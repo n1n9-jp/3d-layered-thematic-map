@@ -1,0 +1,141 @@
+[
+  {
+    "name": "01-default",
+    "query": "",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "5枚が下から標高・人口・道路・公共交通・施設の順に、パネルと重ならずに見える。各段に区の境界線、レイヤー名、凡例が見える"
+  },
+  {
+    "name": "02-spacing-0",
+    "query": "spacing=0",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "5枚が1枚に重なり、ちらつきや濃い塗りの重なりがない"
+  },
+  {
+    "name": "03-spacing-max",
+    "query": "spacing=20000",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "上下の端が画面からはみ出さない"
+  },
+  {
+    "name": "04-rotate",
+    "query": "rx=30&ro=-60",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "方位を変えてもレイヤー名が読める"
+  },
+  {
+    "name": "05-top-down",
+    "query": "rx=85&ro=0",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "真上近くから見ても破綻しない"
+  },
+  {
+    "name": "06-probe-tokyo",
+    "query": "probe=1550,130",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "垂直線が全段を貫き、区名が千代田区、最寄り駅が東京、各値に単位がある"
+  },
+  {
+    "name": "07-probe-sea",
+    "query": "probe=9000,-11000",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "区の外であることが分かり、NaN や undefined が表示されない"
+  },
+  {
+    "name": "08-probe-upland",
+    "query": "probe=-10000,-3000",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "標高が 30m 以上で、06 より明らかに高い"
+  },
+  {
+    "name": "09-reorder",
+    "query": "order=facilities,transit,roads,population,elevation",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "指定した順に積まれ、パネルの一覧と探針の値の順も同じ"
+  },
+  {
+    "name": "10-hidden",
+    "query": "hidden=roads,facilities",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "その2枚が消え、残りの3枚が詰まって積まれる"
+  },
+  {
+    "name": "11-solo-elevation",
+    "query": "solo=elevation",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "真上からの2D表示で、地形の起伏が読める"
+  },
+  {
+    "name": "12-solo-population",
+    "query": "solo=population",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "人口密度の濃淡が読める"
+  },
+  {
+    "name": "13-solo-roads",
+    "query": "solo=roads",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "幹線道路の網が読める"
+  },
+  {
+    "name": "14-solo-transit",
+    "query": "solo=transit",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "鉄道網と駅が読める"
+  },
+  {
+    "name": "15-solo-facilities",
+    "query": "solo=facilities",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "学校と病院の分布が読める"
+  },
+  {
+    "name": "16-solo-probe",
+    "query": "solo=population&probe=1550,130",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "2D表示でも探針と値の一覧が出る"
+  },
+  {
+    "name": "17-out-of-range",
+    "query": "spacing=-5&rx=999&zoom=abc",
+    "size": "1400x1000",
+    "actions": [],
+    "criteria": "表示が壊れず、既定値か上下限に収まる"
+  },
+  {
+    "name": "18-small-window",
+    "query": "",
+    "size": "1000x700",
+    "actions": [],
+    "criteria": "小さい画面でも積層とパネルが重ならない"
+  },
+  {
+    "name": "19-hover",
+    "query": "",
+    "size": "1400x1000",
+    "actions": [
+      {
+        "type": "hover",
+        "x": "center",
+        "y": "center"
+      }
+    ],
+    "criteria": "マウスの位置に探針が出て、値の一覧が表示される"
+  }
+]
