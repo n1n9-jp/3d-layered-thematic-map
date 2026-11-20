@@ -10,6 +10,8 @@ import { registry } from '../layers';
 import { onClick, onHover, probeLayers, visiblePlanes } from '../probe/controller';
 import { installMarkDrag } from '../probe/markDrag';
 import { pillarLayers } from '../probe/pillar';
+import { linkLayers } from '../links/linkLayers';
+import { useLinkSet } from '../links/useLinks';
 import type { MarkCursor } from '../probe/markDrag';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore, viewQuery } from '../store';
@@ -79,6 +81,7 @@ export default function StackView({ columnWidth }: Props) {
   const state = useMapStore();
   const { order, visible, solo, spacing, data, status, viewState, closeupRadius } = state;
   const closeup = state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
+  const linkSet = useLinkSet(closeup);
 
   /* ---------- 画面の大きさ ---------- */
   const [box, size] = useElementSize<HTMLDivElement>();
@@ -333,6 +336,9 @@ export default function StackView({ columnWidth }: Props) {
 
   // 固定した円を、表示中の最下段から最上段まで貫く柱。ラベルと探針の下、段の上に重ねる。
   if (closeup) stackLayers.push(...pillarLayers({ circle: closeup, zs: visibleIds.map((t) => t.z), rotationOrbit: viewState.rotationOrbit, idPrefix: 'stack' }));
+
+  // 対応の線（固定した円の中の、段と段の関係）。
+  if (linkSet) stackLayers.push(...linkLayers({ links: linkSet, on: state.links, zs: shown, idPrefix: 'stack' }));
 
   const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
 

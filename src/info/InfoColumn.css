@@ -204,3 +204,64 @@
 .ic-v + .ic-v {
   margin-top: 1px;
 }
+
+/* 対応の線の切り替え（クローズアップと表のあいだの1行）。 */
+.ic-links {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  padding: 4px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+}
+
+.ic-links-title {
+  color: #9aa;
+  font-size: 11px;
+}
+
+.ic-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #d7dde8;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ic-link input {
+  margin: 0;
+  accent-color: #ffb000;
+}
+
+.ic-link[data-disabled='true'] {
+  color: #666;
+  cursor: not-allowed;
+}
+
+.ic-swatches {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 2px;
+}
+
+.ic-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ic-link[data-disabled='true'] .ic-swatch {
+  opacity: 0.35;
+}
+
+.ic-link-summary {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* 関係の名前（「駅 → 直下の人口」）が折り返されない幅。 */
+.ic-link-summary col.ic-col-name {
+  width: 10em;
+}

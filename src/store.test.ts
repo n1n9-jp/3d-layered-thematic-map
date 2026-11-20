@@ -43,6 +43,23 @@ describe('initialStateFromQuery', () => {
   });
 });
 
+describe('links クエリ', () => {
+  it('未指定は両方オフ', () => {
+    expect(initialStateFromQuery('').links).toEqual({ 'facility-station': false, 'station-population': false });
+  });
+  it('カンマ区切りで、書かれた関係だけオン。不正な値は無視する', () => {
+    expect(initialStateFromQuery('?links=facility-station').links).toEqual({ 'facility-station': true, 'station-population': false });
+    expect(initialStateFromQuery('?links=station-population,facility-station').links).toEqual({ 'facility-station': true, 'station-population': true });
+    expect(initialStateFromQuery('?links=foo,all').links).toEqual({ 'facility-station': false, 'station-population': false });
+  });
+  it('setLink で関係ごとに出し入れできる', () => {
+    useMapStore.getState().setLink('facility-station', true);
+    expect(useMapStore.getState().links).toEqual({ 'facility-station': true, 'station-population': false });
+    useMapStore.getState().setLink('facility-station', false);
+    expect(useMapStore.getState().links['facility-station']).toBe(false);
+  });
+});
+
 describe('視点のクエリは上下限に収める', () => {
   it('rx と zoom は視点の上下限に収まる', () => {
     expect(initialStateFromQuery('?rx=200&zoom=50').viewState).toMatchObject({

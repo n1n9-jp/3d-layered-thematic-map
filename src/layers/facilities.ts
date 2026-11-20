@@ -4,6 +4,7 @@ import { fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { FacilityCollection, FacilityKind, LayerModule, Position } from '../types';
 import {
+  FACILITY_COLOR,
   FACILITY_KIND_LABEL,
   buildFacilityData,
   sampleFacilities,
@@ -16,8 +17,8 @@ type Rgb = [number, number, number];
 
 /** 学校は明るい水色、病院は赤。病院は件数が少ないので一回り大きくする。 */
 const STYLE: Record<FacilityKind, { color: Rgb; radius: number; minPx: number; maxPx: number }> = {
-  school: { color: [100, 205, 255], radius: 80, minPx: 2.5, maxPx: 8 },
-  hospital: { color: [255, 70, 60], radius: 110, minPx: 3.5, maxPx: 10 },
+  school: { color: FACILITY_COLOR.school, radius: 80, minPx: 2.5, maxPx: 8 },
+  hospital: { color: FACILITY_COLOR.hospital, radius: 110, minPx: 3.5, maxPx: 10 },
 };
 const OUTLINE: Rgb = [0, 0, 0];
 const KINDS: FacilityKind[] = ['school', 'hospital'];
