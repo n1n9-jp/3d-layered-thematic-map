@@ -1,8 +1,10 @@
 import { clipPolylineToCircle, pointInCircle } from '../lib/circleClip';
 import type { Circle } from '../lib/circleClip';
+import { createBoxIndex, intersectLineSegment, isUsableLine } from '../lib/section';
+import type { BoxIndex } from '../lib/section';
 import { createSegmentIndex } from '../lib/spatialIndex';
 import type { Segment, SegmentIndex } from '../lib/spatialIndex';
-import type { Position, ProbeValue, RoadClass, RoadCollection } from '../types';
+import type { Position, ProbeValue, RoadClass, RoadCollection, SectionLine, SectionMarks } from '../types';
 import { formatDistance } from './format';
 import { simplifyPath } from './simplify';
 
@@ -127,4 +129,73 @@ export function sampleRoads(data: RoadData, x: number, y: number): ProbeValue[] 
   if (!hit) return [{ label: '最寄りの道路', value: null }];
   const text = roadDescription(data.segClass[hit.index], data.segName[hit.index]);
   return [{ label: '最寄りの道路', value: `${text}（${formatDistance(hit.distance)}）` }];
+}
+
+/* ---------- 断面 ---------- */
+
+/** 断面用の索引。線分は、間引く前の元の線（`data.lines`）から作る。 */
+interface RoadSectionIndex {
+  /** 線分 i は [x1, y1, x2, y2] = segs[4i .. 4i+3] */
+  segs: Float64Array;
+  /** 線分 i が属する線（`data.lines` の添字）と、その線の最後の線分か */
+  lineOf: Int32Array;
+  isLast: Uint8Array;
+  index: BoxIndex;
+}
+
+const sectionIndexes = new WeakMap<RoadData, RoadSectionIndex>();
+
+/** 断面用の索引。データごとに1回だけ作る（load が先に作っておく）。 */
+export function roadSectionIndex(data: RoadData): RoadSectionIndex {
+  let idx = sectionIndexes.get(data);
+  if (idx) return idx;
+  let n = 0;
+  for (const { path } of data.lines) n += Math.max(0, path.length - 1);
+  const segs = new Float64Array(n * 4);
+  const boxes = new Float64Array(n * 4);
+  const lineOf = new Int32Array(n);
+  const isLast = new Uint8Array(n);
+  let k = 0;
+  data.lines.forEach(({ path }, li) => {
+    for (let i = 0; i + 1 < path.length; i++, k++) {
+      const [x1, y1] = path[i];
+      const [x2, y2] = path[i + 1];
+      segs.set([x1, y1, x2, y2], 4 * k);
+      boxes.set([Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)], 4 * k);
+      lineOf[k] = li;
+      isLast[k] = i + 2 === path.length ? 1 : 0;
+    }
+  });
+  idx = { segs, lineOf, isLast, index: createBoxIndex(boxes) };
+  sectionIndexes.set(data, idx);
+  return idx;
+}
+
+/**
+ * 線と道路の交点。間引く前の元の線との交点で、線に沿った距離の順。
+ * 道路の頂点がちょうど線の上にあるときは、その点を1回だけ数える（折れ線の各線分の終点は除き、始点だけ数える。
+ * 折れ線の最後の終点は数える）。線に平行な道路は交わらないものとして扱う。
+ * `color` は種別ごとの色（地図上の配色）。
+ */
+export function sectionRoads(data: RoadData, line: SectionLine, color: (cls: RoadClass) => [number, number, number]): SectionMarks {
+  const track: SectionMarks = { kind: 'marks', label: '道路との交差', marks: [] };
+  if (!isUsableLine(line)) return track;
+  const { segs, lineOf, isLast, index } = roadSectionIndex(data);
+  index.near(line, 0, (i) => {
+    const hit = intersectLineSegment(line, segs[4 * i], segs[4 * i + 1], segs[4 * i + 2], segs[4 * i + 3]);
+    if (!hit || (hit.u >= 1 && !isLast[i])) return;
+    const road = data.lines[lineOf[i]];
+    track.marks.push({
+      d: hit.d,
+      offset: 0,
+      category: road.cls,
+      categoryLabel: ROAD_CLASS_LABEL[road.cls],
+      name: road.name,
+      color: color(road.cls),
+      x: hit.x,
+      y: hit.y,
+    });
+  });
+  track.marks.sort((a, b) => a.d - b.d);
+  return track;
 }

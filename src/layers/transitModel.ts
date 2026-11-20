@@ -1,8 +1,10 @@
 import { clipPolylineToCircle, pointInCircle } from '../lib/circleClip';
 import type { Circle } from '../lib/circleClip';
+import { createBoxIndex, intersectLineSegment, isUsableLine, lineLength, projectOnLine } from '../lib/section';
+import type { BoxIndex } from '../lib/section';
 import { createPointIndex, createSegmentIndex } from '../lib/spatialIndex';
 import type { PointIndex, Segment, SegmentIndex } from '../lib/spatialIndex';
-import type { Position, ProbeValue, RailCollection, StationCollection } from '../types';
+import type { Position, ProbeValue, RailCollection, SectionLine, SectionMarks, StationCollection } from '../types';
 import { formatDistance, unique, withSuffix } from './format';
 import { simplifyPath } from './simplify';
 
@@ -118,4 +120,119 @@ export function sampleTransit(data: TransitData, x: number, y: number): ProbeVal
     { label: '最寄り駅', value: stationText },
     { label: '通る路線', value: lineText },
   ];
+}
+
+/* ---------- 断面 ---------- */
+
+/** 断面で、線から何 m 以内の駅を出すか。 */
+export const STATION_SECTION_RADIUS = 500;
+
+interface TransitSectionIndex {
+  /** 路線の線分 i は [x1, y1, x2, y2] = segs[4i .. 4i+3]。元の線（間引く前）から作る */
+  segs: Float64Array;
+  /** 線分 i が属する路線（`rail.features` の添字）と、その線の最後の線分か */
+  featureOf: Int32Array;
+  isLast: Uint8Array;
+  rail: BoxIndex;
+  /** 駅（点）。添字は `stationPoints` と同じ */
+  stations: BoxIndex;
+}
+
+const sectionIndexes = new WeakMap<TransitData, TransitSectionIndex>();
+
+/** 断面用の索引。データごとに1回だけ作る（load が先に作っておく）。 */
+export function transitSectionIndex(data: TransitData): TransitSectionIndex {
+  let idx = sectionIndexes.get(data);
+  if (idx) return idx;
+  let n = 0;
+  for (const f of data.rail.features) n += Math.max(0, (f.geometry?.coordinates.length ?? 0) - 1);
+  const segs = new Float64Array(n * 4);
+  const boxes = new Float64Array(n * 4);
+  const featureOf = new Int32Array(n);
+  const isLast = new Uint8Array(n);
+  let k = 0;
+  data.rail.features.forEach((f, fi) => {
+    const path = f.geometry?.coordinates ?? [];
+    for (let i = 0; i + 1 < path.length; i++, k++) {
+      const [x1, y1] = path[i];
+      const [x2, y2] = path[i + 1];
+      segs.set([x1, y1, x2, y2], 4 * k);
+      boxes.set([Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)], 4 * k);
+      featureOf[k] = fi;
+      isLast[k] = i + 2 === path.length ? 1 : 0;
+    }
+  });
+  const pts = new Float64Array(data.stationPoints.length * 4);
+  data.stationPoints.forEach(([x, y], i) => pts.set([x, y, x, y], 4 * i));
+  idx = { segs, featureOf, isLast, rail: createBoxIndex(boxes), stations: createBoxIndex(pts) };
+  sectionIndexes.set(data, idx);
+  return idx;
+}
+
+/**
+ * 公共交通の断面。2つのトラックを返す。
+ * 1. 線と路線の交点（`category` は 'rail'、`name` は路線名）。間引く前の元の線との交点で、線に沿った距離の順。
+ *    頂点がちょうど線の上にあるときの数え方は道路と同じ（`sectionRoads`）。
+ * 2. 線から `STATION_SECTION_RADIUS`（500 m）以内で、線への垂線の足が線分の内側（0 〜 長さ）にある駅
+ *    （`category` は 'station'、`name` は駅名）。`d` は垂線の足の位置、`offset` は線からの距離（左が正）。
+ *    同じ駅名の駅は、線にいちばん近い1つだけにする。
+ */
+export function sectionTransit(
+  data: TransitData,
+  line: SectionLine,
+  colors: { rail: [number, number, number]; station: [number, number, number] },
+): SectionMarks[] {
+  const rail: SectionMarks = { kind: 'marks', label: '鉄道との交差', marks: [] };
+  const station: SectionMarks = { kind: 'marks', label: '近くの駅', marks: [] };
+  if (!isUsableLine(line)) return [rail, station];
+  const { segs, featureOf, isLast, rail: railIndex, stations: stationIndex } = transitSectionIndex(data);
+
+  railIndex.near(line, 0, (i) => {
+    const hit = intersectLineSegment(line, segs[4 * i], segs[4 * i + 1], segs[4 * i + 2], segs[4 * i + 3]);
+    if (!hit || (hit.u >= 1 && !isLast[i])) return;
+    rail.marks.push({
+      d: hit.d,
+      offset: 0,
+      category: 'rail',
+      categoryLabel: '鉄道',
+      name: data.rail.features[featureOf[i]].properties?.line || null,
+      color: colors.rail,
+      x: hit.x,
+      y: hit.y,
+    });
+  });
+  rail.marks.sort((a, b) => a.d - b.d);
+
+  const len = lineLength(line);
+  // 駅名ごとに、線にいちばん近い駅（距離が同じなら添字の小さいほう）
+  const best = new Map<string, { i: number; d: number; offset: number }>();
+  const single: { i: number; d: number; offset: number }[] = [];
+  stationIndex.near(line, STATION_SECTION_RADIUS, (i) => {
+    const [px, py] = data.stationPoints[i];
+    const pr = projectOnLine(line, px, py);
+    if (!pr || pr.d < 0 || pr.d > len || Math.abs(pr.offset) > STATION_SECTION_RADIUS) return;
+    const cand = { i, d: pr.d, offset: pr.offset };
+    const name = data.stations.features[i].properties?.name;
+    if (!name) {
+      single.push(cand);
+      return;
+    }
+    const cur = best.get(name);
+    if (!cur || Math.abs(cand.offset) < Math.abs(cur.offset) || (Math.abs(cand.offset) === Math.abs(cur.offset) && i < cur.i))
+      best.set(name, cand);
+  });
+  for (const { i, d, offset } of [...best.values(), ...single].sort((a, b) => a.d - b.d || a.i - b.i)) {
+    const [x, y] = data.stationPoints[i];
+    station.marks.push({
+      d,
+      offset,
+      category: 'station',
+      categoryLabel: '駅',
+      name: data.stations.features[i].properties?.name || null,
+      color: colors.station,
+      x,
+      y,
+    });
+  }
+  return [rail, station];
 }

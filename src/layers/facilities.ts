@@ -6,7 +6,9 @@ import type { FacilityCollection, FacilityKind, LayerModule, Position } from '..
 import {
   FACILITY_KIND_LABEL,
   buildFacilityData,
+  facilitySectionIndex,
   sampleFacilities,
+  sectionFacilities,
   subsetFacilities,
   summarizeFacilities,
 } from './facilitiesModel';
@@ -28,7 +30,9 @@ const facilities: LayerModule<FacilityData> = {
   id: 'facilities',
   label: '施設',
   async load(base) {
-    return buildFacilityData(await fetchJson<FacilityCollection>(`${base}facilities.geojson`));
+    const data = buildFacilityData(await fetchJson<FacilityCollection>(`${base}facilities.geojson`));
+    facilitySectionIndex(data); // 断面の索引は、利用者の操作の前に作っておく
+    return data;
   },
   render(data, ctx) {
     return KINDS.map((kind) => {
@@ -55,6 +59,7 @@ const facilities: LayerModule<FacilityData> = {
     });
   },
   sample: sampleFacilities,
+  section: (data, line) => [sectionFacilities(data, line, (kind) => STYLE[kind].color)],
   subset: subsetFacilities,
   summarize: summarizeFacilities,
   legend: KINDS.map((k) => ({ color: STYLE[k].color, label: FACILITY_KIND_LABEL[k] })),

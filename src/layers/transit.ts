@@ -3,7 +3,7 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { LayerModule, Position, RailCollection, StationCollection } from '../types';
-import { buildTransitData, sampleTransit, subsetTransit, summarizeTransit } from './transitModel';
+import { buildTransitData, sampleTransit, sectionTransit, subsetTransit, summarizeTransit, transitSectionIndex } from './transitModel';
 import type { TransitData } from './transitModel';
 
 export type { TransitData };
@@ -26,7 +26,9 @@ const transit: LayerModule<TransitData> = {
       fetchJson<RailCollection>(`${base}rail.geojson`),
       fetchJson<StationCollection>(`${base}stations.geojson`),
     ]);
-    return buildTransitData(rail, stations);
+    const data = buildTransitData(rail, stations);
+    transitSectionIndex(data); // 断面の索引は、利用者の操作の前に作っておく
+    return data;
   },
   render(data, ctx) {
     const common = {
@@ -69,6 +71,7 @@ const transit: LayerModule<TransitData> = {
     ];
   },
   sample: sampleTransit,
+  section: (data, line) => sectionTransit(data, line, { rail: RAIL_COLOR, station: STATION_COLOR }),
   subset: subsetTransit,
   summarize: summarizeTransit,
   legend: [

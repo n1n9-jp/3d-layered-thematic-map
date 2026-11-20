@@ -3,7 +3,16 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { LayerModule, Position, RoadClass, RoadCollection } from '../types';
-import { ROAD_CLASSES, ROAD_CLASS_LABEL, buildRoadData, sampleRoads, subsetRoads, summarizeRoads } from './roadsModel';
+import {
+  ROAD_CLASSES,
+  ROAD_CLASS_LABEL,
+  buildRoadData,
+  roadSectionIndex,
+  sampleRoads,
+  sectionRoads,
+  subsetRoads,
+  summarizeRoads,
+} from './roadsModel';
 import type { RoadData } from './roadsModel';
 
 type Rgb = [number, number, number];
@@ -26,7 +35,9 @@ const roads: LayerModule<RoadData> = {
   id: 'roads',
   label: '道路',
   async load(base) {
-    return buildRoadData(await fetchJson<RoadCollection>(`${base}roads.geojson`));
+    const data = buildRoadData(await fetchJson<RoadCollection>(`${base}roads.geojson`));
+    roadSectionIndex(data); // 断面の索引は、利用者の操作の前に作っておく
+    return data;
   },
   render(data, ctx) {
     return ROAD_CLASSES.map((cls) => {
@@ -51,6 +62,7 @@ const roads: LayerModule<RoadData> = {
     });
   },
   sample: sampleRoads,
+  section: (data, line) => [sectionRoads(data, line, (cls) => STYLE[cls].color)],
   subset: subsetRoads,
   summarize: summarizeRoads,
   legend: [...ROAD_CLASSES].reverse().map((cls) => ({ color: STYLE[cls].color, label: ROAD_CLASS_LABEL[cls] })),

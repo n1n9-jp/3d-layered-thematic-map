@@ -1,8 +1,10 @@
 import { pointInCircle } from '../lib/circleClip';
 import type { Circle } from '../lib/circleClip';
+import { createBoxIndex, isUsableLine, lineLength, projectOnLine } from '../lib/section';
+import type { BoxIndex } from '../lib/section';
 import { createPointIndex } from '../lib/spatialIndex';
 import type { PointIndex } from '../lib/spatialIndex';
-import type { FacilityCollection, FacilityKind, Position, ProbeValue } from '../types';
+import type { FacilityCollection, FacilityKind, Position, ProbeValue, SectionLine, SectionMarks } from '../types';
 import { formatDistance } from './format';
 
 export const FACILITY_COUNT_RADIUS = 500;
@@ -85,4 +87,59 @@ export function sampleFacilities(data: FacilityData, x: number, y: number): Prob
       value: nearest ? `${data.name[nearest.index]}（${formatDistance(nearest.distance)}）` : null,
     },
   ];
+}
+
+/* ---------- 断面 ---------- */
+
+/** 断面で、線から何 m 以内の施設を出すか。 */
+export const FACILITY_SECTION_RADIUS = 300;
+
+const sectionIndexes = new WeakMap<FacilityData, BoxIndex>();
+
+/** 断面用の索引（施設の点の格子）。データごとに1回だけ作る（load が先に作っておく）。 */
+export function facilitySectionIndex(data: FacilityData): BoxIndex {
+  let idx = sectionIndexes.get(data);
+  if (!idx) {
+    const pts = new Float64Array(data.all.length * 4);
+    data.all.forEach(([x, y], i) => pts.set([x, y, x, y], 4 * i));
+    idx = createBoxIndex(pts);
+    sectionIndexes.set(data, idx);
+  }
+  return idx;
+}
+
+/**
+ * 線から `FACILITY_SECTION_RADIUS`（300 m）以内の学校と病院。線への垂線の足が線分の内側（0 〜 長さ）にあるものだけで、
+ * `d` は垂線の足の位置、`offset` は線からの距離（左が正）。線に沿った距離の順。
+ * `color` は種別ごとの色（地図上の配色）。
+ */
+export function sectionFacilities(
+  data: FacilityData,
+  line: SectionLine,
+  color: (kind: FacilityKind) => [number, number, number],
+): SectionMarks {
+  const track: SectionMarks = { kind: 'marks', label: '近くの学校・病院', marks: [] };
+  if (!isUsableLine(line)) return track;
+  const len = lineLength(line);
+  const found: { i: number; d: number; offset: number }[] = [];
+  facilitySectionIndex(data).near(line, FACILITY_SECTION_RADIUS, (i) => {
+    const pr = projectOnLine(line, data.all[i][0], data.all[i][1]);
+    if (!pr || pr.d < 0 || pr.d > len || Math.abs(pr.offset) > FACILITY_SECTION_RADIUS) return;
+    found.push({ i, d: pr.d, offset: pr.offset });
+  });
+  found.sort((a, b) => a.d - b.d || a.i - b.i);
+  for (const { i, d, offset } of found) {
+    const kind = data.kind[i];
+    track.marks.push({
+      d,
+      offset,
+      category: kind,
+      categoryLabel: FACILITY_KIND_LABEL[kind],
+      name: data.name[i] || null,
+      color: color(kind),
+      x: data.all[i][0],
+      y: data.all[i][1],
+    });
+  }
+  return track;
 }

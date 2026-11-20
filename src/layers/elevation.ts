@@ -8,6 +8,7 @@ import { gridStats, subsetGrid } from '../lib/gridSubset';
 import { asModelMatrix } from '../stack';
 import type { ElevationData, ElevationMeta, LayerModule } from '../types';
 import { LEGEND_STOPS, elevationColor, elevationPixels } from './elevation/color';
+import { sectionElevation } from './elevation/section';
 
 /** 標高格子に、色に変換済みの画像を添えたもの。画像は load で1回だけ作る。 */
 export interface ElevationLayerData extends ElevationData {
@@ -48,6 +49,7 @@ const elevation: LayerModule<ElevationLayerData> = {
       { label: '平均', value: roundTo1(mean), unit: 'm' },
     ];
   },
+  section: (data, line) => [sectionElevation(data, line)],
   render(data, ctx) {
     // bounds は参照が変わるとメッシュを作り直すので、データごとに1つだけ持つ
     return [
