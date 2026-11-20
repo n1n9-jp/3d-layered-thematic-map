@@ -2,16 +2,19 @@ import { createPointIndex, createSegmentIndex } from '../lib/spatialIndex';
 import type { PointIndex, Segment, SegmentIndex } from '../lib/spatialIndex';
 import type { Position, ProbeValue, RailCollection, StationCollection } from '../types';
 import { formatDistance, unique, withSuffix } from './format';
+import { simplifyPath } from './simplify';
 
 export const STATION_SAMPLE_RADIUS = 1000;
 export const RAIL_SAMPLE_RADIUS = 100;
+/** 描画用に線を間引く許容誤差（m）。探針の参照（lines）は元の線のまま作る。 */
+export const RAIL_DRAW_TOLERANCE = 3;
 /** 乗換駅として同じ駅名の駅をまとめる範囲（m） */
 const STATION_MERGE_RADIUS = 500;
 
 export interface TransitData {
   rail: RailCollection;
   stations: StationCollection;
-  /** 描画用 */
+  /** 描画用（間引き済み） */
   railPaths: Position[][];
   stationPoints: Position[];
   /** 路線（事業者＋路線名）ごとの線分索引。「通る路線」の探索用 */
@@ -25,7 +28,8 @@ export function buildTransitData(rail: RailCollection, stations: StationCollecti
   for (const f of rail.features) {
     const line = f.geometry?.coordinates;
     if (!line || line.length < 2) continue;
-    railPaths.push(line);
+    const drawn = simplifyPath(line, RAIL_DRAW_TOLERANCE);
+    if (drawn.length >= 2) railPaths.push(drawn);
     const key = `${f.properties?.operator ?? ''}\u0000${f.properties?.line ?? ''}`;
     let g = groups.get(key);
     if (!g) groups.set(key, (g = { name: f.properties?.line ?? '', segments: [] }));

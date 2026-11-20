@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoadCollection, RoadProps } from '../types';
-import { buildRoadData, roadDescription, sampleRoads } from './roadsModel';
+import { ROAD_DRAW_TOLERANCE, buildRoadData, roadDescription, sampleRoads } from './roadsModel';
 
 const road = (coordinates: [number, number][], props: Partial<RoadProps>) => ({
   type: 'Feature' as const,
@@ -56,5 +56,29 @@ describe('sampleRoads', () => {
   it('roadDescription', () => {
     expect(roadDescription('prefectural', '環七通り')).toBe('都道府県道 環七通り');
     expect(roadDescription('motorway', null)).toBe('高速道路');
+  });
+});
+
+describe('描画用の線の間引き', () => {
+  // 500 m 地点の頂点が、両端を結ぶ直線から 2 m だけずれた道路（許容誤差より小さい）
+  const bump = buildRoadData({
+    type: 'FeatureCollection',
+    features: [road([[0, 0], [500, 2], [1000, 0]], { class: 'national', name: '国道1号' })],
+  });
+
+  it('描画用の paths は、許容誤差内の頂点を間引く', () => {
+    expect(2).toBeLessThanOrEqual(ROAD_DRAW_TOLERANCE);
+    expect(bump.paths.national).toEqual([[[0, 0], [1000, 0]]]);
+  });
+  it('探針の参照は元の線のままで、距離は元のデータから求める', () => {
+    expect(bump.segClass).toHaveLength(2);
+    expect(sampleRoads(bump, 500, 12)[0].value).toBe('国道 国道1号（10m）'); // 間引いた線なら 12m になる
+  });
+  it('許容誤差を超えて曲がる頂点は描画にも残す', () => {
+    const bend = buildRoadData({
+      type: 'FeatureCollection',
+      features: [road([[0, 0], [500, 100], [1000, 0]], { class: 'other' })],
+    });
+    expect(bend.paths.other[0]).toHaveLength(3);
   });
 });

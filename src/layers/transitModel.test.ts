@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RailCollection, StationCollection } from '../types';
-import { buildTransitData, sampleTransit } from './transitModel';
+import { RAIL_DRAW_TOLERANCE, buildTransitData, sampleTransit } from './transitModel';
 
 const rail = (line: string, coordinates: [number, number][]) => ({
   type: 'Feature' as const,
@@ -63,5 +63,20 @@ describe('sampleTransit', () => {
       { label: '最寄り駅', value: null },
       { label: '通る路線', value: null },
     ]);
+  });
+});
+
+describe('描画用の線の間引き', () => {
+  const bump = buildTransitData(
+    { type: 'FeatureCollection', features: [rail('緩曲線', [[0, 0], [500, 2], [1000, 0]])] },
+    { type: 'FeatureCollection', features: [] },
+  );
+  it('描画用の railPaths は、許容誤差内の頂点を間引く', () => {
+    expect(2).toBeLessThanOrEqual(RAIL_DRAW_TOLERANCE);
+    expect(bump.railPaths).toEqual([[[0, 0], [1000, 0]]]);
+  });
+  it('探針の参照（lines）は元の線のまま', () => {
+    expect(bump.lines).toHaveLength(1);
+    expect(bump.lines[0].index.nearest(500, 12, 100)?.distance).toBeCloseTo(10, 6); // 間引いた線なら 12
   });
 });

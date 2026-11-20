@@ -292,6 +292,24 @@ node scripts/shot-all.mjs --out shots/all
 
 ブラウザは、この環境にプリインストールされた Playwright（と Chromium）を使います。`package.json` の依存関係には含めていないので、Playwright が入っていない環境では、別途用意してください。
 
+### 1フレームの描画時間を測る：`scripts/measure-frame.mjs`
+
+```sh
+node scripts/measure-frame.mjs                          # 5枚すべてと、1枚ずつ（ほかの段は hidden）、1枚も出さない場合
+node scripts/measure-frame.mjs --only all,roads --frames 8 --extra "rx=90&zoom=-3"
+```
+
+Vite を自動で起動し、`window.__ready` と数秒の待ちのあと、`requestAnimationFrame` のたびに視点を1度ずつ回して描き直させ、フレームの間隔（ms）を測ります。表に、構成ごとの中央値と各フレームの値を出します。GPU のない環境では描画（WebGL）が時間のほぼすべてなので、描く量を変えたときの比較に使います。
+
+| オプション | 意味 |
+| --- | --- |
+| `--frames <n>` | 1構成あたりのフレーム数（既定 5） |
+| `--only <a,b>` | 測る構成（`all` / `none` / レイヤーID をカンマ区切り）。既定は全部 |
+| `--extra <q>` | 全構成の URL に付け足すクエリ |
+| `--size <幅x高さ>` / `--url <URL>` | `shot.mjs` と同じ |
+
+描画の負荷は、線の頂点数にほぼ比例します（端や継ぎ目の丸めの有無では変わりません）。区の境界線は表示中の段ごとに1組描くので、5枚の積層では最も重くなります。そのため、描画に使う線（区の境界線、道路、鉄道）は、読み込み時に許容誤差 3 m で間引いて（`src/layers/simplify.ts`）います。探針の参照（区名、最寄りの道路、路線）は元の形のデータのままです。
+
 ## 出典表示の部品
 
 画面の右下には、出典の1行が常に出ています（`src/App.tsx` が `src/panel/Credits.tsx` を置いています）。
