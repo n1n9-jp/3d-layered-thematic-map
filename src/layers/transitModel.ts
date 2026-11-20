@@ -1,3 +1,5 @@
+import { clipPolylineToCircle, pointInCircle } from '../lib/circleClip';
+import type { Circle } from '../lib/circleClip';
 import { createPointIndex, createSegmentIndex } from '../lib/spatialIndex';
 import type { PointIndex, Segment, SegmentIndex } from '../lib/spatialIndex';
 import type { Position, ProbeValue, RailCollection, StationCollection } from '../types';
@@ -20,15 +22,21 @@ export interface TransitData {
   /** 路線（事業者＋路線名）ごとの線分索引。「通る路線」の探索用 */
   lines: { name: string; index: SegmentIndex }[];
   stationIndex: PointIndex;
+  /** subset の結果のとき、切り出した円。この円の外の地点は sample が値なしにする */
+  clip?: Circle;
 }
 
-export function buildTransitData(rail: RailCollection, stations: StationCollection): TransitData {
+export function buildTransitData(
+  rail: RailCollection,
+  stations: StationCollection,
+  drawTolerance: number = RAIL_DRAW_TOLERANCE,
+): TransitData {
   const railPaths: Position[][] = [];
   const groups = new Map<string, { name: string; segments: Segment[] }>();
   for (const f of rail.features) {
     const line = f.geometry?.coordinates;
     if (!line || line.length < 2) continue;
-    const drawn = simplifyPath(line, RAIL_DRAW_TOLERANCE);
+    const drawn = simplifyPath(line, drawTolerance);
     if (drawn.length >= 2) railPaths.push(drawn);
     const key = `${f.properties?.operator ?? ''}\u0000${f.properties?.line ?? ''}`;
     let g = groups.get(key);
@@ -47,7 +55,45 @@ export function buildTransitData(rail: RailCollection, stations: StationCollecti
   };
 }
 
+/**
+ * 円で切った路線と、円の中の駅。路線は元の線から切り、描画用の形も間引かない
+ * （円の中は拡大して表示されるので、間引く前の形から作る）。
+ */
+export function subsetTransit(data: TransitData, cx: number, cy: number, radius: number): TransitData {
+  const features: RailCollection['features'] = [];
+  for (const f of data.rail.features) {
+    const line = f.geometry?.coordinates;
+    if (!line || line.length < 2) continue;
+    for (const piece of clipPolylineToCircle(line, cx, cy, radius))
+      features.push({ type: 'Feature', properties: f.properties, geometry: { type: 'LineString', coordinates: piece } });
+  }
+  const stations = data.stations.features.filter((_, i) => {
+    const p = data.stationPoints[i];
+    return pointInCircle(p[0], p[1], cx, cy, radius);
+  });
+  const built = buildTransitData(
+    { ...data.rail, features },
+    { ...data.stations, features: stations },
+    0,
+  );
+  return { ...built, clip: { cx, cy, r: radius } };
+}
+
+export function summarizeTransit(data: TransitData): ProbeValue[] {
+  const stationNames = new Set(data.stations.features.map((f) => f.properties.name));
+  const lineNames = new Set(data.rail.features.map((f) => f.properties.line));
+  return [
+    { label: '駅', value: stationNames.size, unit: '駅' },
+    { label: '路線', value: lineNames.size, unit: '路線' },
+  ];
+}
+
 export function sampleTransit(data: TransitData, x: number, y: number): ProbeValue[] {
+  if (data.clip && !pointInCircle(x, y, data.clip.cx, data.clip.cy, data.clip.r))
+    return [
+      { label: '最寄り駅', value: null },
+      { label: '通る路線', value: null },
+    ];
   // 最寄り駅。同じ駅名で近接する別路線の駅（乗換駅）は、路線をまとめて示す。
   let stationText: string | null = null;
   const hit = data.stationIndex.nearest(x, y, STATION_SAMPLE_RADIUS);

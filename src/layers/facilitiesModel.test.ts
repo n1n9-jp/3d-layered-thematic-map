@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FacilityCollection, FacilityProps } from '../types';
-import { buildFacilityData, sampleFacilities } from './facilitiesModel';
+import { buildFacilityData, sampleFacilities, subsetFacilities, summarizeFacilities } from './facilitiesModel';
 
 const fac = (xy: [number, number], props: Partial<FacilityProps>) => ({
   type: 'Feature' as const,
@@ -55,6 +55,54 @@ describe('sampleFacilities', () => {
     expect(sampleFacilities(empty, 0, 0)).toEqual([
       { label: '500m以内', value: '学校 0、病院 0' },
       { label: '最寄りの施設', value: null },
+    ]);
+  });
+});
+
+describe('subsetFacilities / summarizeFacilities', () => {
+  // 円：中心 (0, 0)、半径 300。第一小学校 (180,0)、第二中学校 (-100,100)、中央病院 (0,-300)（縁の上）が中
+  const sub = subsetFacilities(data, 0, 0, 300);
+
+  it('円の中の点だけ（縁の上は中）。種別・名前を引き継ぐ', () => {
+    expect(sub.name).toEqual(['第一小学校', '第二中学校', '中央病院']);
+    expect(sub.kind).toEqual(['school', 'school', 'hospital']);
+    expect(sub.points.school).toEqual([[180, 0], [-100, 100]]);
+    expect(sub.points.hospital).toEqual([[0, -300]]);
+    expect(sub.all).toHaveLength(3);
+  });
+
+  it('縁の外は含まない', () => {
+    expect(subsetFacilities(data, 0, 0, 299.9).name).toEqual(['第一小学校', '第二中学校']);
+  });
+
+  it('全体のデータは変えない', () => {
+    expect(data.kind).toHaveLength(5);
+    expect(data.points.school).toHaveLength(3);
+  });
+
+  it('sample：円の中の地点では全体と同じ値、円の外では値なし', () => {
+    // 施設から遠い（500 m 以内の点がすべて円の中）地点では、全体と同じ
+    expect(sampleFacilities(sub, 0, 0)).toEqual(sampleFacilities(data, 0, 0));
+    expect(sampleFacilities(sub, 0, 0)[0].value).toBe('学校 2、病院 1');
+    expect(sampleFacilities(sub, 600, 0)).toEqual([
+      { label: '500m以内', value: null },
+      { label: '最寄りの施設', value: null },
+    ]);
+    expect(sampleFacilities(data, 600, 0)[0].value).not.toBeNull();
+  });
+
+  it('summarize：学校と病院の数', () => {
+    expect(summarizeFacilities(sub)).toEqual([
+      { label: '学校', value: 2, unit: '校' },
+      { label: '病院', value: 1, unit: '院' },
+    ]);
+    expect(summarizeFacilities(subsetFacilities(data, 0, 0, 100000))).toEqual([
+      { label: '学校', value: 3, unit: '校' },
+      { label: '病院', value: 2, unit: '院' },
+    ]);
+    expect(summarizeFacilities(subsetFacilities(data, 90000, 0, 10))).toEqual([
+      { label: '学校', value: 0, unit: '校' },
+      { label: '病院', value: 0, unit: '院' },
     ]);
   });
 });

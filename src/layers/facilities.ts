@@ -3,7 +3,13 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { FacilityCollection, FacilityKind, LayerModule, Position } from '../types';
-import { FACILITY_KIND_LABEL, buildFacilityData, sampleFacilities } from './facilitiesModel';
+import {
+  FACILITY_KIND_LABEL,
+  buildFacilityData,
+  sampleFacilities,
+  subsetFacilities,
+  summarizeFacilities,
+} from './facilitiesModel';
 import type { FacilityData } from './facilitiesModel';
 
 type Rgb = [number, number, number];
@@ -49,6 +55,8 @@ const facilities: LayerModule<FacilityData> = {
     });
   },
   sample: sampleFacilities,
+  subset: subsetFacilities,
+  summarize: summarizeFacilities,
   legend: KINDS.map((k) => ({ color: STYLE[k].color, label: FACILITY_KIND_LABEL[k] })),
 };
 

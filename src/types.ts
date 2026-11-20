@@ -119,5 +119,9 @@ export interface LayerModule<D> {
   render(data: D, ctx: LayerRenderContext): Layer[];
   /** 地点 (x, y) の値（探針用） */
   sample(data: D, x: number, y: number): ProbeValue[];
+  /** 中心 (cx, cy)・半径 radius（m）の円の中だけを取り出した、同じ形のデータを返す。render と sample にそのまま渡せる。 */
+  subset(data: D, cx: number, cy: number, radius: number): D;
+  /** データ（ふつうは subset の結果）の集計を返す。 */
+  summarize(data: D): ProbeValue[];
   legend: { color: [number, number, number]; label: string }[];
 }

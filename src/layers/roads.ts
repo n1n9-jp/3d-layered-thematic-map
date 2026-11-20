@@ -3,7 +3,7 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { LayerModule, Position, RoadClass, RoadCollection } from '../types';
-import { ROAD_CLASSES, ROAD_CLASS_LABEL, buildRoadData, sampleRoads } from './roadsModel';
+import { ROAD_CLASSES, ROAD_CLASS_LABEL, buildRoadData, sampleRoads, subsetRoads, summarizeRoads } from './roadsModel';
 import type { RoadData } from './roadsModel';
 
 type Rgb = [number, number, number];
@@ -51,6 +51,8 @@ const roads: LayerModule<RoadData> = {
     });
   },
   sample: sampleRoads,
+  subset: subsetRoads,
+  summarize: summarizeRoads,
   legend: [...ROAD_CLASSES].reverse().map((cls) => ({ color: STYLE[cls].color, label: ROAD_CLASS_LABEL[cls] })),
 };
 

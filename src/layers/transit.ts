@@ -3,7 +3,7 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { LayerModule, Position, RailCollection, StationCollection } from '../types';
-import { buildTransitData, sampleTransit } from './transitModel';
+import { buildTransitData, sampleTransit, subsetTransit, summarizeTransit } from './transitModel';
 import type { TransitData } from './transitModel';
 
 export type { TransitData };
@@ -69,6 +69,8 @@ const transit: LayerModule<TransitData> = {
     ];
   },
   sample: sampleTransit,
+  subset: subsetTransit,
+  summarize: summarizeTransit,
   legend: [
     { color: RAIL_COLOR, label: '鉄道路線' },
     { color: STATION_COLOR, label: '駅' },

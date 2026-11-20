@@ -1,7 +1,10 @@
 import { BitmapLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { fetchBuffer, fetchJson } from '../lib/fetch';
+import { pointInCircle } from '../lib/circleClip';
+import type { Circle } from '../lib/circleClip';
 import { sampleGrid } from '../lib/grid';
+import { gridStats, subsetGrid } from '../lib/gridSubset';
 import { asModelMatrix } from '../stack';
 import type { ElevationData, ElevationMeta, LayerModule } from '../types';
 import { LEGEND_STOPS, elevationColor, elevationPixels } from './elevation/color';
@@ -9,6 +12,8 @@ import { LEGEND_STOPS, elevationColor, elevationPixels } from './elevation/color
 /** 標高格子に、色に変換済みの画像を添えたもの。画像は load で1回だけ作る。 */
 export interface ElevationLayerData extends ElevationData {
   image: ImageData;
+  /** subset の結果のとき、切り出した円。この円の外の地点は sample が値なしにする */
+  clip?: Circle;
 }
 
 /** 小数1桁に丸める。-0.05〜0 は丸めると -0 になるので、+0 に直す（パネルに「-0」と出さない）。 */
@@ -30,6 +35,19 @@ const elevation: LayerModule<ElevationLayerData> = {
     const image = new ImageData(elevationPixels(values), meta.width, meta.height);
     return { ...meta, values, image };
   },
+  subset(data, cx, cy, radius) {
+    const grid = subsetGrid(data, cx, cy, radius);
+    const image = new ImageData(elevationPixels(grid.values), grid.width, grid.height);
+    return { ...grid, image, clip: { cx, cy, r: radius } };
+  },
+  summarize(data) {
+    const { count, min, max, mean } = gridStats(data);
+    if (count === 0) return [{ label: '標高', value: null }, { label: '平均', value: null }];
+    return [
+      { label: '標高', value: `${roundTo1(min).toFixed(1)}〜${roundTo1(max).toFixed(1)}`, unit: 'm' },
+      { label: '平均', value: roundTo1(mean), unit: 'm' },
+    ];
+  },
   render(data, ctx) {
     // bounds は参照が変わるとメッシュを作り直すので、データごとに1つだけ持つ
     return [
@@ -46,6 +64,7 @@ const elevation: LayerModule<ElevationLayerData> = {
     ];
   },
   sample(data, x, y) {
+    if (data.clip && !pointInCircle(x, y, data.clip.cx, data.clip.cy, data.clip.r)) return [{ label: '標高', value: null }];
     const v = sampleGrid(data, x, y);
     return [
       v === null
