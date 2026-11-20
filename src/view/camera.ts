@@ -87,16 +87,6 @@ function jacobian(rotationX: number, rotationOrbit: number): Mat2 {
   return [(px[0] - p0[0]) / step, (py[0] - p0[0]) / step, (px[1] - p0[1]) / step, (py[1] - p0[1]) / step];
 }
 
-/**
- * 水平面の上で、カメラのほうへ向かう単位ベクトル（世界の x, y）。rotationOrbit だけで決まる。
- * この向きへ動いた点は、画面の下へ動く。円柱の側面の、手前と奥の判定に使う。
- */
-export function towardCamera(rotationOrbit: number): [number, number] {
-  const [, , c, d] = jacobian(45, rotationOrbit);
-  const len = Math.hypot(c, d) || 1;
-  return [c / len, d / len];
-}
-
 function solve([a, b, c, d]: Mat2, sx: number, sy: number): [number, number] {
   const det = a * d - b * c;
   return [(d * sx - b * sy) / det, (-c * sx + a * sy) / det];
