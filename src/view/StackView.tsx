@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import DeckGL from '@deck.gl/react';
+import type { DeckGLRef } from '@deck.gl/react';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import type { Layer } from '@deck.gl/core';
 import { PathLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import { EXTENT, LAYER_IDS } from '../config';
 import type { LayerId } from '../config';
 import { registry } from '../layers';
-import { onClick, onHover, probeLayers } from '../probe/controller';
+import { onClick, onHover, probeLayers, visiblePlanes } from '../probe/controller';
+import { installMarkDrag } from '../probe/markDrag';
+import type { MarkCursor } from '../probe/markDrag';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore, viewQuery } from '../store';
 import type { MapState, ViewState } from '../store';
 import type { BoundaryData } from '../types';
 import { boundaryLayer, cachedBoundaryPaths } from './boundaryLines';
-import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, nearestAngle } from './camera';
+import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitStack, nearestAngle } from './camera';
 import type { Size } from './camera';
 import { circleLayer } from '../closeup/closeupLayers';
 import { stackLabelLayers } from './labelLayers';
@@ -64,14 +67,18 @@ interface Saved {
 }
 
 interface Props {
-  /** 描画領域の右端から画面の右端までの幅（px）。右上のパネルと、あればクローズアップの幅。 */
-  rightInset?: number;
+  /**
+   * クローズアップの領域の幅（px）。クローズアップは、この描画領域の右端に重ねて置かれる。
+   * クローズアップが出ているかどうかにかかわらず、積層はこの幅を空けた配置で拡大率を決める（出入りで大きさが変わらないように）。
+   */
+  closeupWidth: number;
 }
 
-export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
+export default function StackView({ closeupWidth }: Props) {
   const state = useMapStore();
   const { order, visible, solo, spacing, data, status, viewState, closeupRadius } = state;
-  const closeup = state.probePinned && state.probe !== null ? { ...state.probe, r: closeupRadius } : null;
+  const closeupOn = state.probePinned && state.probe !== null;
+  const closeup = closeupOn && state.probe ? { ...state.probe, r: closeupRadius } : null;
 
   /* ---------- 画面の大きさ ---------- */
   const [box, size] = useElementSize<HTMLDivElement>();
@@ -85,6 +92,34 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
   const shown = useDisplayedZ(targets, sliderActive);
   const targetsRef = useRef(targets);
   targetsRef.current = targets;
+
+  /* ---------- 固定した探針の印をつかんで動かす ---------- */
+  const deckRef = useRef<DeckGLRef>(null);
+  /** 印の上のカーソル。null なら、deck.gl の既定（視点を回せる手のひら）。 */
+  const markCursor = useRef<MarkCursor | null>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    return installMarkDrag(el, {
+      getViewport: () => (deckRef.current?.deck?.getViewports()[0] as ReturnType<Parameters<typeof installMarkDrag>[1]['getViewport']>) ?? null,
+      getMarks: () => {
+        const s = useMapStore.getState();
+        return s.probePinned && s.probe ? { probe: s.probe, zs: visiblePlanes(s).map((p) => p.z) } : null;
+      },
+      setPoint: (p) => useMapStore.getState().setProbe(p),
+      setCursor: (c) => {
+        markCursor.current = c;
+        // deck.gl は、描画のたびにカーソルを設定し直す。描画を待たずに、いま変える。
+        const deck = deckRef.current?.deck;
+        const target = (deck?.props.parent as HTMLElement | undefined) ?? deck?.getCanvas();
+        if (target) target.style.cursor = c ?? 'grab';
+      },
+    });
+  }, [box]);
+  const getCursor = useCallback(
+    ({ isDragging }: { isDragging: boolean }) => markCursor.current ?? (isDragging ? 'grabbing' : 'grab'),
+    [],
+  );
 
   /* ---------- 視点 ---------- */
   const [ready, setReady] = useState(false);
@@ -105,6 +140,15 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
   readyRef.current = ready;
   const sizeRef = useRef<Size | null>(null);
   sizeRef.current = size;
+  /** クローズアップの幅と、出ているかどうか。視点を収めるとき、拡大率は幅から、中心は出ているかどうかから決める。 */
+  const closeupRef = useRef({ width: closeupWidth, on: closeupOn });
+  closeupRef.current = { width: closeupWidth, on: closeupOn };
+  /** 積層が収まる視点（target と zoom）。 */
+  const fit = useCallback(
+    (a: { rotationX: number; rotationOrbit: number; top: number }, sz: Size) =>
+      fitStack({ ...a, size: sz, closeupWidth: closeupRef.current.width, closeupOn: closeupRef.current.on }),
+    [],
+  );
 
   const startTransition = useCallback((next: ViewState) => {
     window.clearTimeout(clearTimer.current);
@@ -124,30 +168,42 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
     const rotationOrbit = ro ?? DEFAULT_ANGLES.rotationOrbit;
     const set = useMapStore.getState().setViewState;
 
-    const view3D = { rotationX, rotationOrbit, ...fitView({ rotationX, rotationOrbit, top: topOf(targets), size }) };
+    const view3D = { rotationX, rotationOrbit, ...fit({ rotationX, rotationOrbit, top: topOf(targets) }, size) };
     if (zoom !== null) view3D.zoom = zoom;
     setAutoFit(zoom === null);
 
     if (solo !== null) {
       saved.current = { view: view3D, auto: autoFit.current };
       setAutoFit(true);
-      set({ ...SOLO_ANGLES, ...fitView({ ...SOLO_ANGLES, top: 0, size }) });
+      set({ ...SOLO_ANGLES, ...fit({ ...SOLO_ANGLES, top: 0 }, size) });
     } else {
       set(view3D);
     }
     prevSolo.current = solo;
     setReady(true);
-  }, [ready, size, solo, targets, setAutoFit]);
+  }, [ready, size, solo, targets, setAutoFit, fit]);
 
   // 画面の大きさや積層の高さが変わったら、収まるように追従する（アニメーション中は行わない）。
   const top = topOf(shown);
   useEffect(() => {
     if (!ready || !size || !autoFit.current || transition) return;
     const vs = useMapStore.getState().viewState;
-    const fit = fitView({ rotationX: vs.rotationX, rotationOrbit: vs.rotationOrbit, top, size });
-    const next = { ...vs, ...fit };
+    const next = { ...vs, ...fit({ rotationX: vs.rotationX, rotationOrbit: vs.rotationOrbit, top }, size) };
     if (!sameView(vs, next)) useMapStore.getState().setViewState(next);
-  }, [ready, size, top, transition]);
+  }, [ready, size, top, transition, closeupWidth, fit]);
+
+  // クローズアップが出入りしたとき、地図の大きさは変えず、位置だけをアニメーションで動かす（自動で収めている間だけ）。
+  const prevCloseupOn = useRef(closeupOn);
+  const topRef = useRef(top);
+  topRef.current = top;
+  useEffect(() => {
+    if (!ready || !size || prevCloseupOn.current === closeupOn) return;
+    prevCloseupOn.current = closeupOn;
+    if (!autoFit.current) return;
+    const vs = useMapStore.getState().viewState;
+    const next = { ...vs, ...fit({ rotationX: vs.rotationX, rotationOrbit: vs.rotationOrbit, top: topRef.current }, size) };
+    if (!sameView(vs, next)) startTransition(next);
+  }, [ready, size, closeupOn, fit, startTransition]);
 
   // 単独表示の開始と解除。
   useEffect(() => {
@@ -160,7 +216,7 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
       startTransition({
         ...SOLO_ANGLES,
         rotationOrbit: nearestAngle(SOLO_ANGLES.rotationOrbit, vs.rotationOrbit),
-        ...fitView({ ...SOLO_ANGLES, top: 0, size }),
+        ...fit({ ...SOLO_ANGLES, top: 0 }, size),
       });
     } else if (saved.current) {
       const prev = saved.current;
@@ -172,12 +228,12 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
           ? {
               ...prev.view,
               rotationOrbit,
-              ...fitView({ rotationX: prev.view.rotationX, rotationOrbit, top: topOf(targetsRef.current), size }),
+              ...fit({ rotationX: prev.view.rotationX, rotationOrbit, top: topOf(targetsRef.current) }, size),
             }
           : { ...prev.view, rotationOrbit },
       );
     }
-  }, [ready, size, solo, startTransition, setAutoFit]);
+  }, [ready, size, solo, startTransition, setAutoFit, fit]);
 
   // 視点のボタン。決まった視点や、方位を45度回した視点へアニメーションで移り、そこで積層が収まるように合わせる。
   // 単独表示のあいだは受け付けない（2D 表示に固定されている）。
@@ -189,9 +245,9 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
         const angles = resolveAngles(cmd, goal.current ?? useMapStore.getState().viewState);
         goal.current = angles;
         setAutoFit(true);
-        startTransition({ ...angles, ...fitView({ ...angles, top: topOf(targetsRef.current), size: sz }) });
+        startTransition({ ...angles, ...fit({ ...angles, top: topOf(targetsRef.current) }, sz) });
       }),
-    [startTransition, setAutoFit],
+    [startTransition, setAutoFit, fit],
   );
 
   const onViewStateChange = useCallback(
@@ -205,9 +261,15 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
       }
       const vs = v as unknown as ViewState;
       const t = vs.target;
-      const target: P3 = is.inTransition
+      // 注視点を描画範囲に収めるのは、利用者の操作のときだけ。アニメーションの途中と終わりは、収め直した視点をそのまま使う。
+      // 収め直した視点の注視点は、積層を画面の中心から寄せて置くために、描画範囲の外にあることがある（傾きが小さいほど遠くなる）。
+      // 操作の始めにそれを範囲の内へ引き戻すと、地図が跳ぶので、いまの位置より外へ出さないだけにする。
+      const interacting = is.isDragging || is.isPanning || is.isRotating || is.isZooming;
+      const cur = useMapStore.getState().viewState.target;
+      const bound = (v: number, lo: number, hi: number, now: number) => clamp(v, Math.min(lo, now), Math.max(hi, now));
+      const target: P3 = is.inTransition || !interacting
         ? [t[0], t[1], t[2]]
-        : [clamp(t[0], minX, maxX), clamp(t[1], minY, maxY), clamp(t[2], 0, topOf(targetsRef.current))];
+        : [bound(t[0], minX, maxX, cur[0]), bound(t[1], minY, maxY, cur[1]), bound(t[2], 0, topOf(targetsRef.current), cur[2])];
       state.setViewState({ target, rotationOrbit: vs.rotationOrbit, rotationX: vs.rotationX, zoom: vs.zoom });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -286,10 +348,12 @@ export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
   const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
 
   return (
-    // 右上のパネルの左までを描画領域にする（積層はこの領域の中心に置く）。
-    <div ref={box} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: rightInset, background: '#000' }}>
+    // 右上のパネルの左までを描画領域にする。クローズアップは、この右端に重なって出る。
+    <div ref={box} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: RIGHT_PANEL_W, background: '#000' }}>
       {ready && (
         <DeckGL
+          ref={deckRef}
+          getCursor={getCursor}
           views={VIEW}
           viewState={deckViewState}
           onViewStateChange={onViewStateChange as never}

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { OrbitView } from '@deck.gl/core';
-import { EXTENT } from '../config';
-import { LIMITS, SOLO_ANGLES, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
+import { DATA_OUTLINE, EXTENT } from '../config';
+import { DATA_BOX, LIMITS, SOLO_ANGLES, fitStack, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, rayToPolygon, spreadLabels } from './camera';
 import type { Size } from './camera';
-import { computeLayout, convexHull, convexIntersectsRect, paddedCenter } from './layout';
+import { RIGHT_PANEL_W, closeupWidth, computeLayout, convexHull, convexIntersectsRect, paddedCenter } from './layout';
 
 const corners = (top: number) =>
   [EXTENT.minX, EXTENT.maxX].flatMap((x) =>
@@ -168,5 +168,92 @@ describe('spreadLabels', () => {
     const out = spreadLabels([105, 100], 20);
     expect(out[1]).toBeLessThan(out[0]);
     expect(out[0] - out[1]).toBeCloseTo(20);
+  });
+});
+
+describe('rayToPolygon', () => {
+  const square: [number, number][] = [[-10, -10], [10, -10], [10, 10], [-10, 10]];
+  it('中心から縁までの距離', () => {
+    expect(rayToPolygon(0, 0, 1, 0, square)).toBeCloseTo(10);
+    expect(rayToPolygon(0, 0, 0, -1, square)).toBeCloseTo(10);
+    expect(rayToPolygon(0, 0, Math.SQRT1_2, Math.SQRT1_2, square)).toBeCloseTo(10 * Math.SQRT2);
+    expect(rayToPolygon(5, 0, 1, 0, square)).toBeCloseTo(5);
+  });
+  it('向きを少しずつ回すと、距離は連続的に変わる', () => {
+    let prev = rayToPolygon(-1000, -1000, 1, 0, DATA_OUTLINE);
+    for (let deg = 1; deg <= 360; deg++) {
+      const t = (deg * Math.PI) / 180;
+      const r = rayToPolygon(-1000, -1000, Math.cos(t), Math.sin(t), DATA_OUTLINE);
+      expect(r).toBeGreaterThan(10000);
+      expect(Math.abs(r - prev)).toBeLessThan(1500);
+      prev = r;
+    }
+  });
+});
+
+describe('labelAnchors（データのある範囲）', () => {
+  it('データのある範囲の縁にあり、描画範囲の外枠より内側', () => {
+    for (const ro of [0, 45, 90, 135, 200, -70]) {
+      const [a] = labelAnchors(20, ro, [0], DATA_BOX);
+      const [b] = labelAnchors(20, ro, [0]);
+      expect(Math.hypot(a[0] - DATA_BOX.cx, a[1] - DATA_BOX.cy)).toBeLessThan(Math.hypot(b[0] - DATA_BOX.cx, b[1] - DATA_BOX.cy) + 1e-6);
+      expect(a[0]).toBeGreaterThan(EXTENT.minX);
+      expect(a[0]).toBeLessThan(EXTENT.maxX);
+    }
+  });
+});
+
+describe('fitStack（クローズアップが出る前後で、地図の大きさは変わらない）', () => {
+  const windows: [number, number][] = [[1400, 1000], [1000, 700], [1920, 1080], [1280, 800], [1600, 900]];
+  const angles: [number, number][] = [[20, 45], [12, 0], [60, 120], [90, 0], [45, 300]];
+  for (const [w, h] of windows)
+    for (const [rotationX, rotationOrbit] of angles)
+      for (const top of [0, 24000, 48000, 80000]) {
+        const size = { width: w - RIGHT_PANEL_W, height: h };
+        const cw = closeupWidth(w);
+        const opts = { rotationX, rotationOrbit, top, size, closeupWidth: cw };
+        it(`${w}x${h} rx=${rotationX} ro=${rotationOrbit} top=${top}: zoom は出る前後で同じ。位置は、出ると左へだけ動き（縦は動かない）、右の領域には入らない`, () => {
+          const off = fitStack({ ...opts, closeupOn: false });
+          const on = fitStack({ ...opts, closeupOn: true });
+          expect(off.zoom).toBe(on.zoom);
+          const vs = (f: typeof on) => ({ ...f, rotationX, rotationOrbit });
+          // 23区のデータのある範囲の画面上の外形（全段）
+          const outline = (f: typeof on) => DATA_OUTLINE.flatMap(([x, y]) => [0, top].map((z) => projectPoint(vs(f), size, [x, y, z])));
+          const onPts = outline(on);
+          const offPts = outline(off);
+          const clampedZoom = on.zoom <= LIMITS.minZoom + 1e-9 || on.zoom >= LIMITS.maxZoom - 1e-9;
+          if (clampedZoom) return;
+          // 出ているとき：クローズアップ（とレイヤー名の余白）、探針パネルに重ならない
+          const closeupRect = { left: size.width - cw - 80, top: 0, right: size.width, bottom: size.height };
+          const probeRect = computeLayout(size).avoid[0];
+          expect(convexIntersectsRect(convexHull(onPts), closeupRect)).toBe(false);
+          expect(convexIntersectsRect(convexHull(onPts), probeRect)).toBe(false);
+          // 出ていないとき：探針パネルには重ならない（クローズアップの領域は空いている）
+          expect(convexIntersectsRect(convexHull(offPts), probeRect)).toBe(false);
+          // 位置は左へだけ動く（右端が、出ていないときより左。縦は同じ）
+          const rightEdge = (pts: [number, number][]) => Math.max(...pts.map((p) => p[0]));
+          const topEdge = (pts: [number, number][]) => Math.min(...pts.map((p) => p[1]));
+          expect(rightEdge(onPts)).toBeLessThanOrEqual(rightEdge(offPts) + 1e-6);
+          expect(topEdge(onPts)).toBeCloseTo(topEdge(offPts), 6);
+        });
+      }
+
+  it('間隔スライダーを動かしても、出る前後の zoom は同じで、zoom は連続的に変わる', () => {
+    const size = { width: 1144, height: 1000 };
+    let prev: number | null = null;
+    for (let top = 0; top <= 80000; top += 1000) {
+      const a = fitStack({ rotationX: 20, rotationOrbit: 45, top, size, closeupWidth: 480, closeupOn: false });
+      const b = fitStack({ rotationX: 20, rotationOrbit: 45, top, size, closeupWidth: 480, closeupOn: true });
+      expect(a.zoom).toBe(b.zoom);
+      if (prev !== null) expect(Math.abs(a.zoom - prev)).toBeLessThan(0.1);
+      prev = a.zoom;
+    }
+  });
+
+  it('クローズアップが出る前の地図は、クローズアップを避けない配置（出ていない配置）より小さい（出た後に合わせる）', () => {
+    const size = { width: 1144, height: 1000 };
+    const common = fitStack({ rotationX: 20, rotationOrbit: 45, top: 48000, size, closeupWidth: 480, closeupOn: false });
+    const alone = fitView({ rotationX: 20, rotationOrbit: 45, top: 48000, size, box: DATA_BOX });
+    expect(common.zoom).toBeLessThan(alone.zoom);
   });
 });

@@ -7,7 +7,7 @@ import SpacingSlider from './panel/SpacingSlider';
 import ViewButtons from './panel/ViewButtons';
 import StackView from './view/StackView';
 import { useMapStore } from './store';
-import { PANEL, PROBE_PANEL, RIGHT_PANEL_W, closeupWidth } from './view/layout';
+import { PANEL, PROBE_PANEL, closeupWidth } from './view/layout';
 
 const panelStyle = {
   position: 'absolute',
@@ -36,13 +36,13 @@ function useWindowWidth(): number {
 }
 
 export default function App() {
-  // 探針が固定されているあいだ、全体の積層の右隣にクローズアップを出す。解除すると消え、積層は元の幅に戻る。
+  // 探針が固定されているあいだ、全体の積層の右端に重ねてクローズアップを出す。全体の積層の大きさは、出入りで変わらない（位置だけが動く）。
   const pinned = useMapStore((s) => (s.probePinned ? s.probe : null));
   const windowWidth = useWindowWidth();
-  const cw = pinned ? closeupWidth(windowWidth) : 0;
+  const cw = closeupWidth(windowWidth);
   return (
     <>
-      <StackView rightInset={RIGHT_PANEL_W + cw} />
+      <StackView closeupWidth={cw} />
       {pinned && <Closeup x={pinned.x} y={pinned.y} width={cw} />}
       <div
         style={{

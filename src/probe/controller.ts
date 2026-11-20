@@ -5,6 +5,7 @@ import { layerZ } from '../stack';
 import { useMapStore } from '../store';
 import type { MapState } from '../store';
 import { createDistrictLookup } from './district';
+import { RING_RADIUS_PX } from './markDrag';
 import { pickProbePoint } from './ray';
 import type { Plane } from './ray';
 import type { BoundaryData } from '../types';
@@ -81,7 +82,6 @@ export function installProbeKeys(target: Pick<Window, 'addEventListener' | 'remo
 const HOVER_COLOR: [number, number, number, number] = [90, 220, 255, 255];
 const PINNED_COLOR: [number, number, number, number] = [255, 176, 0, 255];
 const HALO: [number, number, number, number] = [0, 0, 0, 230];
-const RING_RADIUS_PX = 11;
 
 /** 探針の描画：表示中の最下段から最上段を貫く垂直線と、各段との交点の輪。StackView が layers の末尾に足す。 */
 export function probeLayers(state: MapState): Layer[] {

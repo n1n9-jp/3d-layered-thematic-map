@@ -92,16 +92,72 @@ describe('maxScale', () => {
 });
 
 describe('closeupWidth', () => {
-  it('パネルを除いた幅の 42%。1400 px の画面では 480 px', () => {
+  it('パネルを除いた幅の 31.5%。1400 px の画面では 360 px', () => {
     expect(closeupWidth(1400)).toBe(Math.round((1400 - RIGHT_PANEL_W) * CLOSEUP.share));
-    expect(closeupWidth(1400)).toBe(480);
+    expect(closeupWidth(1400)).toBe(360);
   });
   it('小さい画面では下限（340 px）、大きい画面では上限（560 px）', () => {
     expect(closeupWidth(1000)).toBe(CLOSEUP.minWidth);
     expect(closeupWidth(300)).toBe(CLOSEUP.minWidth);
     expect(closeupWidth(3000)).toBe(CLOSEUP.maxWidth);
   });
-  it('1400 px 幅で、全体の積層の領域に 664 px 残る（レイヤー名のぶんの余白を引いても積層が収まる）', () => {
-    expect(1400 - RIGHT_PANEL_W - closeupWidth(1400)).toBe(664);
+  it('1400 px 幅で、クローズアップの左に 784 px 残る（レイヤー名のぶんの余白を引いても積層が収まる）', () => {
+    expect(1400 - RIGHT_PANEL_W - closeupWidth(1400)).toBe(784);
+  });
+});
+
+describe('maxScale（避ける長方形と外形が別のとき、長方形が複数のとき）', () => {
+  const inner: Rect = { left: 0, top: 0, right: 1000, bottom: 500 };
+  const pref: Pt = [500, 250];
+  const outer: Pt[] = [[-120, -60], [120, -60], [-120, 60], [120, 60]]; // 外枠（四角）
+  const core: Pt[] = [[-100, 0], [100, 0], [0, -50], [0, 50]]; // データのある範囲（菱形。外枠の角にはない）
+  const place = (o: Pt[], s: number, c: Pt) => o.map((p) => [c[0] + p[0] * s, c[1] + p[1] * s] as const);
+
+  it('avoidOffsets を渡すと、外枠の角は避ける長方形の下に入ってよく、そのぶん大きくなる', () => {
+    const avoid: Rect[] = [{ left: 800, top: 0, right: 1000, bottom: 500 }];
+    const withSquare = maxScale(outer, pref, inner, avoid);
+    const withCore = maxScale(outer, pref, inner, avoid, { avoidOffsets: core });
+    expect(withCore.scale).toBeGreaterThan(withSquare.scale);
+    expect(convexIntersectsRect(convexHull(place(core, withCore.scale, withCore.center)), avoid[0])).toBe(false);
+    // 外枠は領域の中には収まる
+    for (const p of place(outer, withCore.scale, withCore.center)) {
+      expect(p[0]).toBeGreaterThanOrEqual(-1e-6);
+      expect(p[0]).toBeLessThanOrEqual(1000 + 1e-6);
+    }
+  });
+  it('長方形が2つあるとき、それぞれ単独で最もよい向きの組み合わせにこだわらず、全体で大きく置ける向きを選ぶ', () => {
+    const wide: Pt[] = [[-100, -250], [100, -250], [-100, 250], [100, 250], [0, -300], [0, 300]];
+    const box: Rect = { left: 0, top: 0, right: 600, bottom: 600 };
+    const a: Rect = { left: 0, top: 400, right: 200, bottom: 600 }; // 左下
+    const b: Rect = { left: 420, top: 0, right: 600, bottom: 600 }; // 右の全高
+    const r = maxScale(wide, [300, 300], box, [a, b]);
+    const poly = convexHull(place(wide, r.scale, r.center));
+    expect(convexIntersectsRect(poly, a)).toBe(false);
+    expect(convexIntersectsRect(poly, b)).toBe(false);
+    // 総当たり（中心を 3 px 刻みで探し、倍率を 0.5% 刻みで下げる）で見つかる最大の 98% 以上
+    let best = 0;
+    for (let s = 2; s > 0.2 && best === 0; s *= 0.995)
+      for (let cx = 0; cx <= 600 && best === 0; cx += 3)
+        for (let cy = 0; cy <= 600; cy += 3) {
+          const pts = place(wide, s, [cx, cy]);
+          if (pts.some((p) => p[0] < 0 || p[0] > 600 || p[1] < 0 || p[1] > 600)) continue;
+          const h = convexHull(pts);
+          if (!convexIntersectsRect(h, a) && !convexIntersectsRect(h, b)) {
+            best = s;
+            break;
+          }
+        }
+    expect(r.scale).toBeGreaterThan(best * 0.97);
+  });
+});
+
+describe('computeLayout（クローズアップの領域）', () => {
+  it('closeupWidth を渡すと、右端にその幅（とレイヤー名のぶん）の長方形を避ける', () => {
+    const size = { width: 1144, height: 1000 };
+    const l = computeLayout(size, { closeupWidth: 480 });
+    expect(l.avoid).toHaveLength(2);
+    expect(l.avoid[1]).toEqual({ left: 1144 - 480 - LABEL_ROOM, top: 0, right: 1144, bottom: 1000 });
+    expect(computeLayout(size).avoid).toHaveLength(1);
+    expect(computeLayout(size, { closeupWidth: 0 }).avoid).toHaveLength(1);
   });
 });

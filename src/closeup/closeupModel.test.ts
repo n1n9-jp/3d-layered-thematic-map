@@ -1,3 +1,4 @@
+import { OrbitView } from '@deck.gl/core';
 import { describe, expect, it } from 'vitest';
 import { LAYER_IDS } from '../config';
 import type { LayerId } from '../config';
@@ -5,7 +6,7 @@ import { layerZ } from '../stack';
 import { projectPoint, labelAnchors } from '../view/camera';
 import type { Size } from '../view/camera';
 import { CLOSEUP_LAYOUT } from '../view/layout';
-import { PLANE_WIDTH, closeupBox, closeupHeights, closeupSpacing, closeupView, radiusLabel } from './closeupModel';
+import { PLANE_WIDTH, closeupBox, closeupHeights, closeupSpacing, closeupView, pickCloseupPoint, radiusLabel } from './closeupModel';
 
 const ORDER: LayerId[] = ['elevation', 'population', 'roads', 'transit', 'facilities'];
 const visible = Object.fromEntries(LAYER_IDS.map((id) => [id, true])) as Record<LayerId, boolean>;
@@ -109,5 +110,68 @@ describe('radiusLabel', () => {
   it('「半径 2 km」', () => {
     expect(radiusLabel(2000)).toBe('半径 2 km');
     expect(radiusLabel(5000)).toBe('半径 5 km');
+  });
+});
+
+describe('pickCloseupPoint', () => {
+  const circle = { x: 1500, y: 100, r: 2000 };
+  const zs = [0, 800, 1600, 2400, 3200];
+  const planes = LAYER_IDS.map((id, i) => ({ id, z: zs[i] })).reverse(); // 上の段が先頭
+  const size = { width: 400, height: 700 };
+  const view = (rotationOrbit: number, rotationX = 30) => {
+    const v = closeupView({ circle, rotationX, rotationOrbit, top: 3200, size });
+    const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ ...size, viewState: v });
+    if (!vp) throw new Error('viewport を作れません');
+    return vp;
+  };
+
+  it('円の中心の上の段の点は、その段の中心を返す（上の段から順に当たる）', () => {
+    const vp = view(45);
+    const [px, py] = vp.project([circle.x, circle.y, 3200]);
+    const p = pickCloseupPoint(vp, px, py, planes, circle);
+    expect(p?.layerId).toBe('facilities');
+    expect(p?.x).toBeCloseTo(circle.x, 3);
+    expect(p?.y).toBeCloseTo(circle.y, 3);
+  });
+  it('下の段の点をクリックすると、その段のその地点になる（上の段の円の外にある位置）', () => {
+    const vp = view(45, 20);
+    // 標高の段の、円の縁近くの点。上の段の円からは外れた画面の位置
+    const target: [number, number] = [circle.x + 0, circle.y - 1900];
+    const [px, py] = vp.project([target[0], target[1], 0]);
+    const p = pickCloseupPoint(vp, px, py, planes, circle);
+    expect(p).not.toBeNull();
+    expect(p?.layerId).toBe('elevation');
+    expect(p?.x).toBeCloseTo(target[0], 3);
+    expect(p?.y).toBeCloseTo(target[1], 3);
+  });
+  it('中心から画面の右へずれた位置をクリックすると、視点の向きに応じた方向へ中心が動く', () => {
+    for (const ro of [0, 45, 90, 180, -60]) {
+      const vp = view(ro, 90); // 真上から見る
+      const [cx, cy] = vp.project([circle.x, circle.y, 3200]);
+      const p = pickCloseupPoint(vp, cx + 60, cy, planes, circle);
+      expect(p).not.toBeNull();
+      // 画面の右 = 方位 ro のときの、世界の向き。中心からのずれは、画面の右へ 60 px に当たる距離
+      const dx = (p?.x ?? NaN) - circle.x;
+      const dy = (p?.y ?? NaN) - circle.y;
+      const [rx, ry] = vp.project([circle.x + dx, circle.y + dy, 3200]);
+      expect(rx).toBeCloseTo(cx + 60, 3);
+      expect(ry).toBeCloseTo(cy, 3);
+      expect(Math.hypot(dx, dy)).toBeGreaterThan(1);
+      // 方位が違えば、向きも違う（0 度では東、90 度では ro に応じて回る）
+      if (ro === 0) {
+        expect(dx).toBeGreaterThan(0);
+        expect(Math.abs(dy)).toBeLessThan(1e-3);
+      }
+    }
+  });
+  it('円の外は何も指さない', () => {
+    const vp = view(45);
+    expect(pickCloseupPoint(vp, 2, 2, planes, circle)).toBeNull();
+    const [px, py] = vp.project([circle.x + circle.r * 1.2, circle.y, 3200]);
+    expect(pickCloseupPoint(vp, px, py, [{ id: 'facilities', z: 3200 }], circle)).toBeNull();
+  });
+  it('段がなければ何も指さない', () => {
+    const vp = view(45);
+    expect(pickCloseupPoint(vp, 200, 350, [], circle)).toBeNull();
   });
 });

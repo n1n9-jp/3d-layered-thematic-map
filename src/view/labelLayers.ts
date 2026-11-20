@@ -5,7 +5,7 @@ import { LAYER_IDS } from '../config';
 import type { LayerId } from '../config';
 import { registry } from '../layers';
 import type { ViewState } from '../store';
-import { EXTENT_BOX, labelAnchors, projectPoint, spreadLabels } from './camera';
+import { DATA_BOX, labelAnchors, projectPoint, spreadLabels } from './camera';
 import type { PlaneBox, Size } from './camera';
 
 type P3 = [number, number, number];
@@ -26,7 +26,7 @@ const LABELS: LabelDatum[] = LAYER_IDS.map((id) => ({ id, text: registry[id].lab
 
 /**
  * 各段の右脇に出すレイヤー名。`tiers` は表示中の段（id と高さ）。
- * box は平面の位置と大きさ（既定は描画範囲全体、クローズアップでは切り出した円）。
+ * box は平面の位置と大きさ（既定は全体の積層の、23区のデータのある範囲、クローズアップでは切り出した円）。
  * `prefix` は、同じ画面に複数の積層を描くときのレイヤー ID の接頭辞。
  */
 export function stackLabelLayers(opts: {
@@ -36,7 +36,7 @@ export function stackLabelLayers(opts: {
   box?: PlaneBox;
   prefix?: string;
 }): Layer[] {
-  const { tiers, viewState, size, box = EXTENT_BOX, prefix = 'stack' } = opts;
+  const { tiers, viewState, size, box = DATA_BOX, prefix = 'stack' } = opts;
   const anchors = labelAnchors(viewState.rotationX, viewState.rotationOrbit, tiers.map((t) => t.z), box);
   const anchorById = new Map(tiers.map((t, i) => [t.id, anchors[i]]));
   // 平面が近づいて名前が重なるときは、画面上で縦に押し広げて読めるようにする。

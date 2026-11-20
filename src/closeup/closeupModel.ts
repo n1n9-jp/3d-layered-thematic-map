@@ -11,6 +11,8 @@ import { fitView } from '../view/camera';
 import type { PlaneBox, Size } from '../view/camera';
 import type { ViewState } from '../store';
 import type { ZMap } from '../view/useDisplayedZ';
+import { intersectHorizontalPlane, rayFromPixel } from '../probe/ray';
+import type { Plane, ProbePoint } from '../probe/ray';
 
 /** 切り出す円。中心 (x, y)・半径 r（m）。 */
 export interface CloseupCircle {
@@ -63,4 +65,24 @@ export function closeupView(opts: {
 /** 半径 r（m）の表示。「半径 2 km」。 */
 export function radiusLabel(r: number): string {
   return `半径 ${r / 1000} km`;
+}
+
+/**
+ * クローズアップの画面上の画素 (px, py) が指す地点。planes は表示中の段（上の段が先頭）で、z はクローズアップでの高さ。
+ * 上の段から順に、視線と平面の交点が円の中に入る最初の段を採用する（円の外は何も指さない）。
+ * 段は水平で、画面の上の段が下の段を隠すので、利用者が指した段は、円の中に当たる最も上の段である。
+ */
+export function pickCloseupPoint(
+  viewport: Parameters<typeof rayFromPixel>[0],
+  px: number,
+  py: number,
+  planes: readonly Plane[],
+  circle: CloseupCircle,
+): ProbePoint | null {
+  const ray = rayFromPixel(viewport, px, py);
+  for (const plane of planes) {
+    const hit = intersectHorizontalPlane(ray, plane.z);
+    if (hit && Math.hypot(hit.x - circle.x, hit.y - circle.y) <= circle.r) return { x: hit.x, y: hit.y, layerId: plane.id };
+  }
+  return null;
 }

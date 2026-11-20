@@ -12,6 +12,8 @@
 //     { type: "hover", x: "center"|<px>, y: "center"|<px> }                        マウスを動かす
 //     { type: "click", button: <ボタンの名前>, settled?: { rotationX, rotationOrbit } }   名前のボタンを押す。settled があれば、
 //       視点がその角度（方位は360度の違いを無視）になり、描画が追いつくまで待つ（視点のボタン用）
+//     { type: "drag-mark", dx, dy }        固定した探針の、真ん中の段の輪をつかみ、(dx, dy) px だけドラッグする（地点が動き終わるまで待つ）
+//     { type: "click-closeup", dx, dy }    クローズアップの積層の領域の中心から (dx, dy) px の位置をクリックする（地点が動くまで待つ）
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -149,6 +151,20 @@ function parseSize(size, name) {
   return { width: Number(m[1]), height: Number(m[2]) };
 }
 
+/** 探針の地点が before から動き、描画が追いつく（2フレーム）まで待つ。 */
+async function waitProbeMoved(page, before) {
+  await page.waitForFunction(
+    (b) => {
+      const p = window.__store.getState().probe;
+      return p && (p.x !== b.x || p.y !== b.y);
+    },
+    before,
+    { timeout: READY_TIMEOUT_MS, polling: 100 },
+  );
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await sleep(500);
+}
+
 async function runActions(page, actions, viewport) {
   for (const a of actions ?? []) {
     if (a.type === 'hover') {
@@ -174,6 +190,32 @@ async function runActions(page, actions, viewport) {
         await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       }
       await sleep(500);
+    } else if (a.type === 'drag-mark') {
+      // 全体の積層の描画領域（最初の canvas）と、いまの視点から、固定した探針の真ん中の段の輪の画面上の位置を求める。
+      const info = await page.evaluate(() => {
+        const r = document.querySelector('canvas').getBoundingClientRect();
+        const s = window.__store.getState();
+        return { left: r.left, top: r.top, width: r.width, height: r.height, vs: s.viewState, probe: s.probe, spacing: s.spacing };
+      });
+      const { OrbitView } = await import(join(ROOT, 'node_modules/@deck.gl/core/dist/index.js'));
+      const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ width: info.width, height: info.height, viewState: info.vs });
+      const [rx, ry] = vp.project([info.probe.x, info.probe.y, 2 * info.spacing]);
+      const x = info.left + rx;
+      const y = info.top + ry;
+      await page.mouse.move(x, y);
+      await sleep(300);
+      await page.mouse.down();
+      await page.mouse.move(x + a.dx, y + a.dy, { steps: 10 });
+      await page.mouse.up();
+      await waitProbeMoved(page, info.probe);
+    } else if (a.type === 'click-closeup') {
+      const before = await page.evaluate(() => window.__store.getState().probe);
+      const box = await page.evaluate(() => {
+        const r = document.querySelector('.cu-canvas').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await page.mouse.click(box.x + a.dx, box.y + a.dy);
+      await waitProbeMoved(page, before);
     } else {
       throw new Error(`未知の操作です: ${a.type}`);
     }

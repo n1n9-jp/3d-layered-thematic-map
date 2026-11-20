@@ -1,6 +1,7 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import DeckGL from '@deck.gl/react';
-import type { Layer } from '@deck.gl/core';
+import type { DeckGLRef } from '@deck.gl/react';
+import type { Layer, PickingInfo } from '@deck.gl/core';
 import { CLOSEUP_RADII, LAYER_IDS } from '../config';
 import type { CloseupRadius, LayerId } from '../config';
 import { registry } from '../layers';
@@ -19,8 +20,9 @@ import { topOf, withHeight } from '../view/layerHeights';
 import { RIGHT_PANEL_W } from '../view/layout';
 import { useDisplayedZ } from '../view/useDisplayedZ';
 import { useElementSize } from '../view/useElementSize';
+import type { Plane } from '../probe/ray';
 import { circleFillLayer, circleLayer } from './closeupLayers';
-import { closeupBox, closeupHeights, closeupView, radiusLabel } from './closeupModel';
+import { closeupBox, closeupHeights, closeupView, pickCloseupPoint, radiusLabel } from './closeupModel';
 import type { CloseupCircle } from './closeupModel';
 import { cutCloseup } from './cut';
 import type { CloseupCut } from './cut';
@@ -91,13 +93,44 @@ function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
   layers.push(...stackLabelLayers({ tiers, viewState: view, size, box: closeupBox(circle), prefix: 'closeup' }));
   layers.push(...probeMarkLayers(circle, true, tiers.map((t) => t.z)));
 
+  // 円の中の平面をクリックすると、その地点が新しい中心になる（クリックした段の、その地点）。クリックできる円の中では、カーソルを十字にする。
+  const planesRef = useRef<Plane[]>([]);
+  planesRef.current = tiers.map((t) => ({ id: t.id, z: t.z })).reverse(); // 上の段が先頭
+  const circleRef = useRef(circle);
+  circleRef.current = circle;
+  const pick = (info: PickingInfo) => {
+    const { viewport } = info;
+    if (!viewport || info.x < 0 || info.y < 0) return null;
+    return pickCloseupPoint(viewport, info.x, info.y, planesRef.current, circleRef.current);
+  };
+  const deckRef = useRef<DeckGLRef>(null);
+  const overCircle = useRef(false);
+  const onHover = (info: PickingInfo) => {
+    const over = pick(info) !== null;
+    if (over === overCircle.current) return;
+    overCircle.current = over;
+    // deck.gl は描画のたびにカーソルを設定し直す。描画を待たずに、いま変える。
+    const deck = deckRef.current?.deck;
+    const target = (deck?.props.parent as HTMLElement | undefined) ?? deck?.getCanvas();
+    if (target) target.style.cursor = over ? 'crosshair' : 'default';
+  };
+  const onClick = (info: PickingInfo) => {
+    const p = pick(info);
+    if (p) useMapStore.getState().setProbe({ x: p.x, y: p.y });
+  };
+  const getCursor = useCallback(() => (overCircle.current ? 'crosshair' : 'default'), []);
+
   return (
     <DeckGL
+      ref={deckRef}
       views={VIEW}
       viewState={view}
       controller={false}
       parameters={DECK_PARAMETERS}
       layers={layers}
+      onHover={onHover}
+      onClick={onClick}
+      getCursor={getCursor}
       style={{ background: '#000' }}
     />
   );

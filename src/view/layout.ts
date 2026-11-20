@@ -42,7 +42,7 @@ export const PROBE_PANEL = { width: 330, height: 360 } as const;
  * クローズアップの領域（右上のパネルのすぐ左）の幅の範囲（px）と、パネルを除いた画面の幅に対する割合。
  * 領域の高さは画面いっぱい（下端は出典の1行を避ける）。
  */
-export const CLOSEUP = { minWidth: 340, maxWidth: 560, share: 0.42 } as const;
+export const CLOSEUP = { minWidth: 340, maxWidth: 560, share: 0.315 } as const;
 
 /** クローズアップの領域の幅（px）。windowWidth は画面の幅。 */
 export function closeupWidth(windowWidth: number): number {
@@ -65,13 +65,19 @@ export interface Layout {
 
 const MIN_SAFE = 160;
 
-/** size は描画領域の大きさ。 */
-export function computeLayout(size: Size): Layout {
+/**
+ * size は描画領域の大きさ（右上のパネルの左側の全体）。
+ * closeupWidth を渡すと、その右端にクローズアップの領域（幅 closeupWidth、高さは領域いっぱい）があるものとして、
+ * 積層がそこに重ならないようにする。右脇のレイヤー名は積層の右に出るので、クローズアップの左に LABEL_ROOM のぶん空ける。
+ */
+export function computeLayout(size: Size, opts: { closeupWidth?: number } = {}): Layout {
   const right = Math.min(LABEL_ROOM, Math.max(GUTTER, size.width - GUTTER - MIN_SAFE));
   const padding: Padding = { left: GUTTER, right, top: GUTTER, bottom: GUTTER };
   const avoid: Rect[] = [
     { left: 0, top: size.height - PROBE_PANEL.height, right: PROBE_PANEL.width, bottom: size.height },
   ];
+  const cw = opts.closeupWidth ?? 0;
+  if (cw > 0) avoid.push({ left: Math.max(0, size.width - cw - LABEL_ROOM), top: 0, right: size.width, bottom: size.height });
   return { padding, avoid };
 }
 
@@ -136,11 +142,11 @@ const cornersOf = (r: Rect): Pt[] => [[r.left, r.top], [r.right, r.top], [r.righ
  *   n·c ≥ hR − s·min(n·h)
  * 中心 c は倍率 s で決まる範囲 [loX, hiX] × [loY, hiY] に動くので、n·c の最大値は s の一次式 A − s·B になり、s は閉じた式で求まる。
  */
-function scaleAlong(n: Pt, r: Rect, ext: ReturnType<typeof extent>, offsets: readonly Pt[], inner: Rect, sInner: number): number {
+function scaleAlong(n: Pt, r: Rect, ext: ReturnType<typeof extent>, avoidOffsets: readonly Pt[], inner: Rect, sInner: number): number {
   const A = n[0] * (n[0] >= 0 ? inner.right : inner.left) + n[1] * (n[1] >= 0 ? inner.bottom : inner.top);
   const B = n[0] * (n[0] >= 0 ? ext.maxX : ext.minX) + n[1] * (n[1] >= 0 ? ext.maxY : ext.minY);
   let mn = Infinity;
-  for (const [x, y] of offsets) mn = Math.min(mn, n[0] * x + n[1] * y);
+  for (const [x, y] of avoidOffsets) mn = Math.min(mn, n[0] * x + n[1] * y);
   const hR = Math.max(...cornersOf(r).map((c) => n[0] * c[0] + n[1] * c[1]));
   const denom = B - mn;
   if (denom <= 1e-12) return sInner;
@@ -211,6 +217,10 @@ const SAFETY = 1 - 1e-7;
  * 少し小さくすれば、置ける範囲に幅が残り、中心は連続的に動く。
  */
 const SLACK = 0.99;
+/** 避ける長方形が複数あるとき、向きを選び直す回数と、そのときの角度の刻み（度）、置ける最大の倍率を二分法で求める回数。 */
+const JOINT_PASSES = 2;
+const JOINT_ANGLE_STEP_DEG = 3;
+const JOINT_ITERATIONS = 22;
 
 /**
  * 外形 offsets（zoom 0 での、箱の中心からの相対位置。点対称）を、領域 inner に収め、avoid の長方形のどれにも重ならないように置く。
@@ -223,9 +233,20 @@ const SLACK = 0.99;
  * （「いま pref に近い置き場所」を毎回選び直す方式では、避ける場所が上から右へ入れ替わる瞬間に中心が跳ぶ。）
  *
  * 避けるのが不可能なとき（領域が避ける長方形に覆われているなど）は、避けずに領域だけに収める。
+ *
+ * opts.avoidOffsets：避ける長方形との重なりを判定する外形。既定は offsets。
+ *   領域（inner）には offsets（平面の外枠）を収め、避ける長方形には、データのある範囲だけ（avoidOffsets）が重ならないようにしたいときに渡す。
+ *   外枠の、データのない角が長方形の下に入るのを許す。avoidOffsets は offsets の内側にあること。
  */
-export function maxScale(offsets: readonly Pt[], pref: Pt, inner: Rect, avoid: readonly Rect[]): { scale: number; center: Pt } {
+export function maxScale(
+  offsets: readonly Pt[],
+  pref: Pt,
+  inner: Rect,
+  avoid: readonly Rect[],
+  opts: { avoidOffsets?: readonly Pt[] } = {},
+): { scale: number; center: Pt } {
   const ext = extent(offsets);
+  const avoidOffsets = opts.avoidOffsets ?? offsets;
   const w = ext.maxX - ext.minX;
   const h = ext.maxY - ext.minY;
   const hi = Math.max(1e-6, Math.min((inner.right - inner.left) / Math.max(w, 1e-6), (inner.bottom - inner.top) / Math.max(h, 1e-6)));
@@ -236,7 +257,10 @@ export function maxScale(offsets: readonly Pt[], pref: Pt, inner: Rect, avoid: r
     bottom: inner.bottom - ext.maxY * s,
   });
   const clampInto = (r: Rect): Pt => [Math.min(r.right, Math.max(r.left, pref[0])), Math.min(r.bottom, Math.max(r.top, pref[1]))];
-  const fallback = () => ({ scale: hi * SAFETY, center: clampInto(rectAt(hi * SAFETY)) });
+  const fallback = () => {
+    const s0 = hi * SAFETY;
+    return { scale: s0, center: clampInto(rectAt(s0)) };
+  };
   if (avoid.length === 0) return fallback();
 
   // 長方形ごとに、分離線の法線を決める。
@@ -248,7 +272,7 @@ export function maxScale(offsets: readonly Pt[], pref: Pt, inner: Rect, avoid: r
     for (let deg = 0; deg < 360; deg += ANGLE_STEP_DEG) {
       const t = (deg * Math.PI) / 180;
       const n: Pt = [Math.cos(t), Math.sin(t)];
-      const s = scaleAlong(n, r, ext, offsets, inner, hi);
+      const s = scaleAlong(n, r, ext, avoidOffsets, inner, hi);
       dirs.push({ n, s });
       best = Math.max(best, s);
     }
@@ -263,26 +287,71 @@ export function maxScale(offsets: readonly Pt[], pref: Pt, inner: Rect, avoid: r
     const len = Math.hypot(vx, vy);
     const n: Pt = len > 1e-12 ? [vx / len, vy / len] : dirs.reduce((a, b) => (b.s > a.s ? b : a)).n;
     normals.push(n);
-    sMax = Math.min(sMax, scaleAlong(n, r, ext, offsets, inner, hi));
+    sMax = Math.min(sMax, scaleAlong(n, r, ext, avoidOffsets, inner, hi));
   }
 
-  const constraints = avoid.map((r, k) => {
-    const n = normals[k];
+  type Constraint = { n: Pt; mn: number; hR: number };
+  const constraintFor = (r: Rect, n: Pt): Constraint => {
     let mn = Infinity;
-    for (const [x, y] of offsets) mn = Math.min(mn, n[0] * x + n[1] * y);
+    for (const [x, y] of avoidOffsets) mn = Math.min(mn, n[0] * x + n[1] * y);
     const hR = Math.max(...cornersOf(r).map((c) => n[0] * c[0] + n[1] * c[1]));
     return { n, mn, hR };
-  });
-  const regionAt = (s: number): Pt[] => {
+  };
+  const regionOf = (cs: readonly Constraint[], s: number): Pt[] => {
     const r = rectAt(s);
     let poly: Pt[] = cornersOf(r);
     if (r.left > r.right || r.top > r.bottom) return [];
-    for (const { n, mn, hR } of constraints) {
+    for (const { n, mn, hR } of cs) {
       poly = clipHalfPlane(poly, n, hR - s * mn);
       if (poly.length === 0) return [];
     }
     return poly;
   };
+  /** cs のもとで、置ける最大の倍率（置ける範囲は倍率が小さいほど広いので、二分法で求める）。 */
+  const jointMax = (cs: readonly Constraint[], upper: number): number => {
+    if (regionOf(cs, upper).length > 0) return upper;
+    let lo = 0;
+    let up = upper;
+    for (let i = 0; i < JOINT_ITERATIONS; i++) {
+      const mid = (lo + up) / 2;
+      if (regionOf(cs, mid).length > 0) lo = mid;
+      else up = mid;
+    }
+    return lo;
+  };
+
+  let constraints = avoid.map((r, k) => constraintFor(r, normals[k]));
+  if (avoid.length > 1) {
+    // 長方形ごとに最もよい向きが、同時には置けないことがある（たとえば、左下のパネルと右端のクローズアップ）。
+    // 1つずつ、ほかの向きを固定して、全体で置ける最大の倍率が最も大きくなる向きに選び直す（最大に近い向きの重み付き平均）。
+    for (let pass = 0; pass < JOINT_PASSES; pass++) {
+      for (let k = 0; k < avoid.length; k++) {
+        const dirs: { n: Pt; c: Constraint; s: number }[] = [];
+        let best = 0;
+        for (let deg = 0; deg < 360; deg += JOINT_ANGLE_STEP_DEG) {
+          const t = (deg * Math.PI) / 180;
+          const n: Pt = [Math.cos(t), Math.sin(t)];
+          const c = constraintFor(avoid[k], n);
+          const sj = jointMax(constraints.map((o, i) => (i === k ? c : o)), hi);
+          dirs.push({ n, c, s: sj });
+          best = Math.max(best, sj);
+        }
+        if (best <= hi * 1e-3) return fallback();
+        let vx = 0;
+        let vy = 0;
+        for (const { n, s: sj } of dirs) {
+          const wt = Math.max(0, sj - (1 - PLATEAU) * best);
+          vx += wt * n[0];
+          vy += wt * n[1];
+        }
+        const len = Math.hypot(vx, vy);
+        const n: Pt = len > 1e-12 ? [vx / len, vy / len] : dirs.reduce((a, b) => (b.s > a.s ? b : a)).n;
+        constraints = constraints.map((o, i) => (i === k ? constraintFor(avoid[k], n) : o));
+      }
+    }
+    sMax = Math.min(sMax, jointMax(constraints, hi));
+  }
+  const regionAt = (s: number) => regionOf(constraints, s);
 
   let s = sMax * SLACK;
   let region = regionAt(s);
