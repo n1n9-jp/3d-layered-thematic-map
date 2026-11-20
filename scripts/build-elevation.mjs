@@ -14,6 +14,7 @@ import path from 'node:path';
 import { PNG } from 'pngjs';
 import { EXTENT, toLocal, toLonLat } from './lib/projection.mjs';
 import { fetchCached } from './lib/fetch-cache.mjs';
+import { loadWards } from './lib/wards.mjs';
 
 const ZOOM = 14;
 const TILE_SIZE = 256;
@@ -116,52 +117,6 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
-// ---------------------------------------------------------------- 境界
-
-async function loadBoundary() {
-  let text;
-  try {
-    text = await readFile(BOUNDARY_FILE, 'utf8');
-  } catch (e) {
-    if (e.code === 'ENOENT') return null;
-    throw e;
-  }
-  const polys = []; // { rings: [[x,y][]...], bbox }
-  for (const f of JSON.parse(text).features) {
-    const g = f.geometry;
-    const list = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
-    for (const rings of list) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const [x, y] of rings[0]) {
-        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
-      }
-      polys.push({ rings, bbox: [x0, y0, x1, y1] });
-    }
-  }
-  return polys;
-}
-
-function inRing(x, y, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-/** 点が、いずれかのポリゴン（外周の内側かつ穴の外側）に入るか。 */
-function inBoundary(x, y, polys) {
-  for (const { rings, bbox } of polys) {
-    if (x < bbox[0] || x > bbox[2] || y < bbox[1] || y > bbox[3]) continue;
-    if (!inRing(x, y, rings[0])) continue;
-    let inHole = false;
-    for (let k = 1; k < rings.length; k++) if (inRing(x, y, rings[k])) { inHole = true; break; }
-    if (!inHole) return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------- 格子の生成
 
 /** 画素値（R,G,B）→ 標高（m）。データなしは NaN。 */
@@ -236,22 +191,19 @@ async function build() {
     if (valid[i] > 0 && valid[i] * 2 >= total[i]) grid[i] = sum[i] / valid[i];
   }
 
-  const boundary = await loadBoundary();
-  if (boundary) {
-    let cut = 0;
-    for (let row = 0; row < HEIGHT; row++) {
-      const y = EXTENT.maxY - (row + 0.5) * CELL_SIZE;
-      for (let col = 0; col < WIDTH; col++) {
-        const i = row * WIDTH + col;
-        if (Number.isNaN(grid[i])) continue;
-        const x = EXTENT.minX + (col + 0.5) * CELL_SIZE;
-        if (!inBoundary(x, y, boundary)) { grid[i] = NaN; cut++; }
-      }
+  // 23区の外はデータなし。判定は他のレイヤーと同じ共通関数（scripts/lib/wards.mjs）を使い、輪郭を揃える。
+  const wards = loadWards(BOUNDARY_FILE);
+  let cut = 0;
+  for (let row = 0; row < HEIGHT; row++) {
+    const y = EXTENT.maxY - (row + 0.5) * CELL_SIZE;
+    for (let col = 0; col < WIDTH; col++) {
+      const i = row * WIDTH + col;
+      if (Number.isNaN(grid[i])) continue;
+      const x = EXTENT.minX + (col + 0.5) * CELL_SIZE;
+      if (!wards.contains(x, y)) { grid[i] = NaN; cut++; }
     }
-    console.log(`境界で切り抜き: 23区の外のセル ${cut} 個を NaN にした`);
-  } else {
-    console.warn(`警告: ${path.relative('.', BOUNDARY_FILE)} が無いため、23区の外を切り抜かずに出力する`);
   }
+  console.log(`境界で切り抜き: 23区の外のセル ${cut} 個を NaN にした`);
 
   let min = Infinity, max = -Infinity, nan = 0;
   for (const v of grid) {
@@ -260,8 +212,6 @@ async function build() {
     if (v > max) max = v;
   }
   if (nan === grid.length) throw new Error('有効なセルがありません');
-  min = Math.round(min * 100) / 100;
-  max = Math.round(max * 100) / 100;
 
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(BIN_FILE, Buffer.from(grid.buffer, grid.byteOffset, grid.byteLength)); // 実行環境はリトルエンディアン
