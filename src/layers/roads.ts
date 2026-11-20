@@ -8,12 +8,16 @@ import type { RoadData } from './roadsModel';
 
 type Rgb = [number, number, number];
 
-/** 青緑〜ミント系。上位の道路ほど明るく太い。幅はメートル指定で、画面上では下限〜上限のピクセル幅に収める。 */
+/**
+ * 青緑の色相（150〜185°付近）は保ち、種別ごとに明るさ・彩度・太さを大きく変える。
+ * 高速＝ほぼ白のミント（太い）、国道＝彩度の高い明るい緑青、都道府県道＝中間の青緑、一般道＝暗く細い青緑。
+ * 幅はメートル指定で、画面上では下限〜上限のピクセル幅に収める。
+ */
 const STYLE: Record<RoadClass, { color: Rgb; width: number; minPx: number; maxPx: number }> = {
-  other: { color: [24, 132, 116], width: 8, minPx: 0.8, maxPx: 3 },
-  prefectural: { color: [40, 180, 150], width: 14, minPx: 1.4, maxPx: 5 },
-  national: { color: [80, 226, 188], width: 22, minPx: 2.2, maxPx: 7 },
-  motorway: { color: [170, 255, 226], width: 34, minPx: 3.2, maxPx: 10 },
+  other: { color: [38, 112, 118], width: 6, minPx: 0.7, maxPx: 1.4 },
+  prefectural: { color: [34, 176, 160], width: 12, minPx: 1.4, maxPx: 2.6 },
+  national: { color: [64, 240, 168], width: 24, minPx: 2.8, maxPx: 5 },
+  motorway: { color: [232, 255, 244], width: 40, minPx: 4.6, maxPx: 8 },
 };
 
 const getPath = (d: Position[]) => d;
