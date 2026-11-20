@@ -42,10 +42,12 @@ describe('sampleRoads', () => {
   it('折れ曲がりの後の線分も拾う', () => {
     expect(sampleRoads(data, 1060, 800)[0].value).toBe('国道 国道1号（60m）');
   });
-  it('100m を超えると null', () => {
-    expect(sampleRoads(data, 500, 700)).toEqual([{ label: '最寄りの道路', value: null }]);
-    expect(sampleRoads(data, 500, 599)[0].value).not.toBeNull(); // 道路 y=500 まで 99m
-    expect(sampleRoads(data, 500, 601)[0].value).toBeNull();
+  it('100m を超えても 300m 以内なら拾う', () => {
+    expect(sampleRoads(data, 500, 700)).toEqual([{ label: '最寄りの道路', value: '一般道（200m）' }]);
+  });
+  it('300m を超えると null', () => {
+    expect(sampleRoads(data, 500, 799)[0].value).toBe('一般道（299m）'); // 道路 y=500 まで 299m
+    expect(sampleRoads(data, 500, 801)).toEqual([{ label: '最寄りの道路', value: null }]);
   });
   it('道路がないデータ', () => {
     const empty = buildRoadData({ type: 'FeatureCollection', features: [] });

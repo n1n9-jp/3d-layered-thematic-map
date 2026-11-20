@@ -104,7 +104,7 @@ export default function ProbePanel() {
               {r.state === 'values' ? (
                 r.values.map((v, i) => (
                   <div key={i}>
-                    {v.label && <span style={styles.dim}>{v.label} </span>}
+                    {v.label && v.label !== r.label && <span style={styles.dim}>{v.label} </span>}
                     {formatValue(v)}
                   </div>
                 ))

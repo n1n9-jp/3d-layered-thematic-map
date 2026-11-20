@@ -29,6 +29,13 @@ const PLANE = [[[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 
 const FRAME_COLOR: [number, number, number, number] = [130, 145, 170, 90];
 const FILL_COLOR: [number, number, number, number] = [150, 175, 220, 9];
 const LABEL_COLOR: [number, number, number, number] = [225, 230, 240, 255];
+type LabelDatum = { id: LayerId; text: string };
+type HaloDatum = LabelDatum & { dx: number; dy: number };
+const LABEL_HALO_COLOR: [number, number, number, number] = [0, 0, 0, 255];
+/** 文字の縁取りに使う、黒い文字を重ねる方向（px）。 */
+const HALO_OFFSETS: readonly [number, number][] = [
+  [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1],
+];
 const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQuanYi Zen Hei", sans-serif';
 
 /** 視点を切り替えるアニメーションの長さ（ms）。 */
@@ -274,28 +281,48 @@ export default function StackView() {
   const screenY = size ? anchors.map((a) => projectPoint(viewState, size, a)[1]) : anchors.map(() => 0);
   const spread = spreadLabels(screenY, LABEL_GAP);
   const offsetById = new Map(visibleIds.map((v, i) => [v.id, spread[i] - screenY[i]]));
-  const labelLayer = new TextLayer({
-    id: 'stack-labels',
-    data: labels.filter((l) => anchorById.has(l.id)),
+  // 日本語の画数の多い字（「標」など）は、SDF 方式だと14px の大きさでつぶれて読めない。
+  // そのため SDF は使わず、通常の文字テクスチャで描く。縁取りの代わりに、黒い同じ文字を8方向に1px ずらして
+  // 後ろに重ねる（明るい標高の面や区境界線の上でも読めるようにする）。
+  const labelData = labels.filter((l) => anchorById.has(l.id));
+  const labelProps = {
     coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
-    getPosition: (d: (typeof labels)[number]) => anchorById.get(d.id) as P3,
-    getText: (d: (typeof labels)[number]) => d.text,
-    getColor: LABEL_COLOR,
+    getText: (d: LabelDatum) => d.text,
     getSize: 14,
     sizeUnits: 'pixels',
     getTextAnchor: 'start',
     getAlignmentBaseline: 'center',
-    getPixelOffset: (d: (typeof labels)[number]) => [10, offsetById.get(d.id) ?? 0],
     fontFamily: LABEL_FONT,
     characterSet: 'auto',
-    fontSettings: { sdf: true },
-    outlineWidth: 2,
-    outlineColor: [0, 0, 0, 255],
+    fontSettings: { sdf: false, fontSize: 64 },
     pickable: false,
-    updateTriggers: {
-      getPosition: [visibleIds.map((v) => `${v.id}:${v.z.toFixed(2)}`).join(), viewState.rotationX, viewState.rotationOrbit],
-      getPixelOffset: [visibleIds.map((v) => `${v.id}:${(offsetById.get(v.id) ?? 0).toFixed(1)}`).join()],
+  } as const;
+  const labelUpdateTriggers = {
+    getPosition: [visibleIds.map((v) => `${v.id}:${v.z.toFixed(2)}`).join(), viewState.rotationX, viewState.rotationOrbit],
+    getPixelOffset: [visibleIds.map((v) => `${v.id}:${(offsetById.get(v.id) ?? 0).toFixed(1)}`).join()],
+  };
+  const labelBaseOffset = (d: LabelDatum): [number, number] => [10, offsetById.get(d.id) ?? 0];
+  const haloData: HaloDatum[] = HALO_OFFSETS.flatMap(([dx, dy]) => labelData.map((l) => ({ ...l, dx, dy })));
+  const labelHaloLayer = new TextLayer<HaloDatum>({
+    ...labelProps,
+    id: 'stack-labels-halo',
+    data: haloData,
+    getPosition: (d) => anchorById.get(d.id) as P3,
+    getColor: LABEL_HALO_COLOR,
+    getPixelOffset: (d) => {
+      const [x, y] = labelBaseOffset(d);
+      return [x + d.dx, y + d.dy];
     },
+    updateTriggers: labelUpdateTriggers,
+  });
+  const labelLayer = new TextLayer<LabelDatum>({
+    ...labelProps,
+    id: 'stack-labels',
+    data: labelData,
+    getPosition: (d) => anchorById.get(d.id) as P3,
+    getColor: LABEL_COLOR,
+    getPixelOffset: labelBaseOffset,
+    updateTriggers: labelUpdateTriggers,
   });
 
   return (
@@ -308,7 +335,7 @@ export default function StackView() {
           onViewStateChange={onViewStateChange as never}
           controller={CONTROLLER}
           parameters={DECK_PARAMETERS}
-          layers={[...stackLayers, labelLayer, ...probeLayers(state as MapState)]}
+          layers={[...stackLayers, labelHaloLayer, labelLayer, ...probeLayers(state as MapState)]}
           onHover={onHover}
           onClick={onClick}
           style={{ background: '#000' }}

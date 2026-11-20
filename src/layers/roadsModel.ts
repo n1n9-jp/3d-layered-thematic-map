@@ -13,7 +13,8 @@ export const ROAD_CLASS_LABEL: Record<RoadClass, string> = {
   other: '一般道',
 };
 
-export const ROAD_SAMPLE_RADIUS = 100;
+/** 探針が「最寄りの道路」を探す範囲（m）。 */
+export const ROAD_SAMPLE_RADIUS = 300;
 
 export interface RoadData {
   /** 種別ごとの線（頂点列）。描画用 */
