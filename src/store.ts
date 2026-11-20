@@ -1,0 +1,140 @@
+import { create } from 'zustand';
+import { EXTENT, LAYER_IDS, SPACING } from './config';
+import type { LayerId } from './config';
+
+export type LayerStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type DataKey = LayerId | 'boundary';
+
+export interface ViewState {
+  target: [number, number, number];
+  rotationOrbit: number;
+  rotationX: number;
+  zoom: number;
+}
+
+export interface MapState {
+  /** 下→上 */
+  order: LayerId[];
+  visible: Record<LayerId, boolean>;
+  /** null 以外なら単独表示 */
+  solo: LayerId | null;
+  /** レイヤー間隔（m） */
+  spacing: number;
+  viewState: ViewState;
+  /** ローカル座標（m） */
+  probe: { x: number; y: number } | null;
+  probePinned: boolean;
+  data: Partial<Record<DataKey, unknown>>;
+  status: Record<DataKey, LayerStatus>;
+  setSpacing(v: number): void;
+  moveLayer(id: LayerId, toIndex: number): void;
+  setVisible(id: LayerId, v: boolean): void;
+  setSolo(id: LayerId | null): void;
+  setViewState(v: MapState['viewState']): void;
+  setProbe(p: MapState['probe']): void;
+  setProbePinned(v: boolean): void;
+}
+
+declare global {
+  interface Window {
+    __store: typeof useMapStore;
+    /** 全レイヤーと区境界の読み込みが成功か失敗に落ち着いたら true */
+    __ready: boolean;
+  }
+}
+
+const DEFAULT_VIEW: ViewState = {
+  target: [(EXTENT.minX + EXTENT.maxX) / 2, (EXTENT.minY + EXTENT.maxY) / 2, 10000], // z は既定の積層（5段・間隔5km）の中央
+  rotationX: 45,
+  rotationOrbit: 30,
+  // 正射影では zoom 0 で 1 ユニット = 1px。36km が 480px 前後に収まる値。
+  zoom: Math.log2(480 / (EXTENT.maxX - EXTENT.minX)),
+};
+
+type InitialState = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned'>;
+
+function isLayerId(s: string): s is LayerId {
+  return (LAYER_IDS as readonly string[]).includes(s);
+}
+
+function num(v: string | null): number | null {
+  if (v === null || v.trim() === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ids(v: string | null): LayerId[] {
+  return (v ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(isLayerId);
+}
+
+/**
+ * URL クエリから初期状態を作る。
+ * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
+ * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`。不正な値は無視して既定値を使う。
+ */
+export function initialStateFromQuery(search: string): InitialState {
+  const q = new URLSearchParams(search);
+
+  const spacingQ = num(q.get('spacing'));
+  const spacing = spacingQ === null ? SPACING.default : Math.min(SPACING.max, Math.max(SPACING.min, spacingQ));
+
+  // order に書かれたものを先に、書かれなかったレイヤーは既定の順で後ろへ。
+  const given = [...new Set(ids(q.get('order')))];
+  const order = [...given, ...LAYER_IDS.filter((id) => !given.includes(id))];
+
+  const visible = Object.fromEntries(LAYER_IDS.map((id) => [id, true])) as Record<LayerId, boolean>;
+  for (const id of ids(q.get('hidden'))) visible[id] = false;
+
+  const soloQ = q.get('solo');
+  const solo = soloQ !== null && isLayerId(soloQ) ? soloQ : null;
+
+  let probe: MapState['probe'] = null;
+  const probeQ = q.get('probe')?.split(',');
+  if (probeQ && probeQ.length === 2) {
+    const x = num(probeQ[0]);
+    const y = num(probeQ[1]);
+    if (x !== null && y !== null) probe = { x, y };
+  }
+
+  const rx = num(q.get('rx'));
+  const ro = num(q.get('ro'));
+  const zoom = num(q.get('zoom'));
+  const viewState: ViewState = {
+    ...DEFAULT_VIEW,
+    ...(rx !== null && { rotationX: rx }),
+    ...(ro !== null && { rotationOrbit: ro }),
+    ...(zoom !== null && { zoom }),
+  };
+
+  return { order, visible, solo, spacing, viewState, probe, probePinned: probe !== null };
+}
+
+const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
+
+export const useMapStore = create<MapState>()((set) => ({
+  ...initialStateFromQuery(typeof location === 'undefined' ? '' : location.search),
+  data: {},
+  status: Object.fromEntries(DATA_KEYS.map((k) => [k, 'idle'])) as Record<DataKey, LayerStatus>,
+
+  setSpacing: (v) => set({ spacing: Math.min(SPACING.max, Math.max(SPACING.min, v)) }),
+  moveLayer: (id, toIndex) =>
+    set((s) => {
+      const rest = s.order.filter((x) => x !== id);
+      const i = Math.min(rest.length, Math.max(0, toIndex));
+      rest.splice(i, 0, id);
+      return { order: rest };
+    }),
+  setVisible: (id, v) => set((s) => ({ visible: { ...s.visible, [id]: v } })),
+  setSolo: (id) => set({ solo: id }),
+  setViewState: (v) => set({ viewState: v }),
+  setProbe: (p) => set({ probe: p }),
+  setProbePinned: (v) => set({ probePinned: v }),
+}));
+
+if (typeof window !== 'undefined') {
+  window.__store = useMapStore;
+  window.__ready = false;
+}
