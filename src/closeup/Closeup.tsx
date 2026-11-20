@@ -6,6 +6,7 @@ import { CLOSEUP_RADII, LAYER_IDS } from '../config';
 import type { CloseupRadius, LayerId } from '../config';
 import { registry } from '../layers';
 import { probeMarkLayers } from '../probe/controller';
+import { pillarLayers } from '../probe/pillar';
 import { translationMatrix } from '../stack';
 import { useMapStore } from '../store';
 import { boundaryLayer } from '../view/boundaryLines';
@@ -81,6 +82,7 @@ export function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
     const next = tiers[k + 1];
     if (cut.boundary && !(next && Math.abs(next.z - z) <= 1)) layers.push(boundaryLayer(cut.boundary, `closeup-${id}`, z));
   }
+  layers.push(...pillarLayers({ circle, zs: tiers.map((t) => t.z), rotationOrbit, idPrefix: 'closeup' }));
   layers.push(...stackLabelLayers({ tiers, viewState: view, size, box: closeupBox(circle), prefix: 'closeup' }));
   layers.push(...probeMarkLayers(circle, true, tiers.map((t) => t.z)));
 

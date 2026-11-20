@@ -9,6 +9,7 @@ import type { LayerId } from '../config';
 import { registry } from '../layers';
 import { onClick, onHover, probeLayers, visiblePlanes } from '../probe/controller';
 import { installMarkDrag } from '../probe/markDrag';
+import { pillarLayers } from '../probe/pillar';
 import type { MarkCursor } from '../probe/markDrag';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore, viewQuery } from '../store';
@@ -329,6 +330,9 @@ export default function StackView({ columnWidth }: Props) {
     // クローズアップで切り出している範囲を、各段に円で示す（同じ高さに重なる段には1本だけ）。
     if (closeup && topOfGroup) stackLayers.push(circleLayer(`closeup-range-${id}`, closeup, z));
   }
+
+  // 固定した円を、表示中の最下段から最上段まで貫く柱。ラベルと探針の下、段の上に重ねる。
+  if (closeup) stackLayers.push(...pillarLayers({ circle: closeup, zs: visibleIds.map((t) => t.z), rotationOrbit: viewState.rotationOrbit, idPrefix: 'stack' }));
 
   const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
 
