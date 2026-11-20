@@ -4,8 +4,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateFixtures } from './lib/fixtures.mjs';
+import { ROOT_DIR } from './lib/paths.mjs';
 
-const OUT_DIR = path.resolve('public/data-fixture');
+// 実行したディレクトリではなく、リポジトリのルート基準で書き出す。
+const OUT_DIR = path.join(ROOT_DIR, 'public', 'data-fixture');
 
 const { geojson, elevation } = generateFixtures();
 await mkdir(OUT_DIR, { recursive: true });

@@ -4,6 +4,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { EXTENT } from './projection.mjs';
+import { createWards } from './wards.mjs';
 
 /** ファイルサイズの上限（1MB = 1024*1024 byte として扱う）。 */
 export const SIZE_LIMITS = {
@@ -13,6 +14,9 @@ export const SIZE_LIMITS = {
 
 /** 標高格子の仕様値。 */
 export const ELEVATION_SPEC = { width: 720, height: 720, cellSize: 50 };
+
+/** elevation.json の min / max と、bin の有効値の最小・最大との差の許容（m）。生成側が値を丸めて書いても通るようにする。 */
+export const ELEVATION_MINMAX_TOLERANCE = 0.05;
 
 export const ROAD_CLASSES = ['motorway', 'national', 'prefectural', 'other'];
 export const FACILITY_KINDS = ['school', 'hospital'];
@@ -49,6 +53,7 @@ const oneOf = (list) => (v) => list.includes(v);
  *  - geometry: 許可する geometry.type
  *  - properties: 項目名 → { test, expect }（expect は違反メッセージ用の説明）
  *  - category: 件数を内訳表示する項目名
+ *  - unique: 値が Feature 間で重複してはならない項目名
  *  - extra: 追加の geometry 検査（問題があれば文字列を返す）
  */
 export const GEOJSON_SPECS = {
@@ -58,6 +63,7 @@ export const GEOJSON_SPECS = {
       code: { test: (v) => typeof v === 'string' && /^\d{5}$/.test(v), expect: '5桁の数字の文字列' },
       name: { test: isNonEmptyString, expect: '空でない文字列' },
     },
+    unique: 'code',
   },
   'population.geojson': {
     geometry: ['Polygon'],
@@ -99,7 +105,7 @@ export const GEOJSON_SPECS = {
     properties: {
       kind: { test: oneOf(FACILITY_KINDS), expect: FACILITY_KINDS.join(' / ') },
       name: { test: isNonEmptyString, expect: '空でない文字列' },
-      subtype: { test: isStringOrNull, expect: '文字列または null' },
+      subtype: { test: isNonEmptyString, expect: '空でない文字列' },
     },
     category: 'kind',
   },
@@ -211,8 +217,11 @@ export function validateGeoJson(fileName, json) {
     return finish(summary, v);
   }
 
+  if (json.features.length === 0) v.add('features', '地物が0件（1件以上あること）');
+
   const geomCounts = {};
   const categoryCounts = {};
+  const firstSeen = new Map();
   const bbox = [Infinity, Infinity, -Infinity, -Infinity];
   let population = 0;
 
@@ -252,6 +261,14 @@ export function validateGeoJson(fileName, json) {
         v.add(`${where}.properties.${key}`, `値 ${show(props[key])} が不正（期待: ${rule.expect}）`);
       }
     }
+    if (spec.unique && typeof props[spec.unique] === 'string') {
+      const key = props[spec.unique];
+      if (firstSeen.has(key)) {
+        v.add(`${where}.properties.${spec.unique}`, `値 ${show(key)} が ${firstSeen.get(key)} と重複している`);
+      } else {
+        firstSeen.set(key, where);
+      }
+    }
     if (spec.category && spec.category in props) {
       const c = props[spec.category];
       categoryCounts[c] = (categoryCounts[c] ?? 0) + 1;
@@ -282,9 +299,10 @@ function finish(summary, v) {
 
 /**
  * elevation.json（パース済み）と elevation.bin（Uint8Array / Buffer）を検証する。
- * min / max の一致は 1e-3 m までの差を許容する（JSON 側で丸められている場合に備える）。
+ * min / max の一致は ELEVATION_MINMAX_TOLERANCE（0.05m）までの差を許容する。
+ * wards（createWards の戻り値）を渡すと、セルの中心がどの区にも含まれないのに有効値が入っているセルを違反にする。
  */
-export function validateElevation(meta, bin) {
+export function validateElevation(meta, bin, { wards = null } = {}) {
   const v = new Violations();
   const summary = [];
   const W = 'elevation.json';
@@ -338,7 +356,7 @@ export function validateElevation(meta, bin) {
   if (valid === 0) {
     v.add('elevation.bin', '有効値（NaN 以外）が1つもない');
   } else {
-    const tol = 1e-3;
+    const tol = ELEVATION_MINMAX_TOLERANCE + 1e-4; // Float32 の表現誤差（標高の桁で 1e-5 程度）で、ちょうど 0.05m の差が落ちないようにする
     if (num('min') && Math.abs(meta.min - min) > tol) {
       v.add(W, `min が bin の最小値と一致しない（json: ${meta.min}, bin: ${min}）`);
     }
@@ -347,9 +365,36 @@ export function validateElevation(meta, bin) {
     }
   }
 
+  // 区の外にあるセルの有効値（bin の大きさが仕様どおりのときだけ、仕様の格子として調べる）
+  let outside = null;
+  if (wards && bytes === expectedBytes) {
+    const { width, height, cellSize } = ELEVATION_SPEC;
+    outside = 0;
+    let firstCell = null;
+    for (let row = 0; row < height; row++) {
+      const y = EXTENT.maxY - (row + 0.5) * cellSize;
+      for (let col = 0; col < width; col++) {
+        if (Number.isNaN(view.getFloat32((row * width + col) * 4, true))) continue;
+        const x = EXTENT.minX + (col + 0.5) * cellSize;
+        if (wards.contains(x, y)) continue;
+        outside += 1;
+        firstCell ??= { row, col, x, y };
+      }
+    }
+    if (outside > 0) {
+      v.add(
+        'elevation.bin',
+        `セルの中心がどの区にも含まれないのに有効値が入っているセルが ${outside} 個ある（例: row ${firstCell.row}, col ${firstCell.col}, 中心 x=${firstCell.x}, y=${firstCell.y}。区の外は NaN にする）`,
+      );
+    }
+  }
+
   summary.push(`格子: ${meta.width} × ${meta.height}, cellSize ${meta.cellSize}m, ${bytes.toLocaleString('en-US')} bytes`);
   summary.push(`有効セル: ${valid}, NaN: ${nan}`);
   if (valid > 0) summary.push(`標高: min ${round3(min)}, max ${round3(max)}（json: ${meta.min}, ${meta.max}）`);
+  if (wards) {
+    summary.push(outside === null ? '区の外のセル: 検査できない（bin の大きさが仕様と異なる）' : `区の外の有効セル: ${outside}`);
+  }
   return finish(summary, v);
 }
 
@@ -427,6 +472,8 @@ export async function validateDirectory(dir, { requireAll = false } = {}) {
   if (!info?.isDirectory()) throw new Error(`ディレクトリがない: ${dir}`);
 
   const entries = [];
+  let wards = null; // boundary.geojson が仕様どおりのときだけ、標高の範囲の検査に使う
+  let boundaryUnusable = false;
 
   for (const name of GEOJSON_FILES) {
     const buf = await readIfExists(path.join(dir, name));
@@ -436,9 +483,15 @@ export async function validateDirectory(dir, { requireAll = false } = {}) {
     }
     const parsed = parseJson(buf, name);
     if (parsed.error) {
+      if (name === 'boundary.geojson') boundaryUnusable = true;
       entries.push({ name, status: 'ng', summary: [], violations: [parsed.error], violationCount: 1 });
     } else {
-      entries.push({ name, ...withStatus(validateGeoJson(name, parsed.value)) });
+      const result = validateGeoJson(name, parsed.value);
+      if (name === 'boundary.geojson') {
+        if (result.violationCount === 0) wards = createWards(parsed.value.features);
+        else boundaryUnusable = true;
+      }
+      entries.push({ name, ...withStatus(result) });
     }
   }
 
@@ -461,7 +514,9 @@ export async function validateDirectory(dir, { requireAll = false } = {}) {
     if (parsed.error) {
       entries.push({ name: label, status: 'ng', summary: [], violations: [parsed.error], violationCount: 1 });
     } else {
-      entries.push({ name: label, ...withStatus(validateElevation(parsed.value, binBuf)) });
+      const result = validateElevation(parsed.value, binBuf, { wards });
+      if (boundaryUnusable) result.summary.push('区の外のセル: boundary.geojson に違反があるため検査していない');
+      entries.push({ name: label, ...withStatus(result) });
     }
   }
 
