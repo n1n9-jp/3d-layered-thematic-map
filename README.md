@@ -45,7 +45,7 @@
 | ファイル | geometry | properties |
 | --- | --- | --- |
 | `boundary.geojson` | Polygon / MultiPolygon（区ごとに1 Feature） | `code`（市区町村コード5桁）, `name`（区名） |
-| `population.geojson` | Polygon（メッシュ1個ごと、4隅） | `meshCode`, `population`（人）, `density`（人/km²） |
+| `population.geojson` | Polygon（メッシュ1個ごと。4隅をたどって始点に戻る5点の閉じたリング） | `meshCode`, `population`（人）, `density`（人/km²） |
 | `roads.geojson` | LineString | `class`（`motorway` / `national` / `prefectural` / `other`）, `name`（なければ null） |
 | `rail.geojson` | LineString | `operator`（事業者名）, `line`（路線名） |
 | `stations.geojson` | Point | `name`（駅名）, `operator`, `line` |
@@ -57,6 +57,9 @@
 - `elevation.json`：`{ width, height, cellSize, minX, minY, maxX, maxY, min, max }`
   - 範囲は `EXTENT` と同じ、`cellSize` は 50（m）、したがって `width = height = 720`
   - `min` / `max` は23区内の有効値の最小・最大（m）
+  - 各セルの値は、セルの中心での標高です。列 `col`・行 `row`（どちらも0始まり）のセルの中心は `x = minX + (col + 0.5) × cellSize`、`y = maxY − (row + 0.5) × cellSize`
+  - 地点 `(x, y)` を含むセルは `col = floor((x − minX) / cellSize)`、`row = floor((maxY − y) / cellSize)`
+  - 23区の外と水面はデータなし（NaN）にします
 
 各データは23区の範囲に絞ります（区の境界で切り抜くか、区に交差するものだけを残します）。
 
