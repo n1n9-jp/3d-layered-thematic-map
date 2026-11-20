@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { CLOSEUP_RADII, DEFAULT_ANGLES, DEFAULT_CLOSEUP_RADIUS, EXTENT, LAYER_IDS, SPACING, VIEW_LIMITS } from './config';
 import type { CloseupRadius, LayerId } from './config';
+import { sectionFromQuery } from './section/interaction';
+import type { SectionLine } from './types';
 
 export type LayerStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type DataKey = LayerId | 'boundary';
@@ -11,6 +13,9 @@ export interface ViewState {
   rotationX: number;
   zoom: number;
 }
+
+/** 全体の地図と右の列の操作：「地点」（探針とクローズアップ）か、「断面」（2点の線に沿った変化）。 */
+export type UiMode = 'point' | 'section';
 
 export interface MapState {
   /** 下→上 */
@@ -28,6 +33,15 @@ export interface MapState {
   probePinned: boolean;
   /** クローズアップの半径（m）。探針が固定されているあいだ、その地点を中心にこの半径の円の範囲を拡大して見せる。 */
   closeupRadius: CloseupRadius;
+  mode: UiMode;
+  /** 断面の線。「地点」へ切り替えても保持する。 */
+  section: SectionLine | null;
+  /** 断面の始点だけ置いて、終点を待っている地点。 */
+  sectionStart: { x: number; y: number } | null;
+  /** 始点を置いたあとの、カーソルの下の地点（線の下書き用）。 */
+  sectionCursor: { x: number; y: number } | null;
+  /** カーソルが指している、断面の線に沿った距離（m）。全体の地図と右のグラフのどちらにカーソルがあっても、この値で連動する。 */
+  sectionHover: number | null;
   data: Partial<Record<DataKey, unknown>>;
   status: Record<DataKey, LayerStatus>;
   setSpacing(v: number): void;
@@ -39,6 +53,11 @@ export interface MapState {
   setProbe(p: MapState['probe']): void;
   setProbePinned(v: boolean): void;
   setCloseupRadius(r: CloseupRadius): void;
+  setMode(m: UiMode): void;
+  setSection(line: SectionLine | null): void;
+  setSectionStart(p: MapState['sectionStart']): void;
+  setSectionCursor(p: MapState['sectionCursor']): void;
+  setSectionHover(d: number | null): void;
 }
 
 declare global {
@@ -57,7 +76,10 @@ const DEFAULT_VIEW: ViewState = {
   zoom: Math.log2(480 / (EXTENT.maxX - EXTENT.minX)),
 };
 
-type InitialState = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius'>;
+type InitialState = Pick<
+  MapState,
+  'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius' | 'mode' | 'section'
+>;
 
 function isLayerId(s: string): s is LayerId {
   return (LAYER_IDS as readonly string[]).includes(s);
@@ -103,7 +125,8 @@ function ids(v: string | null): LayerId[] {
 /**
  * URL クエリから初期状態を作る。
  * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
- * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
+ * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）,
+ * `section=<ax>,<ay>,<bx>,<by>`（断面の線。あれば「断面」に切り替わった状態で開く）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
@@ -137,7 +160,20 @@ export function initialStateFromQuery(search: string): InitialState {
     ...(zoom !== null && { zoom }),
   };
 
-  return { order, visible, solo, spacing, viewState, probe, probePinned: probe !== null, closeupRadius: radiusQuery(search) };
+  const section = sectionFromQuery(q.get('section'));
+
+  return {
+    order,
+    visible,
+    solo,
+    spacing,
+    viewState,
+    probe,
+    probePinned: probe !== null,
+    closeupRadius: radiusQuery(search),
+    mode: section ? 'section' : 'point',
+    section,
+  };
 }
 
 const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
@@ -145,6 +181,9 @@ const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
 export const useMapStore = create<MapState>()((set) => ({
   ...initialStateFromQuery(typeof location === 'undefined' ? '' : location.search),
   autoFit: true,
+  sectionStart: null,
+  sectionCursor: null,
+  sectionHover: null,
   data: {},
   status: Object.fromEntries(DATA_KEYS.map((k) => [k, 'idle'])) as Record<DataKey, LayerStatus>,
 
@@ -165,6 +204,16 @@ export const useMapStore = create<MapState>()((set) => ({
   setProbe: (p) => set({ probe: p }),
   setProbePinned: (v) => set({ probePinned: v }),
   setCloseupRadius: (r) => set({ closeupRadius: r }),
+  setMode: (m) =>
+    set((s) => {
+      if (m === s.mode) return {};
+      // 切り替えのたびに、カーソルに付いてくる一時的な表示は消す。固定した探針と、断面の線は残す。
+      return { mode: m, sectionCursor: null, sectionHover: null, ...(m === 'section' && !s.probePinned ? { probe: null } : {}) };
+    }),
+  setSection: (line) => set({ section: line }),
+  setSectionStart: (p) => set({ sectionStart: p }),
+  setSectionCursor: (p) => set({ sectionCursor: p }),
+  setSectionHover: (d) => set((s) => (s.sectionHover === d ? {} : { sectionHover: d })),
 }));
 
 if (typeof window !== 'undefined') {

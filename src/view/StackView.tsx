@@ -10,6 +10,12 @@ import { registry } from '../layers';
 import { onClick, onHover, probeLayers, visiblePlanes } from '../probe/controller';
 import { installMarkDrag } from '../probe/markDrag';
 import type { MarkCursor } from '../probe/markDrag';
+import { onSectionClick, onSectionHover, sectionHeights } from '../section/controller';
+import { draftLine } from '../section/interaction';
+import { installSectionDrag } from '../section/lineDrag';
+import { standHeight } from '../section/model';
+import { sectionCurtainLayer, sectionCursorLayers, sectionLineLayers, sectionPoleLayers, sectionStandLayers } from '../section/sectionLayers';
+import { useSectionTracks } from '../section/tracks';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore, viewQuery } from '../store';
 import type { MapState, ViewState } from '../store';
@@ -77,7 +83,11 @@ interface Props {
 export default function StackView({ columnWidth }: Props) {
   const state = useMapStore();
   const { order, visible, solo, spacing, data, status, viewState, closeupRadius } = state;
-  const closeup = state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
+  const sectionMode = state.mode === 'section';
+  // 範囲の円は「地点」のときだけ。「断面」のあいだは、固定した探針は残っているが、描かない。
+  const closeup = !sectionMode && state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
+  const { line: sectionLine, tracks: sectionTracks } = useSectionTracks();
+  const { sectionStart, sectionCursor, sectionHover } = state;
 
   /* ---------- 画面の大きさ ---------- */
   const [box, size] = useElementSize<HTMLDivElement>();
@@ -92,31 +102,54 @@ export default function StackView({ columnWidth }: Props) {
   const targetsRef = useRef(targets);
   targetsRef.current = targets;
 
-  /* ---------- 固定した探針の印をつかんで動かす ---------- */
+  /* ---------- 固定した探針の印、断面の線の端点と線をつかんで動かす ---------- */
   const deckRef = useRef<DeckGLRef>(null);
-  /** 印の上のカーソル。null なら、deck.gl の既定（視点を回せる手のひら）。 */
+  /** 印の上のカーソル。null なら、deck.gl の既定（視点を回せる手のひら。「断面」で線を引くときは十字）。 */
   const markCursor = useRef<MarkCursor | null>(null);
+  const sectionModeRef = useRef(sectionMode);
+  sectionModeRef.current = sectionMode;
+  const restCursor = () => (sectionModeRef.current ? 'crosshair' : 'grab');
+  const setMarkCursor = useCallback((c: MarkCursor | null) => {
+    markCursor.current = c;
+    // deck.gl は、描画のたびにカーソルを設定し直す。描画を待たずに、いま変える。
+    const deck = deckRef.current?.deck;
+    const target = (deck?.props.parent as HTMLElement | undefined) ?? deck?.getCanvas();
+    if (target) target.style.cursor = c ?? restCursor();
+  }, []);
+  const getViewport = useCallback(
+    () => (deckRef.current?.deck?.getViewports()[0] as ReturnType<Parameters<typeof installMarkDrag>[1]['getViewport']>) ?? null,
+    [],
+  );
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    return installMarkDrag(el, {
-      getViewport: () => (deckRef.current?.deck?.getViewports()[0] as ReturnType<Parameters<typeof installMarkDrag>[1]['getViewport']>) ?? null,
+    const offProbe = installMarkDrag(el, {
+      getViewport,
       getMarks: () => {
         const s = useMapStore.getState();
-        return s.probePinned && s.probe ? { probe: s.probe, zs: visiblePlanes(s).map((p) => p.z) } : null;
+        return s.mode === 'point' && s.probePinned && s.probe ? { probe: s.probe, zs: visiblePlanes(s).map((p) => p.z) } : null;
       },
       setPoint: (p) => useMapStore.getState().setProbe(p),
-      setCursor: (c) => {
-        markCursor.current = c;
-        // deck.gl は、描画のたびにカーソルを設定し直す。描画を待たずに、いま変える。
-        const deck = deckRef.current?.deck;
-        const target = (deck?.props.parent as HTMLElement | undefined) ?? deck?.getCanvas();
-        if (target) target.style.cursor = c ?? 'grab';
-      },
+      setCursor: setMarkCursor,
     });
-  }, [box]);
+    const offSection = installSectionDrag(el, {
+      getViewport,
+      getTarget: () => {
+        const s = useMapStore.getState();
+        return s.mode === 'section' && s.section && !s.sectionStart
+          ? { line: s.section, planes: visiblePlanes(s).map((p) => p.z), heights: sectionHeights(s) }
+          : null;
+      },
+      setLine: (l) => useMapStore.getState().setSection(l),
+      setCursor: setMarkCursor,
+    });
+    return () => {
+      offProbe();
+      offSection();
+    };
+  }, [box, getViewport, setMarkCursor]);
   const getCursor = useCallback(
-    ({ isDragging }: { isDragging: boolean }) => markCursor.current ?? (isDragging ? 'grabbing' : 'grab'),
+    ({ isDragging }: { isDragging: boolean }) => markCursor.current ?? (isDragging ? 'grabbing' : restCursor()),
     [],
   );
 
@@ -285,6 +318,21 @@ export default function StackView({ columnWidth }: Props) {
     return out;
   }, [targets, solo, data, status]);
 
+  // 断面：段ごとに、切り口に沿って立てるグラフ。段の目標の高さで作っておく（補間中の高さへは withHeight で移す）。
+  const standH = solo === null ? standHeight(spacing) : 0;
+  const stands = useMemo(() => {
+    const out = {} as Record<LayerId, Layer[]>;
+    for (const id of LAYER_IDS) {
+      const z = targets[id];
+      const tr = sectionTracks[id];
+      out[id] =
+        !sectionMode || !sectionLine || z === null || !tr || standH === 0
+          ? []
+          : [...sectionCurtainLayer(id, sectionLine, z, standH), ...sectionStandLayers(id, sectionLine, tr, z, standH)];
+    }
+    return out;
+  }, [sectionMode, sectionLine, sectionTracks, targets, standH]);
+
   const paths = useMemo(() => (status.boundary === 'ready' ? cachedBoundaryPaths(data.boundary as BoundaryData) : null), [status.boundary, data.boundary]);
 
   const stackLayers = [];
@@ -326,11 +374,28 @@ export default function StackView({ columnWidth }: Props) {
     const next = visibleIds[k + 1];
     const topOfGroup = !(next && Math.abs(next.z - z) <= 1);
     if (paths && topOfGroup) stackLayers.push(boundaryLayer(paths, id, z));
+    // 断面：その段の平面の後、1つ上の段の平面の前に、立てるグラフ、切り口の線と端点を描く。
+    if (sectionMode) {
+      stackLayers.push(...stands[id].map((l) => withHeight(l, targets[id] as number, z)));
+      if (topOfGroup) {
+        if (sectionLine) stackLayers.push(...sectionLineLayers(`section-${id}`, sectionLine, z));
+        else if (sectionStart && sectionCursor) stackLayers.push(...sectionLineLayers(`section-draft-${id}`, draftLine(sectionStart, sectionCursor), z, true));
+      }
+    }
     // クローズアップで切り出している範囲を、各段に円で示す（同じ高さに重なる段には1本だけ）。
     if (closeup && topOfGroup) stackLayers.push(circleLayer(`closeup-range-${id}`, closeup, z));
   }
 
   const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
+
+  // 探針（「地点」）か、断面の両端の垂直線とカーソルの印（「断面」）。いちばん上に描く。
+  const zsShown = visibleIds.map((t) => t.z);
+  const overlayLayers: Layer[] = sectionMode
+    ? [
+        ...(sectionLine ? sectionPoleLayers(sectionLine, zsShown) : []),
+        ...(sectionLine && sectionHover !== null ? sectionCursorLayers(sectionLine, sectionHover, zsShown) : []),
+      ]
+    : probeLayers(state as MapState);
 
   return (
     // 右上のパネルの左までを描画領域にする。情報の列は、この右端に重なる。
@@ -344,9 +409,9 @@ export default function StackView({ columnWidth }: Props) {
           onViewStateChange={onViewStateChange as never}
           controller={CONTROLLER}
           parameters={DECK_PARAMETERS}
-          layers={[...stackLayers, ...labelLayers, ...probeLayers(state as MapState)]}
-          onHover={onHover}
-          onClick={onClick}
+          layers={[...stackLayers, ...labelLayers, ...overlayLayers]}
+          onHover={sectionMode ? onSectionHover : onHover}
+          onClick={sectionMode ? onSectionClick : onClick}
           style={{ background: '#000' }}
         />
       )}

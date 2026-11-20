@@ -34,7 +34,7 @@ function districtInside(state: MapState): ((x: number, y: number) => boolean) | 
   return (x, y) => lookup(x, y) !== null;
 }
 
-function pickFromInfo(info: PickingInfo) {
+export function pickFromInfo(info: PickingInfo) {
   const { viewport } = info;
   if (!viewport || info.x < 0 || info.y < 0) return null;
   const state = useMapStore.getState();
@@ -70,10 +70,11 @@ export function onClick(info: PickingInfo): void {
   }
 }
 
-/** Esc キーで固定を解除する。解除関数を返す。 */
+/** Esc キーで固定を解除する（「地点」のときだけ。「断面」の Esc は線を消す操作で、保持している固定は残す）。解除関数を返す。 */
 export function installProbeKeys(target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): () => void {
   const handler = (e: Event) => {
-    if ((e as KeyboardEvent).key === 'Escape' && useMapStore.getState().probePinned) releaseProbe();
+    const s = useMapStore.getState();
+    if ((e as KeyboardEvent).key === 'Escape' && s.mode === 'point' && s.probePinned) releaseProbe();
   };
   target.addEventListener('keydown', handler);
   return () => target.removeEventListener('keydown', handler);

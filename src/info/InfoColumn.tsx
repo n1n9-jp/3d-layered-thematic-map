@@ -6,6 +6,8 @@ import type { CloseupCircle } from '../closeup/closeupModel';
 import type { CloseupCut } from '../closeup/cut';
 import { registry } from '../layers';
 import { installProbeKeys, releaseProbe } from '../probe/controller';
+import { installSectionKeys } from '../section/controller';
+import SectionBody from '../section/SectionPanel';
 import { cachedDistrictLookup } from '../probe/district';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
@@ -170,15 +172,37 @@ function PinnedBody({ p }: { p: Point }) {
   );
 }
 
+/** 「地点」（探針とクローズアップ）と「断面」（2点の線に沿った変化）の切り替え。どちらの状態も、切り替えても消さずに保持する。 */
+function ModeBar() {
+  const mode = useMapStore((s) => s.mode);
+  const setMode = useMapStore((s) => s.setMode);
+  return (
+    <div className="ic-modes" data-testid="mode-bar">
+      <span className="ic-modes-label">読み方</span>
+      <div className="ic-seg" role="group" aria-label="読み方">
+        <button type="button" aria-pressed={mode === 'point'} data-testid="mode-point" onClick={() => setMode('point')}>
+          地点
+        </button>
+        <button type="button" aria-pressed={mode === 'section'} data-testid="mode-section" onClick={() => setMode('section')}>
+          断面
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * 「選んだ地点の情報」の列。全体の地図の右隣（右上のパネルの左）に、中身の有無にかかわらず常に同じ幅で置く。
  * 探針がなければ操作の手がかり、カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表。
  */
 export default function InfoColumn({ width }: { width: number }) {
   useEffect(() => installProbeKeys(), []);
+  useEffect(() => installSectionKeys(), []);
+  const uiMode = useMapStore((s) => s.mode);
   const probe = useMapStore((s) => s.probe);
   const pinned = useMapStore((s) => s.probePinned);
-  const mode = columnMode(probe, pinned);
+  // 「断面」のあいだは、探針（固定を含む）は列に出さない（保持はしている）。
+  const mode = uiMode === 'section' ? 'section' : columnMode(probe, pinned);
   return (
     <section
       className="ic"
@@ -187,7 +211,10 @@ export default function InfoColumn({ width }: { width: number }) {
       aria-label="選んだ地点の情報"
       style={{ right: RIGHT_PANEL_W, width, paddingBottom: BOTTOM_RESERVE }}
     >
-      {mode === 'empty' || probe === null ? (
+      <ModeBar />
+      {mode === 'section' ? (
+        <SectionBody />
+      ) : mode === 'empty' || probe === null ? (
         <div className="ic-hint" data-testid="info-hint">
           <p>平面にカーソルを置くと、その地点の各層の値を読めます。</p>
           <p>クリックで固定すると、周辺のクローズアップと、半径内の集計が出ます。</p>

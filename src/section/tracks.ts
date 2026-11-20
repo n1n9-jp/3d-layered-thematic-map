@@ -1,0 +1,44 @@
+import { useMemo } from 'react';
+import { LAYER_IDS } from '../config';
+import type { LayerId } from '../config';
+import { registry } from '../layers';
+import { useMapStore } from '../store';
+import type { LayerStatus } from '../store';
+import type { LayerModule, SectionLine, SectionTrack } from '../types';
+
+export type SectionTracks = Partial<Record<LayerId, SectionTrack[]>>;
+
+/**
+ * 読み込み済みの各レイヤーの、線に沿ったトラック。読み込み前・失敗したレイヤーは含まない。
+ * あるレイヤーの section が例外を出しても、そのレイヤーだけ含めない（onError に渡す）。
+ */
+export function computeSectionTracks(
+  line: SectionLine,
+  data: Partial<Record<string, unknown>>,
+  status: Record<string, LayerStatus>,
+  modules: Record<LayerId, Pick<LayerModule<unknown>, 'section'>> = registry,
+  onError?: (id: LayerId, e: unknown) => void,
+): SectionTracks {
+  const out: SectionTracks = {};
+  for (const id of LAYER_IDS) {
+    if (status[id] !== 'ready') continue;
+    try {
+      out[id] = modules[id].section(data[id], line);
+    } catch (e) {
+      onError?.(id, e);
+    }
+  }
+  return out;
+}
+
+/** 断面の線に対する、各レイヤーのトラック。線がなければ空。データか線が変わったときだけ計算する（全レイヤーで 1 ms 前後）。 */
+export function useSectionTracks(): { line: SectionLine | null; tracks: SectionTracks } {
+  const line = useMapStore((s) => s.section);
+  const data = useMapStore((s) => s.data);
+  const status = useMapStore((s) => s.status);
+  const tracks = useMemo(
+    () => (line ? computeSectionTracks(line, data, status, registry, (id, e) => console.error(`[section] ${id}.section`, e)) : {}),
+    [line, data, status],
+  );
+  return { line, tracks };
+}

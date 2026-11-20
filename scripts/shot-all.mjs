@@ -14,6 +14,10 @@
 //       視点がその角度（方位は360度の違いを無視）になり、描画が追いつくまで待つ（視点のボタン用）
 //     { type: "drag-mark", dx, dy }        固定した探針の、真ん中の段の輪をつかみ、(dx, dy) px だけドラッグする（地点が動き終わるまで待つ）
 //     { type: "click-closeup", dx, dy }    クローズアップの積層の領域の中心から (dx, dy) px の位置をクリックする（地点が動くまで待つ）
+//     { type: "click-ground", x, y }       最上段の平面の、ローカル座標 (x, y)（m）の位置をクリックする（「断面」で線を引くときの始点・終点）
+//     { type: "hover-ground", x, y }       同じ位置にカーソルを置く（始点を置いたあとの、線の下書きを出す）
+//     { type: "hover-chart", fraction }    「断面」の右の列の、最初のグラフの横幅の fraction（0〜1）の位置にカーソルを置く（線に沿った距離が store に入るまで待つ）
+//     { type: "hover-map-line", t }        全体の地図の、断面の線の t（0〜1）の位置（真ん中の段の高さ）にカーソルを置く（線に沿った距離が store に入るまで待つ）
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -165,6 +169,13 @@ async function waitProbeMoved(page, before) {
   await sleep(500);
 }
 
+/** 線に沿った距離（sectionHover）が store に入り、描画が追いつく（2フレーム）まで待つ。 */
+async function waitSectionHover(page) {
+  await page.waitForFunction(() => window.__store.getState().sectionHover !== null, undefined, { timeout: READY_TIMEOUT_MS, polling: 100 });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await sleep(800);
+}
+
 async function runActions(page, actions, viewport) {
   for (const a of actions ?? []) {
     if (a.type === 'hover') {
@@ -216,6 +227,42 @@ async function runActions(page, actions, viewport) {
       });
       await page.mouse.click(box.x + a.dx, box.y + a.dy);
       await waitProbeMoved(page, before);
+    } else if (a.type === 'click-ground' || a.type === 'hover-ground') {
+      const info = await page.evaluate(() => {
+        const r = document.querySelector('canvas').getBoundingClientRect();
+        const s = window.__store.getState();
+        return { left: r.left, top: r.top, width: r.width, height: r.height, vs: s.viewState, spacing: s.spacing };
+      });
+      const { OrbitView } = await import(join(ROOT, 'node_modules/@deck.gl/core/dist/index.js'));
+      const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ width: info.width, height: info.height, viewState: info.vs });
+      const [px, py] = vp.project([a.x, a.y, 4 * info.spacing]);
+      await page.mouse.move(info.left + px - 6, info.top + py);
+      await page.mouse.move(info.left + px, info.top + py);
+      if (a.type === 'click-ground') await page.mouse.click(info.left + px, info.top + py);
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await sleep(1200);
+    } else if (a.type === 'hover-chart') {
+      const box = await page.evaluate(() => {
+        const r = document.querySelector('[data-testid=section-plot]').getBoundingClientRect();
+        return { x: r.left, y: r.top + r.height / 2, w: r.width };
+      });
+      const x = box.x + box.w * a.fraction;
+      await page.mouse.move(x - 5, box.y);
+      await page.mouse.move(x, box.y);
+      await waitSectionHover(page);
+    } else if (a.type === 'hover-map-line') {
+      const info = await page.evaluate(() => {
+        const r = document.querySelector('canvas').getBoundingClientRect();
+        const s = window.__store.getState();
+        return { left: r.left, top: r.top, width: r.width, height: r.height, vs: s.viewState, line: s.section, spacing: s.spacing };
+      });
+      const { OrbitView } = await import(join(ROOT, 'node_modules/@deck.gl/core/dist/index.js'));
+      const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ width: info.width, height: info.height, viewState: info.vs });
+      const { ax, ay, bx, by } = info.line;
+      const [px, py] = vp.project([ax + (bx - ax) * a.t, ay + (by - ay) * a.t, 2 * info.spacing]);
+      await page.mouse.move(info.left + px - 6, info.top + py);
+      await page.mouse.move(info.left + px, info.top + py);
+      await waitSectionHover(page);
     } else {
       throw new Error(`未知の操作です: ${a.type}`);
     }

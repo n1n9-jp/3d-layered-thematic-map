@@ -43,6 +43,50 @@ describe('initialStateFromQuery', () => {
   });
 });
 
+describe('section クエリ', () => {
+  it('線があれば「断面」で開く。なければ「地点」', () => {
+    const s = initialStateFromQuery('?section=-15000,-2000,14000,-2000');
+    expect(s.mode).toBe('section');
+    expect(s.section).toEqual({ ax: -15000, ay: -2000, bx: 14000, by: -2000 });
+    const d = initialStateFromQuery('');
+    expect(d.mode).toBe('point');
+    expect(d.section).toBeNull();
+  });
+  it('不正な値は無視して「地点」', () => {
+    for (const q of ['?section=1,2,3', '?section=a,b,c,d', '?section=0,0,10,10']) {
+      const s = initialStateFromQuery(q);
+      expect(s.mode).toBe('point');
+      expect(s.section).toBeNull();
+    }
+  });
+  it('probe と併せて指定しても、両方を保持する', () => {
+    const s = initialStateFromQuery('?probe=100,200&section=0,0,5000,0');
+    expect(s.mode).toBe('section');
+    expect(s.probePinned).toBe(true);
+    expect(s.probe).toEqual({ x: 100, y: 200 });
+    expect(s.section).not.toBeNull();
+  });
+});
+
+describe('モードの切り替え', () => {
+  it('切り替えても、線と固定した探針は消えない。カーソルに付いてくる表示は消える', () => {
+    const st = useMapStore;
+    st.setState({ mode: 'point', section: { ax: 0, ay: 0, bx: 1000, by: 0 }, probe: { x: 1, y: 2 }, probePinned: true, sectionHover: 500, sectionCursor: { x: 3, y: 4 } });
+    st.getState().setMode('section');
+    expect(st.getState()).toMatchObject({ mode: 'section', probePinned: true, probe: { x: 1, y: 2 }, sectionHover: null, sectionCursor: null });
+    expect(st.getState().section).not.toBeNull();
+    st.getState().setMode('point');
+    expect(st.getState().section).toEqual({ ax: 0, ay: 0, bx: 1000, by: 0 });
+    expect(st.getState().probe).toEqual({ x: 1, y: 2 });
+  });
+  it('固定していない探針は、「断面」へ切り替えるときに消す', () => {
+    const st = useMapStore;
+    st.setState({ mode: 'point', probe: { x: 1, y: 2 }, probePinned: false });
+    st.getState().setMode('section');
+    expect(st.getState().probe).toBeNull();
+  });
+});
+
 describe('視点のクエリは上下限に収める', () => {
   it('rx と zoom は視点の上下限に収まる', () => {
     expect(initialStateFromQuery('?rx=200&zoom=50').viewState).toMatchObject({

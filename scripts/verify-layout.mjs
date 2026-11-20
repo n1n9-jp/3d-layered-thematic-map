@@ -5,6 +5,7 @@
 //   1. 固定前・カーソルを置いた状態・固定後・解除後で、viewState の zoom と target が一致する（URL で固定して開いた場合も同じ）
 //   2. 右の列の中身が状態に応じて変わる（手がかり／区名と「この地点」／クローズアップと3列の表）
 //   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「解除」ボタンでの解除が動く
+//   4. 「断面」（URL の section= で開く）でも、全体の地図の大きさと位置が変わらない。線を消す・「地点」へ戻す・「断面」へ戻すでも同じ
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。描画が遅い環境（1フレーム約2秒）を見込んで、待ちは長めにとる。
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -172,6 +173,34 @@ async function viewConsistency(browser, base, size) {
     check(o.errors.length === 0, `${q}：ブラウザのエラーなし`);
     await o.ctx.close();
   }
+
+  // 断面：線があるときも、モードを切り替えても、線を消しても、同じ視点
+  const sq = '?section=-15000,-2000,14000,-2000';
+  const o = await open(browser, base, size, sq);
+  const st0 = await getState(o.page);
+  check(sameView(v0, st0.view), `${sq} で開いた視点が、断面なしと一致。${fmt(st0.view)}`);
+  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'section', `${sq}：右の列は断面の中身`);
+  check((await o.page.locator('[data-testid=section-chart]').count()) === 5, `${sq}：右の列に5つのグラフが並ぶ`);
+  const rect = await o.page.evaluate(() => {
+    const b = document.querySelector('[data-testid=info-column]').getBoundingClientRect();
+    return { w: b.width, top: b.top, bottom: b.bottom, vh: window.innerHeight };
+  });
+  check(rect.top === 0 && rect.bottom === rect.vh, '断面：右の列は画面の高さいっぱい');
+  await o.page.getByTestId('mode-point').click();
+  await settle(o.page, 1000);
+  check(sameView(v0, (await getState(o.page)).view), '「地点」へ切り替えても、視点は同じ');
+  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は手がかり（探針なし）');
+  await o.page.getByTestId('mode-section').click();
+  await settle(o.page, 1000);
+  check(sameView(v0, (await getState(o.page)).view), '「断面」へ戻しても、視点は同じ');
+  await o.page.keyboard.press('Escape');
+  await waitFor(o.page, () => window.__store.getState().section === null);
+  await settle(o.page, 1000);
+  check(sameView(v0, (await getState(o.page)).view), 'Esc で線を消しても、視点は同じ');
+  check(o.errors.length === 0, `断面：ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
+  const widths = [rect.w];
+  check(widths[0] === (await o.page.evaluate(() => document.querySelector('[data-testid=info-column]').getBoundingClientRect().width)), '右の列の幅は、モードによらず一定');
+  await o.ctx.close();
 }
 
 async function interactions(browser, base, size) {
