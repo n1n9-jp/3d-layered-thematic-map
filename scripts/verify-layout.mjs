@@ -125,13 +125,13 @@ async function viewConsistency(browser, base, size) {
   check((await page.locator('[data-testid=info-table] thead th').count()) === 2, 'カーソルを置いた：表は2列（レイヤー・この地点）');
   const c1 = await page.textContent('[data-testid=info-column] .ic-coords');
 
-  await page.mouse.move(hx + 60, hy + 40);
-  await waitFor(page, (p) => window.__store.getState().probe.x !== p.x, s1.probe);
+  await page.mouse.move(hx + 30, hy + 20);
+  await waitFor(page, (p) => { const q = window.__store.getState().probe; return q !== null && q.x !== p.x; }, s1.probe);
   await settle(page, 500);
   const c2 = await page.textContent('[data-testid=info-column] .ic-coords');
   check(c1 !== c2, `カーソルを動かすと値が追従する（${c1} → ${c2}）`);
 
-  await page.mouse.click(hx + 60, hy + 40);
+  await page.mouse.click(hx + 30, hy + 20);
   await waitFor(page, () => window.__store.getState().probePinned);
   await settle(page, 3000);
   const s2 = await getState(page);
@@ -185,7 +185,7 @@ async function interactions(browser, base, size) {
   await page.mouse.up();
   await waitFor(page, (b) => {
     const p = window.__store.getState().probe;
-    return p.x !== b.x || p.y !== b.y;
+    return p !== null && (p.x !== b.x || p.y !== b.y);
   }, s0.probe);
   await settle(page, 2500);
   const s1 = await getState(page);
@@ -203,7 +203,7 @@ async function interactions(browser, base, size) {
   await page.mouse.click(box.x + 80, box.y);
   await waitFor(page, (b) => {
     const p = window.__store.getState().probe;
-    return p.x !== b.x || p.y !== b.y;
+    return p !== null && (p.x !== b.x || p.y !== b.y);
   }, s1.probe);
   await settle(page, 2500);
   const s2 = await getState(page);
