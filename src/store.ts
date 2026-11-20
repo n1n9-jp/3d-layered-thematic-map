@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { EXTENT, LAYER_IDS, SPACING } from './config';
+import { DEFAULT_ANGLES, EXTENT, LAYER_IDS, SPACING, VIEW_LIMITS } from './config';
 import type { LayerId } from './config';
 
 export type LayerStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -44,9 +44,9 @@ declare global {
 }
 
 const DEFAULT_VIEW: ViewState = {
-  target: [(EXTENT.minX + EXTENT.maxX) / 2, (EXTENT.minY + EXTENT.maxY) / 2, 10000], // z は既定の積層（5段・間隔5km）の中央
-  rotationX: 45,
-  rotationOrbit: 30,
+  target: [(EXTENT.minX + EXTENT.maxX) / 2, (EXTENT.minY + EXTENT.maxY) / 2, 2 * SPACING.default], // z は既定の積層（5段）の中央
+  rotationX: DEFAULT_ANGLES.rotationX,
+  rotationOrbit: DEFAULT_ANGLES.rotationOrbit,
   // 正射影では zoom 0 で 1 ユニット = 1px。36km が 480px 前後に収まる値。
   zoom: Math.log2(480 / (EXTENT.maxX - EXTENT.minX)),
 };
@@ -63,6 +63,24 @@ function num(v: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+const clampSpacing = (v: number) => Math.min(SPACING.max, Math.max(SPACING.min, v));
+const clampRange = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * URL クエリの `rx`、`ro`、`zoom`。視点の上下限に収め、指定がない・数値でないものは null。
+ * （`ro` に上下限はなく、有限の値をそのまま返す。）
+ */
+export function viewQuery(search: string): { rx: number | null; ro: number | null; zoom: number | null } {
+  const q = new URLSearchParams(search);
+  const rx = num(q.get('rx'));
+  const zoom = num(q.get('zoom'));
+  return {
+    rx: rx === null ? null : clampRange(rx, VIEW_LIMITS.minRotationX, VIEW_LIMITS.maxRotationX),
+    ro: num(q.get('ro')),
+    zoom: zoom === null ? null : clampRange(zoom, VIEW_LIMITS.minZoom, VIEW_LIMITS.maxZoom),
+  };
+}
+
 function ids(v: string | null): LayerId[] {
   return (v ?? '')
     .split(',')
@@ -73,13 +91,13 @@ function ids(v: string | null): LayerId[] {
 /**
  * URL クエリから初期状態を作る。
  * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
- * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`。不正な値は無視して既定値を使う。
+ * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
 
   const spacingQ = num(q.get('spacing'));
-  const spacing = spacingQ === null ? SPACING.default : Math.min(SPACING.max, Math.max(SPACING.min, spacingQ));
+  const spacing = spacingQ === null ? SPACING.default : clampSpacing(spacingQ);
 
   // order に書かれたものを先に、書かれなかったレイヤーは既定の順で後ろへ。
   const given = [...new Set(ids(q.get('order')))];
@@ -99,9 +117,7 @@ export function initialStateFromQuery(search: string): InitialState {
     if (x !== null && y !== null) probe = { x, y };
   }
 
-  const rx = num(q.get('rx'));
-  const ro = num(q.get('ro'));
-  const zoom = num(q.get('zoom'));
+  const { rx, ro, zoom } = viewQuery(search);
   const viewState: ViewState = {
     ...DEFAULT_VIEW,
     ...(rx !== null && { rotationX: rx }),
@@ -119,7 +135,9 @@ export const useMapStore = create<MapState>()((set) => ({
   data: {},
   status: Object.fromEntries(DATA_KEYS.map((k) => [k, 'idle'])) as Record<DataKey, LayerStatus>,
 
-  setSpacing: (v) => set({ spacing: Math.min(SPACING.max, Math.max(SPACING.min, v)) }),
+  setSpacing: (v) => {
+    if (Number.isFinite(v)) set({ spacing: clampSpacing(v) });
+  },
   moveLayer: (id, toIndex) =>
     set((s) => {
       const rest = s.order.filter((x) => x !== id);

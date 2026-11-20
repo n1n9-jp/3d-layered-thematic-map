@@ -8,11 +8,13 @@ import type { LayerId } from '../config';
 import { registry } from '../layers';
 import { onClick, onHover, probeLayers } from '../probe/controller';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
-import { useMapStore } from '../store';
+import { useMapStore, viewQuery } from '../store';
 import type { MapState, ViewState } from '../store';
 import type { BoundaryData } from '../types';
+import { boundaryLayer, boundaryPaths } from './boundaryLines';
 import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
 import type { Size } from './camera';
+import { RIGHT_PANEL_W } from './layout';
 import { getSliderActive, subscribeSliderActive } from './sliderActivity';
 import { useDisplayedZ } from './useDisplayedZ';
 import type { ZMap } from './useDisplayedZ';
@@ -23,8 +25,9 @@ type P3 = [number, number, number];
 const FRAME = [{ path: [[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 0], [minX, minY, 0]] as P3[] }];
 const PLANE = [[[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 0]] as P3[]];
 
-const FRAME_COLOR: [number, number, number, number] = [150, 165, 190, 170];
-const FILL_COLOR: [number, number, number, number] = [150, 175, 220, 16];
+// 区境界線が主役なので、外枠と塗りはごく控えめにする。
+const FRAME_COLOR: [number, number, number, number] = [130, 145, 170, 90];
+const FILL_COLOR: [number, number, number, number] = [150, 175, 220, 9];
 const LABEL_COLOR: [number, number, number, number] = [225, 230, 240, 255];
 const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQuanYi Zen Hei", sans-serif';
 
@@ -117,21 +120,13 @@ export default function StackView() {
   // 初期視点。URL クエリ（rx, ro, zoom）があればそちらを優先する。
   useLayoutEffect(() => {
     if (ready || !size) return;
-    const q = new URLSearchParams(location.search);
-    const num = (k: string) => {
-      const v = q.get(k);
-      const n = v === null || v.trim() === '' ? NaN : Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-    const rx = num('rx');
-    const ro = num('ro');
-    const zoom = num('zoom');
-    const rotationX = clamp(rx ?? DEFAULT_ANGLES.rotationX, LIMITS.minRotationX, LIMITS.maxRotationX);
+    const { rx, ro, zoom } = viewQuery(location.search);
+    const rotationX = rx ?? DEFAULT_ANGLES.rotationX;
     const rotationOrbit = ro ?? DEFAULT_ANGLES.rotationOrbit;
     const set = useMapStore.getState().setViewState;
 
     const view3D = { rotationX, rotationOrbit, ...fitView({ rotationX, rotationOrbit, top: topOf(targets), size }) };
-    if (zoom !== null) view3D.zoom = clamp(zoom, LIMITS.minZoom, LIMITS.maxZoom);
+    if (zoom !== null) view3D.zoom = zoom;
     autoFit.current = zoom === null;
 
     if (solo !== null) {
@@ -228,36 +223,46 @@ export default function StackView() {
     return out;
   }, [targets, solo, data, status]);
 
+  const paths = useMemo(() => (status.boundary === 'ready' ? boundaryPaths(data.boundary as BoundaryData) : null), [status.boundary, data.boundary]);
+
   const stackLayers = [];
+  let prevZ: number | null = null;
   const visibleIds = LAYER_IDS.filter((id) => shown[id] !== null)
     .map((id) => ({ id, z: shown[id] as number, i: order.indexOf(id) }))
     .sort((a, b) => a.z - b.z || a.i - b.i);
-  for (const { id, z } of visibleIds) {
+  for (const [k, { id, z }] of visibleIds.entries()) {
     const modelMatrix = asModelMatrix(translationMatrix(z));
-    stackLayers.push(
-      new SolidPolygonLayer({
-        id: `plane-${id}`,
-        data: PLANE,
-        coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
-        modelMatrix,
-        getPolygon: (d: P3[]) => d,
-        getFillColor: FILL_COLOR,
-        pickable: false,
-      }),
-      new PathLayer({
-        id: `frame-${id}`,
-        data: FRAME,
-        coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
-        modelMatrix,
-        getPath: (d: (typeof FRAME)[number]) => d.path,
-        getColor: FRAME_COLOR,
-        getWidth: 1.5,
-        widthUnits: 'pixels',
-        billboard: true,
-        pickable: false,
-      }),
-      ...rendered[id].map((l) => withHeight(l, targets[id] as number, z)),
-    );
+    // 間隔 0 などで同じ高さに重なる段は、塗りと外枠を1枚ぶんだけ描く（重ねて濃くしない）。
+    const first = prevZ === null || Math.abs(z - prevZ) > 1;
+    prevZ = z;
+    if (first)
+      stackLayers.push(
+        new SolidPolygonLayer({
+          id: `plane-${id}`,
+          data: PLANE,
+          coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+          modelMatrix,
+          getPolygon: (d: P3[]) => d,
+          getFillColor: FILL_COLOR,
+          pickable: false,
+        }),
+        new PathLayer({
+          id: `frame-${id}`,
+          data: FRAME,
+          coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+          modelMatrix,
+          getPath: (d: (typeof FRAME)[number]) => d.path,
+          getColor: FRAME_COLOR,
+          getWidth: 1,
+          widthUnits: 'pixels',
+          billboard: true,
+          pickable: false,
+        }),
+      );
+    stackLayers.push(...rendered[id].map((l) => withHeight(l, targets[id] as number, z)));
+    // 同じ高さに重なる段の区境界線は、いちばん上の段にだけ描く（重ねて濃くしない）。
+    const next = visibleIds[k + 1];
+    if (paths && !(next && Math.abs(next.z - z) <= 1)) stackLayers.push(boundaryLayer(paths, id, z));
   }
 
   const labels = useMemo(() => LAYER_IDS.map((id) => ({ id, text: registry[id].label })), []);
@@ -292,7 +297,8 @@ export default function StackView() {
   });
 
   return (
-    <div ref={box} style={{ position: 'absolute', inset: 0, background: '#000' }}>
+    // 右上のパネルの左までを描画領域にする（積層はこの領域の中心に置く）。
+    <div ref={box} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: RIGHT_PANEL_W, background: '#000' }}>
       {ready && (
         <DeckGL
           views={VIEW}

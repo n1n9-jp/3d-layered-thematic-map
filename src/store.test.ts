@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { initialStateFromQuery, useMapStore } from './store';
-import { SPACING } from './config';
+import { initialStateFromQuery, useMapStore, viewQuery } from './store';
+import { DEFAULT_ANGLES, SPACING, VIEW_LIMITS } from './config';
 
 describe('initialStateFromQuery', () => {
   it('クエリなしは既定値', () => {
@@ -11,7 +11,8 @@ describe('initialStateFromQuery', () => {
     expect(s.solo).toBeNull();
     expect(s.probe).toBeNull();
     expect(s.probePinned).toBe(false);
-    expect(s.viewState.rotationX).toBe(45);
+    expect(s.viewState.rotationX).toBe(DEFAULT_ANGLES.rotationX);
+    expect(s.spacing).toBe(12000);
   });
 
   it('各クエリで上書きできる', () => {
@@ -33,7 +34,7 @@ describe('initialStateFromQuery', () => {
     expect(new Set(s.order).size).toBe(5);
     expect(s.solo).toBeNull();
     expect(s.probe).toBeNull();
-    expect(s.viewState.rotationX).toBe(45);
+    expect(s.viewState.rotationX).toBe(DEFAULT_ANGLES.rotationX);
   });
 
   it('spacing は範囲に収める', () => {
@@ -42,7 +43,41 @@ describe('initialStateFromQuery', () => {
   });
 });
 
+describe('視点のクエリは上下限に収める', () => {
+  it('rx と zoom は視点の上下限に収まる', () => {
+    expect(initialStateFromQuery('?rx=200&zoom=50').viewState).toMatchObject({
+      rotationX: VIEW_LIMITS.maxRotationX,
+      zoom: VIEW_LIMITS.maxZoom,
+    });
+    expect(initialStateFromQuery('?rx=-30&zoom=-99').viewState).toMatchObject({
+      rotationX: VIEW_LIMITS.minRotationX,
+      zoom: VIEW_LIMITS.minZoom,
+    });
+  });
+  it('範囲内の値はそのまま、ro は有限の値をそのまま', () => {
+    expect(initialStateFromQuery('?rx=45&ro=120&zoom=-5').viewState).toMatchObject({ rotationX: 45, rotationOrbit: 120, zoom: -5 });
+    expect(viewQuery('?rx=abc&ro=Infinity&zoom=')).toEqual({ rx: null, ro: null, zoom: null });
+  });
+  it('spacing の上限は 20km', () => {
+    expect(SPACING.max).toBe(20000);
+    expect(initialStateFromQuery('?spacing=20000').spacing).toBe(20000);
+    expect(initialStateFromQuery('?spacing=30000').spacing).toBe(20000);
+  });
+});
+
 describe('store actions', () => {
+  it('setSpacing は有限でない値を無視し、範囲に収める', () => {
+    const { setSpacing } = useMapStore.getState();
+    setSpacing(8000);
+    setSpacing(NaN);
+    setSpacing(Infinity);
+    setSpacing(-Infinity);
+    expect(useMapStore.getState().spacing).toBe(8000);
+    setSpacing(99999);
+    expect(useMapStore.getState().spacing).toBe(SPACING.max);
+    setSpacing(-1);
+    expect(useMapStore.getState().spacing).toBe(SPACING.min);
+  });
   it('moveLayer は指定位置へ動かす', () => {
     const { moveLayer } = useMapStore.getState();
     moveLayer('facilities', 0);
