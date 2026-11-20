@@ -66,3 +66,5 @@
 ## 出典
 
 各データの出典と利用条件は、データを追加するときにこの節へ追記します。
+
+- 区の境界（`boundary.geojson`）：出典：国土交通省 国土数値情報（行政区域データ 2026年（令和8年）1月1日時点）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-2026.html）を加工して作成
