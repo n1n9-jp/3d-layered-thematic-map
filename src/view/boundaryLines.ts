@@ -2,6 +2,7 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { PathLayer } from '@deck.gl/layers';
 import { asModelMatrix, translationMatrix } from '../stack';
 import { simplifyPath } from '../layers/simplify';
+import { clipPolylineToCircle } from '../lib/circleClip';
 import type { BoundaryData, Position } from '../types';
 
 /** 区境界の1本の線（リング1つぶん）。 */
@@ -29,6 +30,24 @@ export function boundaryPaths(boundary: BoundaryData): BoundaryPath[] {
       }
     }
   }
+  return out;
+}
+
+const pathsCache = new WeakMap<BoundaryData, BoundaryPath[]>();
+/** boundaryPaths の結果を、境界データごとに1回だけ作って使い回す（全体の地図とクローズアップで共有する）。 */
+export function cachedBoundaryPaths(boundary: BoundaryData): BoundaryPath[] {
+  let paths = pathsCache.get(boundary);
+  if (!paths) {
+    paths = boundaryPaths(boundary);
+    pathsCache.set(boundary, paths);
+  }
+  return paths;
+}
+
+/** 区境界線を、中心 (cx, cy)・半径 r（m）の円で切り、円の中にある部分だけを返す。クローズアップ用。 */
+export function clipBoundaryPaths(paths: readonly BoundaryPath[], cx: number, cy: number, r: number): BoundaryPath[] {
+  const out: BoundaryPath[] = [];
+  for (const p of paths) for (const piece of clipPolylineToCircle(p, cx, cy, r)) out.push(piece);
   return out;
 }
 

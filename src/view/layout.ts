@@ -38,6 +38,24 @@ export const GUTTER = 24;
 /** 左下の探針パネル（固定表示時の最大の高さを見込む）が占める幅と高さ（px）。 */
 export const PROBE_PANEL = { width: 330, height: 360 } as const;
 
+/**
+ * クローズアップの領域（右上のパネルのすぐ左）の幅の範囲（px）と、パネルを除いた画面の幅に対する割合。
+ * 領域の高さは画面いっぱい（下端は出典の1行を避ける）。
+ */
+export const CLOSEUP = { minWidth: 340, maxWidth: 560, share: 0.42 } as const;
+
+/** クローズアップの領域の幅（px）。windowWidth は画面の幅。 */
+export function closeupWidth(windowWidth: number): number {
+  const available = Math.max(0, windowWidth - RIGHT_PANEL_W);
+  return Math.min(CLOSEUP.maxWidth, Math.max(CLOSEUP.minWidth, Math.round(available * CLOSEUP.share)));
+}
+
+/** クローズアップの積層の外側の余白（px）。右は、レイヤー名のぶん。避ける長方形はない。 */
+export const CLOSEUP_LAYOUT: Layout = {
+  padding: { left: 12, right: LABEL_ROOM, top: 12, bottom: 12 },
+  avoid: [],
+};
+
 export interface Layout {
   /** 積層の中心を置く領域を決める余白。 */
   padding: Padding;

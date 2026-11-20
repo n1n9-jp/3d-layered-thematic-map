@@ -20,3 +20,14 @@ export function createDistrictLookup(boundary: BoundaryData): (x: number, y: num
     return hit === undefined ? null : names[hit];
   };
 }
+
+const lookups = new WeakMap<BoundaryData, (x: number, y: number) => string | null>();
+/** createDistrictLookup の結果を、境界データごとに1回だけ作って使い回す。 */
+export function cachedDistrictLookup(boundary: BoundaryData): (x: number, y: number) => string | null {
+  let lookup = lookups.get(boundary);
+  if (!lookup) {
+    lookup = createDistrictLookup(boundary);
+    lookups.set(boundary, lookup);
+  }
+  return lookup;
+}

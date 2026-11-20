@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import DeckGL from '@deck.gl/react';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import type { Layer } from '@deck.gl/core';
-import { PathLayer, SolidPolygonLayer, TextLayer } from '@deck.gl/layers';
+import { PathLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import { EXTENT, LAYER_IDS } from '../config';
 import type { LayerId } from '../config';
 import { registry } from '../layers';
@@ -11,9 +11,13 @@ import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore, viewQuery } from '../store';
 import type { MapState, ViewState } from '../store';
 import type { BoundaryData } from '../types';
-import { boundaryLayer, boundaryPaths } from './boundaryLines';
-import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
+import { boundaryLayer, cachedBoundaryPaths } from './boundaryLines';
+import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, nearestAngle } from './camera';
 import type { Size } from './camera';
+import { circleLayer } from '../closeup/closeupLayers';
+import { stackLabelLayers } from './labelLayers';
+import { topOf, withHeight } from './layerHeights';
+import { useElementSize } from './useElementSize';
 import { RIGHT_PANEL_W } from './layout';
 import { resolveAngles, subscribeViewCommand } from './viewPresets';
 import type { Angles } from './viewPresets';
@@ -30,16 +34,6 @@ const PLANE = [[[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 
 // 区境界線が主役なので、外枠と塗りはごく控えめにする。
 const FRAME_COLOR: [number, number, number, number] = [130, 145, 170, 90];
 const FILL_COLOR: [number, number, number, number] = [150, 175, 220, 9];
-const LABEL_COLOR: [number, number, number, number] = [225, 230, 240, 255];
-type LabelDatum = { id: LayerId; text: string };
-type HaloDatum = LabelDatum & { dx: number; dy: number };
-const LABEL_HALO_COLOR: [number, number, number, number] = [0, 0, 0, 255];
-/** 文字の縁取りに使う、黒い文字を重ねる方向（px）。 */
-const HALO_OFFSETS: readonly [number, number][] = [
-  [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1],
-];
-const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQuanYi Zen Hei", sans-serif';
-
 /** 視点を切り替えるアニメーションの長さ（ms）。 */
 const TRANSITION_MS = 700;
 /**
@@ -48,8 +42,6 @@ const TRANSITION_MS = 700;
  * 通常は、終了の知らせ（onViewStateChange）か利用者の操作で、これより早く終わる。
  */
 const TRANSITION_FAILSAFE_MS = TRANSITION_MS + 4000;
-/** レイヤー名どうしの縦の最小間隔（px）。 */
-const LABEL_GAP = 20;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 /** DeckGL 全体の描画設定。平面はすべて水平でカメラは常に上側なので、下から上へ描き、深度テストを切る。 */
@@ -66,47 +58,23 @@ function sameView(a: ViewState, b: ViewState) {
   );
 }
 
-function topOf(zs: ZMap): number {
-  let top = 0;
-  for (const id of LAYER_IDS) top = Math.max(top, zs[id] ?? 0);
-  return top;
-}
-
-/** layer の modelMatrix が `from` の高さの平行移動なら、`to` の高さに差し替えたレイヤーを返す。 */
-function withHeight(layer: Layer, from: number, to: number): Layer {
-  if (from === to) return layer;
-  const m = layer.props.modelMatrix as unknown as ArrayLike<number> | null | undefined;
-  const expect = translationMatrix(from);
-  if (!m || m.length !== 16 || !expect.every((v, i) => v === m[i])) return layer;
-  return layer.clone({ modelMatrix: asModelMatrix(translationMatrix(to)) });
-}
-
 interface Saved {
   view: ViewState;
   auto: boolean;
 }
 
-export default function StackView() {
+interface Props {
+  /** 描画領域の右端から画面の右端までの幅（px）。右上のパネルと、あればクローズアップの幅。 */
+  rightInset?: number;
+}
+
+export default function StackView({ rightInset = RIGHT_PANEL_W }: Props) {
   const state = useMapStore();
-  const { order, visible, solo, spacing, data, status, viewState } = state;
+  const { order, visible, solo, spacing, data, status, viewState, closeupRadius } = state;
+  const closeup = state.probePinned && state.probe !== null ? { ...state.probe, r: closeupRadius } : null;
 
   /* ---------- 画面の大きさ ---------- */
-  const box = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState<Size | null>(null);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
-      // 幅か高さが 1px に満たない間は「まだ大きさがない」として扱う（視点の計算も投影もしない）。
-      const next = hasSize(r) ? { width: r.width, height: r.height } : null;
-      setSize((s) => (s === next || (s && next && s.width === next.width && s.height === next.height) ? s : next));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const [box, size] = useElementSize<HTMLDivElement>();
 
   /* ---------- 各レイヤーの高さ（目標値と表示用） ---------- */
   const targets = useMemo(
@@ -270,7 +238,7 @@ export default function StackView() {
     return out;
   }, [targets, solo, data, status]);
 
-  const paths = useMemo(() => (status.boundary === 'ready' ? boundaryPaths(data.boundary as BoundaryData) : null), [status.boundary, data.boundary]);
+  const paths = useMemo(() => (status.boundary === 'ready' ? cachedBoundaryPaths(data.boundary as BoundaryData) : null), [status.boundary, data.boundary]);
 
   const stackLayers = [];
   let prevZ: number | null = null;
@@ -309,63 +277,17 @@ export default function StackView() {
     stackLayers.push(...rendered[id].map((l) => withHeight(l, targets[id] as number, z)));
     // 同じ高さに重なる段の区境界線は、いちばん上の段にだけ描く（重ねて濃くしない）。
     const next = visibleIds[k + 1];
-    if (paths && !(next && Math.abs(next.z - z) <= 1)) stackLayers.push(boundaryLayer(paths, id, z));
+    const topOfGroup = !(next && Math.abs(next.z - z) <= 1);
+    if (paths && topOfGroup) stackLayers.push(boundaryLayer(paths, id, z));
+    // クローズアップで切り出している範囲を、各段に円で示す（同じ高さに重なる段には1本だけ）。
+    if (closeup && topOfGroup) stackLayers.push(circleLayer(`closeup-range-${id}`, closeup, z));
   }
 
-  const labels = useMemo(() => LAYER_IDS.map((id) => ({ id, text: registry[id].label })), []);
-  const anchors = labelAnchors(viewState.rotationX, viewState.rotationOrbit, visibleIds.map((v) => v.z));
-  const anchorById = new Map(visibleIds.map((v, i) => [v.id, anchors[i]]));
-  // 平面が近づいて名前が重なるときは、画面上で縦に押し広げて読めるようにする。
-  const screenY = size ? anchors.map((a) => projectPoint(viewState, size, a)[1]) : anchors.map(() => 0);
-  const spread = spreadLabels(screenY, LABEL_GAP);
-  const offsetById = new Map(visibleIds.map((v, i) => [v.id, spread[i] - screenY[i]]));
-  // 日本語の画数の多い字（「標」など）は、SDF 方式だと14px の大きさでつぶれて読めない。
-  // そのため SDF は使わず、通常の文字テクスチャで描く。縁取りの代わりに、黒い同じ文字を8方向に1px ずらして
-  // 後ろに重ねる（明るい標高の面や区境界線の上でも読めるようにする）。
-  const labelData = labels.filter((l) => anchorById.has(l.id));
-  const labelProps = {
-    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
-    getText: (d: LabelDatum) => d.text,
-    getSize: 14,
-    sizeUnits: 'pixels',
-    getTextAnchor: 'start',
-    getAlignmentBaseline: 'center',
-    fontFamily: LABEL_FONT,
-    characterSet: 'auto',
-    fontSettings: { sdf: false, fontSize: 64 },
-    pickable: false,
-  } as const;
-  const labelUpdateTriggers = {
-    getPosition: [visibleIds.map((v) => `${v.id}:${v.z.toFixed(2)}`).join(), viewState.rotationX, viewState.rotationOrbit],
-    getPixelOffset: [visibleIds.map((v) => `${v.id}:${(offsetById.get(v.id) ?? 0).toFixed(1)}`).join()],
-  };
-  const labelBaseOffset = (d: LabelDatum): [number, number] => [10, offsetById.get(d.id) ?? 0];
-  const haloData: HaloDatum[] = HALO_OFFSETS.flatMap(([dx, dy]) => labelData.map((l) => ({ ...l, dx, dy })));
-  const labelHaloLayer = new TextLayer<HaloDatum>({
-    ...labelProps,
-    id: 'stack-labels-halo',
-    data: haloData,
-    getPosition: (d) => anchorById.get(d.id) as P3,
-    getColor: LABEL_HALO_COLOR,
-    getPixelOffset: (d) => {
-      const [x, y] = labelBaseOffset(d);
-      return [x + d.dx, y + d.dy];
-    },
-    updateTriggers: labelUpdateTriggers,
-  });
-  const labelLayer = new TextLayer<LabelDatum>({
-    ...labelProps,
-    id: 'stack-labels',
-    data: labelData,
-    getPosition: (d) => anchorById.get(d.id) as P3,
-    getColor: LABEL_COLOR,
-    getPixelOffset: labelBaseOffset,
-    updateTriggers: labelUpdateTriggers,
-  });
+  const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
 
   return (
     // 右上のパネルの左までを描画領域にする（積層はこの領域の中心に置く）。
-    <div ref={box} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: RIGHT_PANEL_W, background: '#000' }}>
+    <div ref={box} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: rightInset, background: '#000' }}>
       {ready && (
         <DeckGL
           views={VIEW}
@@ -373,7 +295,7 @@ export default function StackView() {
           onViewStateChange={onViewStateChange as never}
           controller={CONTROLLER}
           parameters={DECK_PARAMETERS}
-          layers={[...stackLayers, labelHaloLayer, labelLayer, ...probeLayers(state as MapState)]}
+          layers={[...stackLayers, ...labelLayers, ...probeLayers(state as MapState)]}
           onHover={onHover}
           onClick={onClick}
           style={{ background: '#000' }}

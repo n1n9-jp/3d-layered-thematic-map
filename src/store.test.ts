@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialStateFromQuery, useMapStore, viewQuery } from './store';
+import { initialStateFromQuery, radiusQuery, useMapStore, viewQuery } from './store';
 import { DEFAULT_ANGLES, SPACING, VIEW_LIMITS } from './config';
 
 describe('initialStateFromQuery', () => {
@@ -84,5 +84,28 @@ describe('store actions', () => {
     expect(useMapStore.getState().order).toEqual(['facilities', 'elevation', 'population', 'roads', 'transit']);
     moveLayer('facilities', 99);
     expect(useMapStore.getState().order).toEqual(['elevation', 'population', 'roads', 'transit', 'facilities']);
+  });
+});
+
+describe('radiusQuery', () => {
+  it('1000 / 2000 / 5000 はそのまま', () => {
+    expect(radiusQuery('?radius=1000')).toBe(1000);
+    expect(radiusQuery('?radius=2000')).toBe(2000);
+    expect(radiusQuery('?radius=5000')).toBe(5000);
+  });
+  it('それ以外（ほかの数値、数値でない値、空、省略）は既定の 2000', () => {
+    for (const q of ['', '?radius=', '?radius=abc', '?radius=3000', '?radius=0', '?radius=-1000', '?radius=1e3x', '?radius=2000.5'])
+      expect(radiusQuery(q)).toBe(2000);
+  });
+  it('initialStateFromQuery が closeupRadius に取り込む。探針の固定とは独立', () => {
+    expect(initialStateFromQuery('?radius=5000').closeupRadius).toBe(5000);
+    expect(initialStateFromQuery('?radius=5000').probePinned).toBe(false);
+    expect(initialStateFromQuery('?probe=1,2&radius=1000')).toMatchObject({ closeupRadius: 1000, probePinned: true });
+    expect(initialStateFromQuery('').closeupRadius).toBe(2000);
+  });
+  it('setCloseupRadius で切り替わる', () => {
+    useMapStore.getState().setCloseupRadius(5000);
+    expect(useMapStore.getState().closeupRadius).toBe(5000);
+    useMapStore.getState().setCloseupRadius(2000);
   });
 });

@@ -20,6 +20,11 @@ export const VIEW_LIMITS = { minZoom: -9, maxZoom: -1, minRotationX: 8, maxRotat
 /** 初期視点の角度（度）。 */
 export const DEFAULT_ANGLES = { rotationX: 20, rotationOrbit: 45 } as const;
 
+/** クローズアップの半径（m）の選択肢と既定値。 */
+export const CLOSEUP_RADII = [1000, 2000, 5000] as const;
+export type CloseupRadius = (typeof CLOSEUP_RADII)[number];
+export const DEFAULT_CLOSEUP_RADIUS: CloseupRadius = 2000;
+
 /** データの取得元。URL クエリ `data=fixture` で `public/data-fixture/` に切り替える。 */
 export const DATA_BASE: string =
   (typeof location !== 'undefined' && new URLSearchParams(location.search).get('data') === 'fixture'

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { DEFAULT_ANGLES, EXTENT, LAYER_IDS, SPACING, VIEW_LIMITS } from './config';
-import type { LayerId } from './config';
+import { CLOSEUP_RADII, DEFAULT_ANGLES, DEFAULT_CLOSEUP_RADIUS, EXTENT, LAYER_IDS, SPACING, VIEW_LIMITS } from './config';
+import type { CloseupRadius, LayerId } from './config';
 
 export type LayerStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type DataKey = LayerId | 'boundary';
@@ -26,6 +26,8 @@ export interface MapState {
   /** ローカル座標（m） */
   probe: { x: number; y: number } | null;
   probePinned: boolean;
+  /** クローズアップの半径（m）。探針が固定されているあいだ、その地点を中心にこの半径の円の範囲を拡大して見せる。 */
+  closeupRadius: CloseupRadius;
   data: Partial<Record<DataKey, unknown>>;
   status: Record<DataKey, LayerStatus>;
   setSpacing(v: number): void;
@@ -36,6 +38,7 @@ export interface MapState {
   setAutoFit(v: boolean): void;
   setProbe(p: MapState['probe']): void;
   setProbePinned(v: boolean): void;
+  setCloseupRadius(r: CloseupRadius): void;
 }
 
 declare global {
@@ -54,7 +57,7 @@ const DEFAULT_VIEW: ViewState = {
   zoom: Math.log2(480 / (EXTENT.maxX - EXTENT.minX)),
 };
 
-type InitialState = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned'>;
+type InitialState = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius'>;
 
 function isLayerId(s: string): s is LayerId {
   return (LAYER_IDS as readonly string[]).includes(s);
@@ -84,6 +87,12 @@ export function viewQuery(search: string): { rx: number | null; ro: number | nul
   };
 }
 
+/** URL クエリの `radius`。1000 / 2000 / 5000 のどれかならその値、それ以外（数値でない値や、ほかの数値）と未指定は既定の 2000。 */
+export function radiusQuery(search: string): CloseupRadius {
+  const n = num(new URLSearchParams(search).get('radius'));
+  return CLOSEUP_RADII.find((r) => r === n) ?? DEFAULT_CLOSEUP_RADIUS;
+}
+
 function ids(v: string | null): LayerId[] {
   return (v ?? '')
     .split(',')
@@ -94,7 +103,7 @@ function ids(v: string | null): LayerId[] {
 /**
  * URL クエリから初期状態を作る。
  * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
- * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
+ * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
@@ -128,7 +137,7 @@ export function initialStateFromQuery(search: string): InitialState {
     ...(zoom !== null && { zoom }),
   };
 
-  return { order, visible, solo, spacing, viewState, probe, probePinned: probe !== null };
+  return { order, visible, solo, spacing, viewState, probe, probePinned: probe !== null, closeupRadius: radiusQuery(search) };
 }
 
 const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
@@ -155,6 +164,7 @@ export const useMapStore = create<MapState>()((set) => ({
   setAutoFit: (v) => set({ autoFit: v }),
   setProbe: (p) => set({ probe: p }),
   setProbePinned: (v) => set({ probePinned: v }),
+  setCloseupRadius: (r) => set({ closeupRadius: r }),
 }));
 
 if (typeof window !== 'undefined') {

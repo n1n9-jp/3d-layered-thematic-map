@@ -1,0 +1,113 @@
+.cu {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #05070b;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e8e8e8;
+  font: 13px/1.45 sans-serif;
+  z-index: 1;
+}
+
+.cu-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 8px;
+}
+
+.cu-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.cu-district {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cu-radius-text {
+  font-size: 12px;
+  color: #ffb000;
+}
+
+.cu-radius {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+.cu-btn {
+  font: 12px sans-serif;
+  color: #d7dde8;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.cu-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.cu-btn:focus-visible {
+  outline: 2px solid #5ab4ff;
+  outline-offset: 1px;
+}
+
+.cu-btn[aria-pressed='true'] {
+  color: #1a1200;
+  background: #ffb000;
+  border-color: #ffb000;
+  font-weight: 600;
+}
+
+.cu-canvas {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 120px;
+  background: #000;
+}
+
+.cu-summary {
+  flex: 0 1 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.cu-row {
+  display: contents;
+}
+
+.cu-row dt {
+  color: #9bd;
+}
+
+.cu-row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cu-dim {
+  color: #777;
+}

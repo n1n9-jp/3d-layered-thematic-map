@@ -24,6 +24,37 @@ const { minX, minY, maxX, maxY } = EXTENT;
 export const CENTER = [(minX + maxX) / 2, (minY + maxY) / 2] as const;
 const HALF = (maxX - minX) / 2;
 
+/**
+ * 積層の平面の位置と大きさ。中心 (cx, cy)、半分の幅 half（m）。
+ * round が true なら円（半径 half）、そうでなければ正方形（一辺 2·half）。既定は描画範囲全体（正方形）。
+ */
+export interface PlaneBox {
+  cx: number;
+  cy: number;
+  half: number;
+  round?: boolean;
+}
+export const EXTENT_BOX: PlaneBox = { cx: CENTER[0], cy: CENTER[1], half: HALF };
+
+/** 円の外周を折れ線で近似するときの分割数（収まりの計算用）。 */
+const FIT_CIRCLE_STEPS = 48;
+
+/** 平面の外形の、水平面上の点。正方形なら4隅、円なら外周の点。 */
+function boxOutline(box: PlaneBox): [number, number][] {
+  if (box.round) {
+    return Array.from({ length: FIT_CIRCLE_STEPS }, (_, k) => {
+      const t = (2 * Math.PI * k) / FIT_CIRCLE_STEPS;
+      return [box.cx + box.half * Math.cos(t), box.cy + box.half * Math.sin(t)];
+    });
+  }
+  return [
+    [box.cx - box.half, box.cy - box.half],
+    [box.cx + box.half, box.cy - box.half],
+    [box.cx - box.half, box.cy + box.half],
+    [box.cx + box.half, box.cy + box.half],
+  ];
+}
+
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** 描画領域に大きさがあるか（幅も高さも 1px 以上）。ないときは視点の計算も投影もできない。 */
@@ -62,25 +93,36 @@ function solve([a, b, c, d]: Mat2, sx: number, sy: number): [number, number] {
  * deck.gl の View の `padding` は使わない。平行投影の OrbitView では、padding によるずれが
  * 奥行きに比例して大きくなり、位置が合わなくなるため。
  */
-export function fitView(opts: { rotationX: number; rotationOrbit: number; top: number; size: Size; layout?: Layout }): Pick<ViewState, 'target' | 'zoom'> {
+export function fitView(opts: {
+  rotationX: number;
+  rotationOrbit: number;
+  top: number;
+  size: Size;
+  layout?: Layout;
+  /** 積層の平面。既定は描画範囲全体。クローズアップでは、切り出した円を渡す。 */
+  box?: PlaneBox;
+  /** zoom の範囲。既定は全体の地図の上下限。 */
+  zoomLimits?: { min: number; max: number };
+}): Pick<ViewState, 'target' | 'zoom'> {
   const { rotationX, rotationOrbit, top, size } = opts;
   if (!hasSize(size)) throw new Error('描画領域に大きさがありません');
   const { padding, avoid } = opts.layout ?? computeLayout(size);
-  const center: [number, number, number] = [CENTER[0], CENTER[1], top / 2];
+  const box = opts.box ?? EXTENT_BOX;
+  const zoomLimits = opts.zoomLimits ?? { min: LIMITS.minZoom, max: LIMITS.maxZoom };
+  const center: [number, number, number] = [box.cx, box.cy, top / 2];
   // padding なしの View は、target を画面の中心に置く。箱の角の、そこからの相対位置を zoom 0 で測る。
   const vp = viewport({ target: center, rotationX, rotationOrbit, zoom: 0 }, size.width, size.height);
   const mid = vp.project(center);
   const offsets: Pt[] = [];
-  for (const x of [minX, maxX])
-    for (const y of [minY, maxY])
-      for (const z of [0, top]) {
-        const [px, py] = vp.project([x, y, z]);
-        offsets.push([px - mid[0], py - mid[1]]);
-      }
+  for (const [x, y] of boxOutline(box))
+    for (const z of [0, top]) {
+      const [px, py] = vp.project([x, y, z]);
+      offsets.push([px - mid[0], py - mid[1]]);
+    }
 
   const inner = { left: padding.left, top: padding.top, right: size.width - padding.right, bottom: size.height - padding.bottom };
   const { scale, center: place } = maxScale(offsets, paddedCenter(size, padding), inner, avoid);
-  const zoom = clamp(Math.log2(scale), LIMITS.minZoom, LIMITS.maxZoom);
+  const zoom = clamp(Math.log2(scale), zoomLimits.min, zoomLimits.max);
 
   // 箱の中心（= target）は画面の中心に来る。これを、置く位置のずれのぶんだけ target を動かして直す。
   const [dx, dy] = solve(jacobian(rotationX, rotationOrbit), place[0] - size.width / 2, place[1] - size.height / 2);
@@ -91,15 +133,16 @@ export function fitView(opts: { rotationX: number; rotationOrbit: number; top: n
 /**
  * 高さ z の平面の「画面上の右側」の縁の位置。
  * 平面の中心から、画面の右向きに対応する水平方向へ伸ばした半直線が、縁と交わる点（連続して動く）。
+ * box は平面の位置と大きさ（既定は描画範囲全体）。
  */
-export function labelAnchors(rotationX: number, rotationOrbit: number, zs: number[]): [number, number, number][] {
+export function labelAnchors(rotationX: number, rotationOrbit: number, zs: number[], box: PlaneBox = EXTENT_BOX): [number, number, number][] {
   const [a, b, c, d] = jacobian(clamp(rotationX, 1, 90), rotationOrbit);
   let [dx, dy] = solve([a, b, c, d], 1, 0);
   const len = Math.hypot(dx, dy) || 1;
   dx /= len;
   dy /= len;
-  const r = HALF / Math.max(Math.abs(dx), Math.abs(dy));
-  return zs.map((z) => [CENTER[0] + dx * r, CENTER[1] + dy * r, z]);
+  const r = box.round ? box.half : box.half / Math.max(Math.abs(dx), Math.abs(dy));
+  return zs.map((z) => [box.cx + dx * r, box.cy + dy * r, z]);
 }
 
 /** 目標の rotationOrbit に最も近い、360度の整数倍だけ違う角度。 */

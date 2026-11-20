@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LABEL_ROOM, PROBE_PANEL, RIGHT_PANEL_W, computeLayout, convexHull, convexIntersectsRect, maxScale, paddedCenter } from './layout';
+import { CLOSEUP, LABEL_ROOM, PROBE_PANEL, RIGHT_PANEL_W, closeupWidth, computeLayout, convexHull, convexIntersectsRect, maxScale, paddedCenter } from './layout';
 import type { Pt, Rect } from './layout';
 
 describe('convexHull', () => {
@@ -88,5 +88,20 @@ describe('maxScale', () => {
       }
       prev = r;
     }
+  });
+});
+
+describe('closeupWidth', () => {
+  it('パネルを除いた幅の 42%。1400 px の画面では 480 px', () => {
+    expect(closeupWidth(1400)).toBe(Math.round((1400 - RIGHT_PANEL_W) * CLOSEUP.share));
+    expect(closeupWidth(1400)).toBe(480);
+  });
+  it('小さい画面では下限（340 px）、大きい画面では上限（560 px）', () => {
+    expect(closeupWidth(1000)).toBe(CLOSEUP.minWidth);
+    expect(closeupWidth(300)).toBe(CLOSEUP.minWidth);
+    expect(closeupWidth(3000)).toBe(CLOSEUP.maxWidth);
+  });
+  it('1400 px 幅で、全体の積層の領域に 664 px 残る（レイヤー名のぶんの余白を引いても積層が収まる）', () => {
+    expect(1400 - RIGHT_PANEL_W - closeupWidth(1400)).toBe(664);
   });
 });

@@ -1,10 +1,13 @@
+import { useEffect, useState } from 'react';
+import Closeup from './closeup/Closeup';
 import ProbePanel from './probe/ProbePanel';
 import Credits from './panel/Credits';
 import LayerPanel from './panel/LayerPanel';
 import SpacingSlider from './panel/SpacingSlider';
 import ViewButtons from './panel/ViewButtons';
 import StackView from './view/StackView';
-import { PANEL, PROBE_PANEL } from './view/layout';
+import { useMapStore } from './store';
+import { PANEL, PROBE_PANEL, RIGHT_PANEL_W, closeupWidth } from './view/layout';
 
 const panelStyle = {
   position: 'absolute',
@@ -22,10 +25,25 @@ const CREDITS_RESERVE = 32;
 /** 出典の1行を、左下の探針パネルの右に置くための、画面の左端からの余白（px）。 */
 const CREDITS_LEFT = PROBE_PANEL.width + 2 * PANEL.margin;
 
+function useWindowWidth(): number {
+  const [w, setW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setW(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return w;
+}
+
 export default function App() {
+  // 探針が固定されているあいだ、全体の積層の右隣にクローズアップを出す。解除すると消え、積層は元の幅に戻る。
+  const pinned = useMapStore((s) => (s.probePinned ? s.probe : null));
+  const windowWidth = useWindowWidth();
+  const cw = pinned ? closeupWidth(windowWidth) : 0;
   return (
     <>
-      <StackView />
+      <StackView rightInset={RIGHT_PANEL_W + cw} />
+      {pinned && <Closeup x={pinned.x} y={pinned.y} width={cw} />}
       <div
         style={{
           ...panelStyle,

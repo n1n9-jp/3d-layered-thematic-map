@@ -87,10 +87,12 @@ const RING_RADIUS_PX = 11;
 export function probeLayers(state: MapState): Layer[] {
   const { probe, probePinned } = state;
   if (!probe) return [];
-  const planes = visiblePlanes(state);
-  if (planes.length === 0) return [];
+  return probeMarkLayers(probe, probePinned, visiblePlanes(state).map((p) => p.z));
+}
 
-  const zs = planes.map((p) => p.z);
+/** 探針の描画。地点 probe を、高さ zs の各段に貫く。クローズアップも、同じ見た目でこれを使う。 */
+export function probeMarkLayers(probe: { x: number; y: number }, probePinned: boolean, zs: number[]): Layer[] {
+  if (zs.length === 0) return [];
   const zMin = Math.min(...zs);
   const zMax = Math.max(...zs);
   const color = probePinned ? PINNED_COLOR : HOVER_COLOR;
@@ -131,7 +133,7 @@ export function probeLayers(state: MapState): Layer[] {
     );
   }
 
-  const marks = planes.map((p) => ({ position: [probe.x, probe.y, p.z] as [number, number, number] }));
+  const marks = zs.map((z) => ({ position: [probe.x, probe.y, z] as [number, number, number] }));
   const ringCommon = {
     ...common,
     data: marks,

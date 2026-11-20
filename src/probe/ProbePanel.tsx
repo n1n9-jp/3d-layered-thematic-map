@@ -5,6 +5,7 @@ import { useMapStore } from '../store';
 import type { BoundaryData, ProbeValue } from '../types';
 import { createDistrictLookup } from './district';
 import { installProbeKeys, releaseProbe } from './controller';
+import { formatValue } from './formatValue';
 
 type Row = { id: string; label: string; state: 'values' | 'none' | 'loading' | 'error'; values: ProbeValue[] };
 
@@ -38,11 +39,6 @@ const styles = {
   },
   foot: { marginTop: 8, fontSize: 11, color: '#8a8a8a' },
 } as const;
-
-function formatValue(v: ProbeValue): string {
-  if (v.value === null) return '—';
-  return `${typeof v.value === 'number' ? v.value.toLocaleString('ja-JP') : v.value}${v.unit ? ` ${v.unit}` : ''}`;
-}
 
 export default function ProbePanel() {
   const probe = useMapStore((s) => s.probe);
