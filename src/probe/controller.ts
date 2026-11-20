@@ -4,8 +4,10 @@ import { PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
 import type { MapState } from '../store';
+import { createDistrictLookup } from './district';
 import { pickProbePoint } from './ray';
 import type { Plane } from './ray';
+import type { BoundaryData } from '../types';
 
 type StackInput = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing'>;
 
@@ -19,10 +21,23 @@ export function visiblePlanes(state: StackInput): Plane[] {
   return planes.reverse();
 }
 
+/** 区境界から作った判定関数。境界データごとに1回だけ作る（マウスが動くたびに呼ぶため）。 */
+let lookupCache: { boundary: BoundaryData; lookup: (x: number, y: number) => string | null } | null = null;
+
+function districtInside(state: MapState): ((x: number, y: number) => boolean) | null {
+  if (state.status.boundary !== 'ready') return null;
+  const boundary = state.data.boundary as BoundaryData | null | undefined;
+  if (!boundary || !Array.isArray(boundary.features)) return null;
+  if (lookupCache?.boundary !== boundary) lookupCache = { boundary, lookup: createDistrictLookup(boundary) };
+  const { lookup } = lookupCache;
+  return (x, y) => lookup(x, y) !== null;
+}
+
 function pickFromInfo(info: PickingInfo) {
   const { viewport } = info;
   if (!viewport || info.x < 0 || info.y < 0) return null;
-  return pickProbePoint(viewport, info.x, info.y, visiblePlanes(useMapStore.getState()));
+  const state = useMapStore.getState();
+  return pickProbePoint(viewport, info.x, info.y, visiblePlanes(state), districtInside(state));
 }
 
 export function onHover(info: PickingInfo): void {

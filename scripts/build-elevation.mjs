@@ -15,6 +15,7 @@ import { PNG } from 'pngjs';
 import { EXTENT, toLocal, toLonLat } from './lib/projection.mjs';
 import { fetchCached } from './lib/fetch-cache.mjs';
 import { loadWards } from './lib/wards.mjs';
+import { CACHE_DIR, DATA_DIR } from './lib/paths.mjs';
 
 const ZOOM = 14;
 const TILE_SIZE = 256;
@@ -24,11 +25,10 @@ const WIDTH = (EXTENT.maxX - EXTENT.minX) / CELL_SIZE;
 const HEIGHT = (EXTENT.maxY - EXTENT.minY) / CELL_SIZE;
 const CONCURRENCY = 4;
 
-const DATA_DIR = path.resolve('public/data');
 const BIN_FILE = path.join(DATA_DIR, 'elevation.bin');
 const JSON_FILE = path.join(DATA_DIR, 'elevation.json');
 const BOUNDARY_FILE = path.join(DATA_DIR, 'boundary.geojson');
-const MISSING_FILE = path.resolve('.cache/dem5a-14-404.json');
+const MISSING_FILE = path.join(CACHE_DIR, 'dem5a-14-404.json');
 
 // 確認用の既知地点（DEM5A、最近傍画素の値）
 const CHECK_POINTS = [

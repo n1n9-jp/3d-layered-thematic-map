@@ -55,7 +55,10 @@ export function inExtent(x: number, y: number): boolean {
 }
 
 /**
- * `planes` を先頭（上の段）から順に試し、交点が EXTENT 内に入った最初の平面を採用する。
+ * `planes` を先頭（上の段）から順に試し、採用する平面を決める。
+ * - `isInside`（地点が区の内側かの判定）があるときは、交点が区の内側にある最初の平面を採用する。
+ *   上の段の平面は区の外側がほぼ透明で下の段が透けて見えるため、利用者が指した段は、区の内側に当たる段だからである。
+ * - どの段の交点も区の内側にないとき、`isInside` がないときは、交点が EXTENT 内に入った最初の平面を採用する。
  * どの平面にも当たらなければ null。
  */
 export function pickProbePoint(
@@ -63,11 +66,17 @@ export function pickProbePoint(
   px: number,
   py: number,
   planes: readonly Plane[],
+  isInside?: ((x: number, y: number) => boolean) | null,
 ): ProbePoint | null {
   const ray = rayFromPixel(viewport, px, py);
+  let fallback: ProbePoint | null = null;
   for (const plane of planes) {
     const hit = intersectHorizontalPlane(ray, plane.z);
-    if (hit && inExtent(hit.x, hit.y)) return { x: hit.x, y: hit.y, layerId: plane.id };
+    if (!hit || !inExtent(hit.x, hit.y)) continue;
+    const point: ProbePoint = { x: hit.x, y: hit.y, layerId: plane.id };
+    if (!isInside) return point;
+    if (isInside(hit.x, hit.y)) return point;
+    fallback ??= point;
   }
-  return null;
+  return fallback;
 }
