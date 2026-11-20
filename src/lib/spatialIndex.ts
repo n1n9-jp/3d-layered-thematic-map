@@ -11,6 +11,14 @@ export interface Bounds {
   maxY: number;
 }
 
+/** リングの番号として扱える上限。これを超える遠方は、リングを進めず全セルを走査する。 */
+const MAX_RING = 2 ** 30;
+
+/** セル番号 q が [0, n) の外にあるとき、その範囲までのセル数。範囲内なら 0。 */
+function gap(q: number, n: number): number {
+  return q < 0 ? -q : q > n - 1 ? q - (n - 1) : 0;
+}
+
 /** 格子バケット。セルは疎な Map に持つ。 */
 class BucketGrid {
   readonly cells = new Map<number, number[]>();
@@ -53,27 +61,41 @@ class BucketGrid {
   }
 
   /**
-   * (x, y) を中心に、チェビシェフ距離 k = 0, 1, 2, ... のリングを順に走査する。
-   * visit(item) の結果を見て、done(k) が true になるか、リングが格子の外へ出きった時点で止める。
+   * (x, y) を中心に、チェビシェフ距離 k のリングを内側から順に走査する。
+   * visit(item) の結果を見て、done(k) が true になるか、リングが格子を覆いきった時点で止める。
    * done(k) は「リング k までを見終えた」時点で呼ぶ。未走査のセルは (x, y) から k * cellSize 以上離れている。
+   *
+   * 走査は格子の範囲と交わるセルだけに限る。(x, y) が格子の外にあるときは、格子に届く最初のリングから始める。
+   * 座標が有限でないとき、または要素が無いときは何も走査しない。
    */
   scanRings(x: number, y: number, visit: (item: number) => void, done: (k: number) => boolean): void {
+    if (this.cells.size === 0 || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const { nx, ny } = this;
     const qc = this.col(x);
     const qr = this.row(y);
-    for (let k = 0; ; k++) {
+    // 格子に届く最初のリング。それより内側のリングは格子と交わらない。
+    const first = Math.max(gap(qc, nx), gap(qr, ny));
+    // 読み飛ばしたリングで done が真になっていたはずなら、見つからずに終わる（done は k について単調）。
+    if (first > 0 && done(first - 1)) return;
+    if (first > MAX_RING) {
+      // 添字が倍精度の整数で表せない遠方。リングを進められないので、全セルを一度ずつ見る。
+      for (const list of this.cells.values()) for (const item of list) visit(item);
+      return;
+    }
+    for (let k = first; ; k++) {
       if (k === 0) this.visitCell(qc, qr, visit);
       else {
-        for (let c = qc - k; c <= qc + k; c++) {
-          this.visitCell(c, qr - k, visit);
-          this.visitCell(c, qr + k, visit);
-        }
-        for (let r = qr - k + 1; r <= qr + k - 1; r++) {
-          this.visitCell(qc - k, r, visit);
-          this.visitCell(qc + k, r, visit);
-        }
+        const c0 = Math.max(qc - k, 0);
+        const c1 = Math.min(qc + k, nx - 1);
+        const r0 = Math.max(qr - k + 1, 0);
+        const r1 = Math.min(qr + k - 1, ny - 1);
+        if (qr - k >= 0 && qr - k < ny) for (let c = c0; c <= c1; c++) this.visitCell(c, qr - k, visit);
+        if (qr + k >= 0 && qr + k < ny) for (let c = c0; c <= c1; c++) this.visitCell(c, qr + k, visit);
+        if (qc - k >= 0 && qc - k < nx) for (let r = r0; r <= r1; r++) this.visitCell(qc - k, r, visit);
+        if (qc + k >= 0 && qc + k < nx) for (let r = r0; r <= r1; r++) this.visitCell(qc + k, r, visit);
       }
       if (done(k)) return;
-      if (qc - k < 0 && qc + k >= this.nx && qr - k < 0 && qr + k >= this.ny) return;
+      if (qc - k < 0 && qc + k >= nx && qr - k < 0 && qr + k >= ny) return;
     }
   }
   private visitCell(c: number, r: number, visit: (item: number) => void): void {
@@ -122,13 +144,17 @@ export interface PointIndex {
 }
 
 export function createPointIndex(points: readonly Position[], cellSize?: number): PointIndex {
+  // 座標が有限でない点は索引に載せない（添字は元の配列のまま）。
+  const usable = points.map((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
   const bounds = boundsOf(
-    points.map((p) => p[0]),
-    points.map((p) => p[1]),
+    points.filter((_, i) => usable[i]).map((p) => p[0]),
+    points.filter((_, i) => usable[i]).map((p) => p[1]),
   );
   const size = cellSize ?? autoCellSize(bounds, points.length);
   const grid = new BucketGrid(bounds, size);
-  points.forEach((p, i) => grid.add(grid.col(p[0]), grid.row(p[1]), i));
+  points.forEach((p, i) => {
+    if (usable[i]) grid.add(grid.col(p[0]), grid.row(p[1]), i);
+  });
 
   return {
     within(x, y, r) {
@@ -151,12 +177,14 @@ export function createPointIndex(points: readonly Position[], cellSize?: number)
       return hits.sort((a, b) => a.distance - b.distance || a.index - b.index);
     },
     nearest(x, y, maxDistance = Infinity) {
+      if (!(maxDistance >= 0)) return null;
       let best: PointHit | null = null;
       grid.scanRings(
         x,
         y,
         (i) => {
           const d = Math.hypot(points[i][0] - x, points[i][1] - y);
+          if (!Number.isFinite(d)) return;
           if (!best || d < best.distance || (d === best.distance && i < best.index)) best = { index: i, distance: d };
         },
         (k) => (best !== null && best.distance <= k * size) || k * size > maxDistance,
@@ -205,24 +233,29 @@ export interface SegmentIndex {
 
 /** 線分は bbox にかかるすべてのセルに登録する（短い線分の集まりを想定）。 */
 export function createSegmentIndex(segments: readonly Segment[], cellSize?: number): SegmentIndex {
+  // 座標が有限でない線分は索引に載せない（添字は元の配列のまま）。
+  const usable = segments.map((s) => s.every(Number.isFinite));
+  const live = segments.filter((_, i) => usable[i]);
   const bounds = boundsOf(
-    segments.flatMap((s) => [s[0], s[2]]),
-    segments.flatMap((s) => [s[1], s[3]]),
+    live.flatMap((s) => [s[0], s[2]]),
+    live.flatMap((s) => [s[1], s[3]]),
   );
   const size = cellSize ?? autoCellSize(bounds, segments.length);
   const grid = new BucketGrid(bounds, size);
-  segments.forEach((s, i) =>
-    grid.addBox(Math.min(s[0], s[2]), Math.min(s[1], s[3]), Math.max(s[0], s[2]), Math.max(s[1], s[3]), i),
-  );
+  segments.forEach((s, i) => {
+    if (usable[i]) grid.addBox(Math.min(s[0], s[2]), Math.min(s[1], s[3]), Math.max(s[0], s[2]), Math.max(s[1], s[3]), i);
+  });
 
   return {
     nearest(x, y, maxDistance = Infinity) {
+      if (!(maxDistance >= 0)) return null;
       let best: SegmentHit | null = null;
       grid.scanRings(
         x,
         y,
         (i) => {
           const c = closestPointOnSegment(x, y, segments[i]);
+          if (!Number.isFinite(c.distance)) return;
           if (!best || c.distance < best.distance || (c.distance === best.distance && i < best.index))
             best = { index: i, distance: c.distance, x: c.x, y: c.y };
         },
