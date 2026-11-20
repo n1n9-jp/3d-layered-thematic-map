@@ -1,76 +1,311 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import DeckGL from '@deck.gl/react';
-import { COORDINATE_SYSTEM, OrbitView } from '@deck.gl/core';
+import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import type { Layer } from '@deck.gl/core';
-import { PathLayer } from '@deck.gl/layers';
+import { PathLayer, SolidPolygonLayer, TextLayer } from '@deck.gl/layers';
 import { EXTENT, LAYER_IDS } from '../config';
+import type { LayerId } from '../config';
 import { registry } from '../layers';
 import { onClick, onHover, probeLayers } from '../probe/controller';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore } from '../store';
-import type { MapState } from '../store';
+import type { MapState, ViewState } from '../store';
 import type { BoundaryData } from '../types';
-
-const view = new OrbitView({ orthographic: true });
+import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
+import type { Size } from './camera';
+import { getSliderActive, subscribeSliderActive } from './sliderActivity';
+import { useDisplayedZ } from './useDisplayedZ';
+import type { ZMap } from './useDisplayedZ';
 
 const { minX, minY, maxX, maxY } = EXTENT;
-const FRAME = [
-  {
-    path: [
-      [minX, minY, 0],
-      [maxX, minY, 0],
-      [maxX, maxY, 0],
-      [minX, maxY, 0],
-      [minX, minY, 0],
-    ] as [number, number, number][],
-  },
-];
+
+type P3 = [number, number, number];
+const FRAME = [{ path: [[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 0], [minX, minY, 0]] as P3[] }];
+const PLANE = [[[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 0]] as P3[]];
+
+const FRAME_COLOR: [number, number, number, number] = [150, 165, 190, 170];
+const FILL_COLOR: [number, number, number, number] = [150, 175, 220, 16];
+const LABEL_COLOR: [number, number, number, number] = [225, 230, 240, 255];
+const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQuanYi Zen Hei", sans-serif';
+
+/** 視点を切り替えるアニメーションの長さ（ms）。 */
+const TRANSITION_MS = 700;
+/** レイヤー名どうしの縦の最小間隔（px）。 */
+const LABEL_GAP = 20;
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+
+/** DeckGL 全体の描画設定。平面はすべて水平でカメラは常に上側なので、下から上へ描き、深度テストを切る。 */
+const DECK_PARAMETERS = { depthCompare: 'always', depthWriteEnabled: false } as const;
+const CONTROLLER = { doubleClickZoom: false } as const;
+
+const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+function sameView(a: ViewState, b: ViewState) {
+  return (
+    same(a.zoom, b.zoom) &&
+    same(a.rotationX, b.rotationX) &&
+    same(a.rotationOrbit, b.rotationOrbit) &&
+    a.target.every((v, i) => same(v, b.target[i]))
+  );
+}
+
+function topOf(zs: ZMap): number {
+  let top = 0;
+  for (const id of LAYER_IDS) top = Math.max(top, zs[id] ?? 0);
+  return top;
+}
+
+/** layer の modelMatrix が `from` の高さの平行移動なら、`to` の高さに差し替えたレイヤーを返す。 */
+function withHeight(layer: Layer, from: number, to: number): Layer {
+  if (from === to) return layer;
+  const m = layer.props.modelMatrix as unknown as ArrayLike<number> | null | undefined;
+  const expect = translationMatrix(from);
+  if (!m || m.length !== 16 || !expect.every((v, i) => v === m[i])) return layer;
+  return layer.clone({ modelMatrix: asModelMatrix(translationMatrix(to)) });
+}
+
+interface Saved {
+  view: ViewState;
+  auto: boolean;
+}
 
 export default function StackView() {
   const state = useMapStore();
-  const { order, visible, solo, spacing, data, status } = state;
+  const { order, visible, solo, spacing, data, status, viewState } = state;
 
-  // viewState や探針が変わっても、各レイヤーの deck.gl レイヤー配列は作り直さない。
-  const stackLayers = useMemo(() => {
-    const boundary = status.boundary === 'ready' ? (data.boundary as BoundaryData) : null;
-    const layers: Layer[] = [];
-    for (const id of order) {
-      const z = layerZ({ order, visible, solo, spacing }, id);
-      if (z === null) continue;
-      const modelMatrix = translationMatrix(z);
-      layers.push(
-        new PathLayer({
-          id: `frame-${id}`,
-          data: FRAME,
-          coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
-          modelMatrix: asModelMatrix(modelMatrix),
-          getPath: (d: (typeof FRAME)[number]) => d.path,
-          getColor: [255, 255, 255, 255],
-          getWidth: 2,
-          widthUnits: 'pixels',
-        }),
-      );
-      if (status[id] === 'ready')
-        layers.push(
-          ...registry[id].render(data[id], { z, modelMatrix, opacity: 1, solo: solo === id, boundary }),
-        );
+  /* ---------- 画面の大きさ ---------- */
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<Size | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setSize((s) => (s && s.width === r.width && s.height === r.height ? s : { width: r.width, height: r.height }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  /* ---------- 各レイヤーの高さ（目標値と表示用） ---------- */
+  const targets = useMemo(
+    () => Object.fromEntries(LAYER_IDS.map((id) => [id, layerZ({ order, visible, solo, spacing }, id)])) as ZMap,
+    [order, visible, solo, spacing],
+  );
+  const sliderActive = useSyncExternalStore(subscribeSliderActive, getSliderActive);
+  const shown = useDisplayedZ(targets, sliderActive);
+  const targetsRef = useRef(targets);
+  targetsRef.current = targets;
+
+  /* ---------- 視点 ---------- */
+  const [ready, setReady] = useState(false);
+  const [transition, setTransition] = useState(false);
+  /** true の間は、画面の大きさや積層の高さに合わせて target と zoom を追従させる（利用者が視点を動かすまで）。 */
+  const autoFit = useRef(true);
+  const saved = useRef<Saved | null>(null);
+  const clearTimer = useRef<number>(0);
+  const prevSolo = useRef<LayerId | null>(null);
+
+  const startTransition = useCallback((next: ViewState) => {
+    window.clearTimeout(clearTimer.current);
+    clearTimer.current = window.setTimeout(() => setTransition(false), TRANSITION_MS + 150);
+    setTransition(true);
+    useMapStore.getState().setViewState(next);
+  }, []);
+
+  // 初期視点。URL クエリ（rx, ro, zoom）があればそちらを優先する。
+  useLayoutEffect(() => {
+    if (ready || !size) return;
+    const q = new URLSearchParams(location.search);
+    const num = (k: string) => {
+      const v = q.get(k);
+      const n = v === null || v.trim() === '' ? NaN : Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const rx = num('rx');
+    const ro = num('ro');
+    const zoom = num('zoom');
+    const rotationX = clamp(rx ?? DEFAULT_ANGLES.rotationX, LIMITS.minRotationX, LIMITS.maxRotationX);
+    const rotationOrbit = ro ?? DEFAULT_ANGLES.rotationOrbit;
+    const set = useMapStore.getState().setViewState;
+
+    const view3D = { rotationX, rotationOrbit, ...fitView({ rotationX, rotationOrbit, top: topOf(targets), size }) };
+    if (zoom !== null) view3D.zoom = clamp(zoom, LIMITS.minZoom, LIMITS.maxZoom);
+    autoFit.current = zoom === null;
+
+    if (solo !== null) {
+      saved.current = { view: view3D, auto: autoFit.current };
+      autoFit.current = true;
+      set({ ...SOLO_ANGLES, ...fitView({ ...SOLO_ANGLES, top: 0, size }) });
+    } else {
+      set(view3D);
     }
-    return layers;
-  }, [order, visible, solo, spacing, data, status]);
+    prevSolo.current = solo;
+    setReady(true);
+  }, [ready, size, solo, targets]);
+
+  // 画面の大きさや積層の高さが変わったら、収まるように追従する（アニメーション中は行わない）。
+  const top = topOf(shown);
+  useEffect(() => {
+    if (!ready || !size || !autoFit.current || transition) return;
+    const vs = useMapStore.getState().viewState;
+    const fit = fitView({ rotationX: vs.rotationX, rotationOrbit: vs.rotationOrbit, top, size });
+    const next = { ...vs, ...fit };
+    if (!sameView(vs, next)) useMapStore.getState().setViewState(next);
+  }, [ready, size, top, transition]);
+
+  // 単独表示の開始と解除。
+  useEffect(() => {
+    if (!ready || !size || solo === prevSolo.current) return;
+    prevSolo.current = solo;
+    const vs = useMapStore.getState().viewState;
+    if (solo !== null) {
+      if (!saved.current) saved.current = { view: vs, auto: autoFit.current };
+      autoFit.current = true;
+      startTransition({
+        ...SOLO_ANGLES,
+        rotationOrbit: nearestAngle(SOLO_ANGLES.rotationOrbit, vs.rotationOrbit),
+        ...fitView({ ...SOLO_ANGLES, top: 0, size }),
+      });
+    } else if (saved.current) {
+      const prev = saved.current;
+      saved.current = null;
+      autoFit.current = prev.auto;
+      const rotationOrbit = nearestAngle(prev.view.rotationOrbit, vs.rotationOrbit);
+      startTransition(
+        prev.auto
+          ? {
+              ...prev.view,
+              rotationOrbit,
+              ...fitView({ rotationX: prev.view.rotationX, rotationOrbit, top: topOf(targetsRef.current), size }),
+            }
+          : { ...prev.view, rotationOrbit },
+      );
+    }
+  }, [ready, size, solo, startTransition]);
+
+  const onViewStateChange = useCallback(
+    ({ viewState: v, interactionState }: { viewState: Record<string, unknown>; interactionState?: Record<string, boolean | undefined> }) => {
+      const is = interactionState ?? {};
+      if (!is.inTransition) {
+        window.clearTimeout(clearTimer.current);
+        setTransition(false);
+        if (is.isDragging || is.isPanning || is.isRotating || is.isZooming) autoFit.current = false;
+      }
+      const vs = v as unknown as ViewState;
+      const t = vs.target;
+      const target: P3 = is.inTransition
+        ? [t[0], t[1], t[2]]
+        : [clamp(t[0], minX, maxX), clamp(t[1], minY, maxY), clamp(t[2], 0, topOf(targetsRef.current))];
+      state.setViewState({ target, rotationOrbit: vs.rotationOrbit, rotationX: vs.rotationX, zoom: vs.zoom });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const deckViewState = useMemo(
+    () => ({
+      ...viewState,
+      ...LIMITS,
+      ...(transition ? { transitionDuration: TRANSITION_MS, transitionEasing: easeInOut } : {}),
+    }),
+    [viewState, transition],
+  );
+
+  /* ---------- レイヤー ---------- */
+  // 各レイヤーの描画結果は、目標の高さで作っておく。補間中の高さへは modelMatrix の差し替えだけで移す。
+  const rendered = useMemo(() => {
+    const boundary = status.boundary === 'ready' ? (data.boundary as BoundaryData) : null;
+    const out = {} as Record<LayerId, Layer[]>;
+    for (const id of LAYER_IDS) {
+      const z = targets[id];
+      out[id] =
+        z === null || status[id] !== 'ready'
+          ? []
+          : registry[id].render(data[id], { z, modelMatrix: translationMatrix(z), opacity: 1, solo: solo === id, boundary });
+    }
+    return out;
+  }, [targets, solo, data, status]);
+
+  const stackLayers = [];
+  const visibleIds = LAYER_IDS.filter((id) => shown[id] !== null)
+    .map((id) => ({ id, z: shown[id] as number, i: order.indexOf(id) }))
+    .sort((a, b) => a.z - b.z || a.i - b.i);
+  for (const { id, z } of visibleIds) {
+    const modelMatrix = asModelMatrix(translationMatrix(z));
+    stackLayers.push(
+      new SolidPolygonLayer({
+        id: `plane-${id}`,
+        data: PLANE,
+        coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+        modelMatrix,
+        getPolygon: (d: P3[]) => d,
+        getFillColor: FILL_COLOR,
+        pickable: false,
+      }),
+      new PathLayer({
+        id: `frame-${id}`,
+        data: FRAME,
+        coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+        modelMatrix,
+        getPath: (d: (typeof FRAME)[number]) => d.path,
+        getColor: FRAME_COLOR,
+        getWidth: 1.5,
+        widthUnits: 'pixels',
+        billboard: true,
+        pickable: false,
+      }),
+      ...rendered[id].map((l) => withHeight(l, targets[id] as number, z)),
+    );
+  }
+
+  const labels = useMemo(() => LAYER_IDS.map((id) => ({ id, text: registry[id].label })), []);
+  const anchors = labelAnchors(viewState.rotationX, viewState.rotationOrbit, visibleIds.map((v) => v.z));
+  const anchorById = new Map(visibleIds.map((v, i) => [v.id, anchors[i]]));
+  // 平面が近づいて名前が重なるときは、画面上で縦に押し広げて読めるようにする。
+  const screenY = size ? anchors.map((a) => projectPoint(viewState, size, a)[1]) : anchors.map(() => 0);
+  const spread = spreadLabels(screenY, LABEL_GAP);
+  const offsetById = new Map(visibleIds.map((v, i) => [v.id, spread[i] - screenY[i]]));
+  const labelLayer = new TextLayer({
+    id: 'stack-labels',
+    data: labels.filter((l) => anchorById.has(l.id)),
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+    getPosition: (d: (typeof labels)[number]) => anchorById.get(d.id) as P3,
+    getText: (d: (typeof labels)[number]) => d.text,
+    getColor: LABEL_COLOR,
+    getSize: 14,
+    sizeUnits: 'pixels',
+    getTextAnchor: 'start',
+    getAlignmentBaseline: 'center',
+    getPixelOffset: (d: (typeof labels)[number]) => [10, offsetById.get(d.id) ?? 0],
+    fontFamily: LABEL_FONT,
+    characterSet: 'auto',
+    fontSettings: { sdf: true },
+    outlineWidth: 2,
+    outlineColor: [0, 0, 0, 255],
+    pickable: false,
+    updateTriggers: {
+      getPosition: [visibleIds.map((v) => `${v.id}:${v.z.toFixed(2)}`).join(), viewState.rotationX, viewState.rotationOrbit],
+      getPixelOffset: [visibleIds.map((v) => `${v.id}:${(offsetById.get(v.id) ?? 0).toFixed(1)}`).join()],
+    },
+  });
 
   return (
-    <DeckGL
-      views={view}
-      viewState={state.viewState}
-      onViewStateChange={({ viewState: v }) => {
-        const vs = v as MapState['viewState'];
-        state.setViewState({ target: vs.target, rotationOrbit: vs.rotationOrbit, rotationX: vs.rotationX, zoom: vs.zoom });
-      }}
-      controller={true}
-      layers={[...stackLayers, ...probeLayers(state)]}
-      onHover={onHover}
-      onClick={onClick}
-      style={{ background: '#000' }}
-    />
+    <div ref={box} style={{ position: 'absolute', inset: 0, background: '#000' }}>
+      {ready && (
+        <DeckGL
+          views={VIEW}
+          viewState={deckViewState}
+          onViewStateChange={onViewStateChange as never}
+          controller={CONTROLLER}
+          parameters={DECK_PARAMETERS}
+          layers={[...stackLayers, labelLayer, ...probeLayers(state as MapState)]}
+          onHover={onHover}
+          onClick={onClick}
+          style={{ background: '#000' }}
+        />
+      )}
+    </div>
   );
 }
