@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import { CLOSEUP_RADII, DEFAULT_ANGLES, DEFAULT_CLOSEUP_RADIUS, EXTENT, LAYER_IDS, SPACING, VIEW_LIMITS } from './config';
 import type { CloseupRadius, LayerId } from './config';
-import { parseLinksQuery } from './links/linksModel';
-import type { LinkKind } from './links/linksModel';
 
 export type LayerStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type DataKey = LayerId | 'boundary';
@@ -30,8 +28,6 @@ export interface MapState {
   probePinned: boolean;
   /** クローズアップの半径（m）。探針が固定されているあいだ、その地点を中心にこの半径の円の範囲を拡大して見せる。 */
   closeupRadius: CloseupRadius;
-  /** 対応の線（固定した円の中の、段と段の関係）の、関係ごとの出し入れ。既定はどちらもオフ。 */
-  links: Record<LinkKind, boolean>;
   data: Partial<Record<DataKey, unknown>>;
   status: Record<DataKey, LayerStatus>;
   setSpacing(v: number): void;
@@ -43,7 +39,6 @@ export interface MapState {
   setProbe(p: MapState['probe']): void;
   setProbePinned(v: boolean): void;
   setCloseupRadius(r: CloseupRadius): void;
-  setLink(kind: LinkKind, on: boolean): void;
 }
 
 declare global {
@@ -62,7 +57,7 @@ const DEFAULT_VIEW: ViewState = {
   zoom: Math.log2(480 / (EXTENT.maxX - EXTENT.minX)),
 };
 
-type InitialState = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius' | 'links'>;
+type InitialState = Pick<MapState, 'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius'>;
 
 function isLayerId(s: string): s is LayerId {
   return (LAYER_IDS as readonly string[]).includes(s);
@@ -108,8 +103,7 @@ function ids(v: string | null): LayerId[] {
 /**
  * URL クエリから初期状態を作る。
  * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
- * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）,
- * `links=<facility-station,station-population>`（対応の線の初期状態）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
+ * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
@@ -143,7 +137,7 @@ export function initialStateFromQuery(search: string): InitialState {
     ...(zoom !== null && { zoom }),
   };
 
-  return { order, visible, solo, spacing, viewState, probe, probePinned: probe !== null, closeupRadius: radiusQuery(search), links: parseLinksQuery(q.get('links')) };
+  return { order, visible, solo, spacing, viewState, probe, probePinned: probe !== null, closeupRadius: radiusQuery(search) };
 }
 
 const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
@@ -171,7 +165,6 @@ export const useMapStore = create<MapState>()((set) => ({
   setProbe: (p) => set({ probe: p }),
   setProbePinned: (v) => set({ probePinned: v }),
   setCloseupRadius: (r) => set({ closeupRadius: r }),
-  setLink: (kind, on) => set((s) => ({ links: { ...s.links, [kind]: on } })),
 }));
 
 if (typeof window !== 'undefined') {

@@ -9,12 +9,6 @@ export const FACILITY_COUNT_RADIUS = 500;
 /** 「最寄りの施設」を探す距離の上限（最寄り駅の探索と同じ 1km）。 */
 export const FACILITY_NEAREST_RADIUS = 1000;
 
-/** 種別ごとの色。施設レイヤーの点と、対応の線（施設 → 最寄り駅）で共有する。学校は明るい水色、病院は赤。 */
-export const FACILITY_COLOR: Record<FacilityKind, [number, number, number]> = {
-  school: [100, 205, 255],
-  hospital: [255, 70, 60],
-};
-
 export const FACILITY_KIND_LABEL: Record<FacilityKind, string> = { school: '学校', hospital: '病院' };
 
 export interface FacilityData {

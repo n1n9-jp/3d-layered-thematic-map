@@ -7,8 +7,6 @@ import type { CloseupRadius, LayerId } from '../config';
 import { registry } from '../layers';
 import { probeMarkLayers } from '../probe/controller';
 import { pillarLayers } from '../probe/pillar';
-import { linkLayers } from '../links/linkLayers';
-import { useLinkSet } from '../links/useLinks';
 import { translationMatrix } from '../stack';
 import { useMapStore } from '../store';
 import { boundaryLayer } from '../view/boundaryLines';
@@ -49,8 +47,6 @@ export function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
   const sliderActive = useSyncExternalStore(subscribeSliderActive, getSliderActive);
   const shown = useDisplayedZ(targets, sliderActive);
   const top = topOf(shown);
-  const linkSet = useLinkSet(circle);
-  const linksOn = useMapStore((s) => s.links);
 
   const view = useMemo(
     () => closeupView({ circle, rotationX, rotationOrbit, top, size }),
@@ -87,7 +83,6 @@ export function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
     if (cut.boundary && !(next && Math.abs(next.z - z) <= 1)) layers.push(boundaryLayer(cut.boundary, `closeup-${id}`, z));
   }
   layers.push(...pillarLayers({ circle, zs: tiers.map((t) => t.z), rotationOrbit, idPrefix: 'closeup' }));
-  if (linkSet) layers.push(...linkLayers({ links: linkSet, on: linksOn, zs: shown, idPrefix: 'closeup' }));
   layers.push(...stackLabelLayers({ tiers, viewState: view, size, box: closeupBox(circle), prefix: 'closeup' }));
   layers.push(...probeMarkLayers(circle, true, tiers.map((t) => t.z)));
 

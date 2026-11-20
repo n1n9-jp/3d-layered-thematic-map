@@ -5,14 +5,8 @@ import { CloseupStack, RadiusButtons, useCloseupCut } from '../closeup/Closeup';
 import type { CloseupCircle } from '../closeup/closeupModel';
 import type { CloseupCut } from '../closeup/cut';
 import { registry } from '../layers';
-import { LINK_KINDS, LINK_LABEL, LINK_LAYERS, describeFacilityStation, describeStationPopulation, linkAvailable } from '../links/linksModel';
-import type { LinkKind } from '../links/linksModel';
-import type { LinkSet } from '../links/compute';
-import { useLinkSet } from '../links/useLinks';
-import { FACILITY_COLOR } from '../layers/facilitiesModel';
 import { installProbeKeys, releaseProbe } from '../probe/controller';
 import { cachedDistrictLookup } from '../probe/district';
-import { DENSITY_CLASSES } from '../layers/population/classes';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
 import type { BoundaryData } from '../types';
@@ -150,101 +144,12 @@ function HoverBody({ p }: { p: Point }) {
   );
 }
 
-/** 切り替えの横に添える、関係が示すものの色見本。 */
-function Swatches({ kind }: { kind: LinkKind }) {
-  const chips =
-    kind === 'facility-station'
-      ? [FACILITY_COLOR.school, FACILITY_COLOR.hospital]
-      : [DENSITY_CLASSES[0].color, DENSITY_CLASSES[2].color, DENSITY_CLASSES[4].color, DENSITY_CLASSES[6].color];
-  return (
-    <span className="ic-swatches" aria-hidden="true">
-      {chips.map((c, i) => (
-        <span key={i} className="ic-swatch" style={{ background: `rgb(${c[0]},${c[1]},${c[2]})` }} />
-      ))}
-    </span>
-  );
-}
-
-/** 対応の線を出し入れする切り替え。関係する2つの段がどちらも表示中のときだけ使える。 */
-function LinkToggles() {
-  const order = useMapStore((s) => s.order);
-  const visible = useMapStore((s) => s.visible);
-  const solo = useMapStore((s) => s.solo);
-  const spacing = useMapStore((s) => s.spacing);
-  const links = useMapStore((s) => s.links);
-  const stack = { order, visible, solo, spacing };
-  return (
-    <div className="ic-links" role="group" aria-label="対応の線" data-testid="link-toggles">
-      <span className="ic-links-title">対応の線</span>
-      {LINK_KINDS.map((kind) => {
-        const available = linkAvailable(kind, stack);
-        const [a, b] = LINK_LAYERS[kind];
-        return (
-          <label
-            key={kind}
-            className="ic-link"
-            data-disabled={!available}
-            title={available ? undefined : `${LABELS[a]}と${LABELS[b]}の両方を表示すると使えます`}
-          >
-            <input
-              type="checkbox"
-              data-testid={`link-toggle-${kind}`}
-              checked={links[kind]}
-              disabled={!available}
-              onChange={(e) => useMapStore.getState().setLink(kind, e.target.checked)}
-            />
-            {LINK_LABEL[kind]}
-            <Swatches kind={kind} />
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-/** オンにしている関係の要約（線が示す内容の数値）。切り替えのすぐ下、レイヤーごとの表の上に置く。 */
-function LinkSummary({ links }: { links: LinkSet | null }) {
-  const order = useMapStore((s) => s.order);
-  const visible = useMapStore((s) => s.visible);
-  const solo = useMapStore((s) => s.solo);
-  const spacing = useMapStore((s) => s.spacing);
-  const on = useMapStore((s) => s.links);
-  const stack = { order, visible, solo, spacing };
-  const shown = LINK_KINDS.filter((k) => on[k] && linkAvailable(k, stack));
-  if (!links || shown.length === 0) return null;
-  return (
-    <table className="ic-table ic-link-summary" data-testid="link-summary">
-      <colgroup>
-        <col className="ic-col-name" />
-        <col />
-      </colgroup>
-      <tbody>
-        {shown.map((kind) => {
-          const lines =
-            kind === 'facility-station'
-              ? links.facilityStation && describeFacilityStation(links.facilityStation.summary)
-              : links.stationPopulation && describeStationPopulation(links.stationPopulation.summary);
-          return (
-            <tr key={kind} data-link={kind}>
-              <th scope="row">{LINK_LABEL[kind]}</th>
-              <td>
-                {lines ? lines.map((t, i) => <div key={i} className="ic-v">{t}</div>) : <span className="ic-dim">読み込み中…</span>}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
-
 /** 固定中：上にクローズアップ（円形の積層と半径のボタン）、下に表（「この地点」と「半径 ○km 内」）。 */
 function PinnedBody({ p }: { p: Point }) {
   const radius = useMapStore((s) => s.closeupRadius);
   const circle = useMemo<CloseupCircle>(() => ({ x: p.x, y: p.y, r: radius }), [p.x, p.y, radius]);
   const cut = useCloseupCut(circle);
   const rows = useRows(p, cut.summaries);
-  const linkSet = useLinkSet(circle);
   const [canvasBox, size] = useElementSize<HTMLDivElement>();
   return (
     <>
@@ -258,9 +163,7 @@ function PinnedBody({ p }: { p: Point }) {
       <div className="cu-canvas ic-canvas" ref={canvasBox} data-testid="closeup">
         {size && <CloseupStack cut={cut} size={size} />}
       </div>
-      <LinkToggles />
       <div className="ic-scroll" data-testid="info-scroll">
-        <LinkSummary links={linkSet} />
         <InfoTable rows={rows} areaTitle={areaHeading(radius)} />
       </div>
     </>
