@@ -9,6 +9,9 @@
 //   --hover <x,y>   撮影前にマウスを動かす画面座標
 //   --url <URL>     指定時は Vite を起動せず、この URL を撮る（--query は付け足される）
 //   --wait <ms>     撮影前の追加待ち時間（既定 0）
+//   --require-ready 撮影前に window.__store の status（boundary と各レイヤー）がすべて ready か確かめる。
+//                   ready でないものがあれば、その名前を表示し、画像は保存したうえで終了コード 1 で終わる。
+// 実行の最後に、ページを開いてから撮影直前までの所要時間（ms）を表示する。
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -40,6 +43,7 @@ const { values } = parseArgs({
     hover: { type: 'string' },
     url: { type: 'string' },
     wait: { type: 'string', default: '0' },
+    'require-ready': { type: 'boolean', default: false },
   },
 });
 
@@ -139,6 +143,17 @@ let vite = null;
 let browser = null;
 let exitCode = 0;
 
+// 何らかの理由で終了処理を通らずに抜けても、Vite のプロセスグループを残さない（同期で送れる SIGKILL）
+process.on('exit', () => {
+  if (vite && vite.exitCode === null) {
+    try {
+      process.kill(-vite.pid, 'SIGKILL');
+    } catch {
+      // すでに終了している
+    }
+  }
+});
+
 // Ctrl-C や kill でも Vite のプロセスグループを残さない
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, async () => {
@@ -171,6 +186,7 @@ try {
   page.on('pageerror', (err) => problems.push(`[pageerror] ${err.message}`));
   page.on('requestfailed', (req) => problems.push(`[requestfailed] ${req.url()} ${req.failure()?.errorText ?? ''}`));
 
+  const openedAt = performance.now();
   await page.goto(target, { waitUntil: 'load' });
 
   // 読み込み完了待ち。window.__ready が true になるまで待つ。
@@ -208,12 +224,34 @@ try {
   }
   if (waitMs > 0) await sleep(waitMs);
 
+  // 読み込み状態の確認（--require-ready）。画像は失敗していても保存する。
+  let notReady = null;
+  if (values['require-ready']) {
+    const status = await page.evaluate(() => window.__store?.getState().status ?? null);
+    if (status === null) {
+      notReady = ['window.__store が見つかりません'];
+    } else {
+      const bad = Object.entries(status).filter(([, v]) => v !== 'ready');
+      if (bad.length > 0) notReady = bad.map(([k, v]) => `${k} (${v})`);
+    }
+  }
+
+  const elapsedMs = Math.round(performance.now() - openedAt);
   mkdirSync(dirname(outPath), { recursive: true });
   await page.screenshot({ path: outPath });
 
   console.log(`url: ${target}`);
   console.log(`ready: ${readyMode}`);
   console.log(`saved: ${outPath} (${viewport.width}x${viewport.height} @${scale}x)`);
+  console.log(`elapsed: ${elapsedMs}ms (ページを開いてから撮影直前まで)`);
+  if (values['require-ready']) {
+    if (notReady) {
+      console.log(`load status: NOT READY — ${notReady.join(', ')}`);
+      exitCode = 1;
+    } else {
+      console.log('load status: all ready');
+    }
+  }
   if (problems.length === 0) {
     console.log('browser errors: none');
   } else {
