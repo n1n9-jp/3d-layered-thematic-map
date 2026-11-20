@@ -102,107 +102,184 @@ export function convexIntersectsRect(poly: readonly Pt[], r: Rect): boolean {
   return true;
 }
 
-const within = (v: number, lo: number, hi: number) => v >= lo - EPS && v <= hi + EPS;
-
-/** 凸多角形の内部（境界を除く）に点があるか。 */
-function strictlyInside(poly: readonly Pt[], p: Pt): boolean {
-  if (poly.length < 3) return false;
-  let area = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i];
-    const b = poly[(i + 1) % poly.length];
-    area += a[0] * b[1] - b[0] * a[1];
-  }
-  const sign = area >= 0 ? 1 : -1;
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i];
-    const b = poly[(i + 1) % poly.length];
-    if (sign * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) <= EPS) return false;
-  }
-  return true;
+/** 外形 offsets の、中心から見た x・y の範囲。 */
+function extent(offsets: readonly Pt[]) {
+  const xs = offsets.map((p) => p[0]);
+  const ys = offsets.map((p) => p[1]);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
 }
 
+/** 長方形の4隅。 */
+const cornersOf = (r: Rect): Pt[] => [[r.left, r.top], [r.right, r.top], [r.right, r.bottom], [r.left, r.bottom]];
+
 /**
- * 外形 offsets（zoom 0 での、箱の中心からの相対位置）を倍率 s にしたとき、その中心を置ける場所。
- * 領域 inner に収まり、avoid のどれにも重ならない位置のうち、希望の位置 pref にいちばん近いもの。なければ null。
- *
- * 外形を倍率 s で位置 c に置いたとき長方形 r と重なるのは、c が「r から外形を引いた集合（ミンコフスキー和）」の内側にあるとき。
- * この集合は凸多角形なので、pref がその内側なら、境界上の最も近い点（辺への射影、頂点、置ける範囲の縁との交点）を選ぶ。
+ * 外形を、長方形 r に重ならないよう、法線 n の直線の「n の向きの側」に置く条件で、置ける最大の倍率。
+ * 外形を倍率 s・中心 c に置くと、外形の頂点は c + s·h。すべてが n·p ≥ max(r の n·p) を満たす条件は、c について線形：
+ *   n·c ≥ hR − s·min(n·h)
+ * 中心 c は倍率 s で決まる範囲 [loX, hiX] × [loY, hiY] に動くので、n·c の最大値は s の一次式 A − s·B になり、s は閉じた式で求まる。
  */
-export function placeBox(offsets: readonly Pt[], s: number, pref: Pt, inner: Rect, avoid: readonly Rect[]): Pt | null {
-  let loX = -Infinity, hiX = Infinity, loY = -Infinity, hiY = Infinity;
-  for (const [x, y] of offsets) {
-    loX = Math.max(loX, inner.left - x * s);
-    hiX = Math.min(hiX, inner.right - x * s);
-    loY = Math.max(loY, inner.top - y * s);
-    hiY = Math.min(hiY, inner.bottom - y * s);
-  }
-  if (loX > hiX + EPS || loY > hiY + EPS) return null;
-  const clampX = (v: number) => Math.min(hiX, Math.max(loX, v));
-  const clampY = (v: number) => Math.min(hiY, Math.max(loY, v));
-  const start: Pt = [clampX(pref[0]), clampY(pref[1])];
+function scaleAlong(n: Pt, r: Rect, ext: ReturnType<typeof extent>, offsets: readonly Pt[], inner: Rect, sInner: number): number {
+  const A = n[0] * (n[0] >= 0 ? inner.right : inner.left) + n[1] * (n[1] >= 0 ? inner.bottom : inner.top);
+  const B = n[0] * (n[0] >= 0 ? ext.maxX : ext.minX) + n[1] * (n[1] >= 0 ? ext.maxY : ext.minY);
+  let mn = Infinity;
+  for (const [x, y] of offsets) mn = Math.min(mn, n[0] * x + n[1] * y);
+  const hR = Math.max(...cornersOf(r).map((c) => n[0] * c[0] + n[1] * c[1]));
+  const denom = B - mn;
+  if (denom <= 1e-12) return sInner;
+  return Math.min(sInner, Math.max(0, (A - hR) / denom));
+}
 
-  const hull = convexHull(offsets);
-  const forbidden = avoid.map((r) => {
-    const sums: Pt[] = [];
-    for (const [rx, ry] of [[r.left, r.top], [r.right, r.top], [r.right, r.bottom], [r.left, r.bottom]] as const)
-      for (const [hx, hy] of hull) sums.push([rx - s * hx, ry - s * hy]);
-    return convexHull(sums);
-  });
-  const blocked = (p: Pt) => forbidden.some((q) => strictlyInside(q, p));
-  if (!blocked(start)) return start;
-
-  const cands: Pt[] = [[loX, loY], [hiX, loY], [hiX, hiY], [loX, hiY]];
-  for (const q of forbidden)
-    for (let i = 0; i < q.length; i++) {
-      const a = q[i];
-      const b = q[(i + 1) % q.length];
-      cands.push(a);
-      const dx = b[0] - a[0];
-      const dy = b[1] - a[1];
-      const len2 = dx * dx + dy * dy;
-      if (len2 > 0) {
-        const t = Math.min(1, Math.max(0, ((start[0] - a[0]) * dx + (start[1] - a[1]) * dy) / len2));
-        cands.push([a[0] + t * dx, a[1] + t * dy]);
-      }
-      for (const x of [loX, hiX]) if (dx !== 0) { const t = (x - a[0]) / dx; if (within(t, 0, 1)) cands.push([x, a[1] + t * dy]); }
-      for (const y of [loY, hiY]) if (dy !== 0) { const t = (y - a[1]) / dy; if (within(t, 0, 1)) cands.push([a[0] + t * dx, y]); }
+/** 凸多角形 poly の、n·p ≥ b の側だけを残す（Sutherland–Hodgman）。 */
+function clipHalfPlane(poly: readonly Pt[], n: Pt, b: number): Pt[] {
+  const out: Pt[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const c = poly[(i + 1) % poly.length];
+    const da = n[0] * a[0] + n[1] * a[1] - b;
+    const dc = n[0] * c[0] + n[1] * c[1] - b;
+    if (da >= 0) out.push(a);
+    if ((da > 0 && dc < 0) || (da < 0 && dc > 0)) {
+      const t = da / (da - dc);
+      out.push([a[0] + t * (c[0] - a[0]), a[1] + t * (c[1] - a[1])]);
     }
-  let best: Pt | null = null;
+  }
+  return out;
+}
+
+/** 点 p から線分 ab への最も近い点。 */
+function nearestOnSegment(p: Pt, a: Pt, b: Pt): Pt {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.min(1, Math.max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+  return [a[0] + t * dx, a[1] + t * dy];
+}
+
+/** 凸多角形（頂点列）の中の、p にいちばん近い点。p が内側なら p。 */
+function nearestInConvex(poly: readonly Pt[], p: Pt): Pt {
+  if (poly.length === 1) return poly[0];
+  let inside = poly.length >= 3;
+  let sign = 0;
+  for (let i = 0; inside && i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const cr = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    if (Math.abs(cr) <= 1e-12) continue;
+    if (sign === 0) sign = Math.sign(cr);
+    else if (Math.sign(cr) !== sign) inside = false;
+  }
+  if (inside) return p;
+  let best = poly[0];
   let bestD = Infinity;
-  for (const c of cands) {
-    if (!within(c[0], loX, hiX) || !within(c[1], loY, hiY) || blocked(c)) continue;
-    const d = (c[0] - start[0]) ** 2 + (c[1] - start[1]) ** 2;
+  for (let i = 0; i < poly.length; i++) {
+    const q = nearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]);
+    const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2;
     if (d < bestD) {
       bestD = d;
-      best = [clampX(c[0]), clampY(c[1])];
+      best = q;
     }
   }
   return best;
 }
 
+/** 避ける長方形ごとの分離線の向き（法線）を決めるときの角度の刻み（度）と、最大倍率からの許容幅。 */
+const ANGLE_STEP_DEG = 1;
+const PLATEAU = 0.1;
+/** 数値の誤差で、収まるはずの外形がわずかにはみ出さないよう、求めた倍率にかける係数。 */
+const SAFETY = 1 - 1e-7;
 /**
- * 外形 offsets を領域 inner に収め、avoid と重ならないようにできる最大の倍率と、そのときの中心の位置。
- * 中心はなるべく pref に近い位置。避ける領域に阻まれて置けないときは、避けずに領域だけに収める。
+ * 避けるときは、分離線の条件で置ける最大の倍率より少し小さくする。
+ * 最大ちょうどでは、置ける中心の集まりが1点に潰れ、線の向きがわずかに変わるだけで、その点が領域の別の角へ跳ぶ。
+ * 少し小さくすれば、置ける範囲に幅が残り、中心は連続的に動く。
+ */
+const SLACK = 0.99;
+
+/**
+ * 外形 offsets（zoom 0 での、箱の中心からの相対位置。点対称）を、領域 inner に収め、avoid の長方形のどれにも重ならないように置く。
+ * 倍率はなるべく大きく、中心はなるべく pref の近くにする。
+ *
+ * 避け方は「長方形と外形を分ける直線の向き」を1つ決め、外形をその直線の片側に置く条件にする。
+ * この条件のもとでは、置ける中心の集まりが凸多角形になるので、倍率が決まれば、pref にいちばん近い中心が1つに決まる。
+ * 向きは、置ける最大の倍率が最も大きい向きの近くで決める。最大に近い向き（最大の 95% 以上）の重み付き平均なので、
+ * 間隔・画面の大きさ・視点の角度を連続的に変えるとき、向き・倍率・中心がどれも連続的に変わる。
+ * （「いま pref に近い置き場所」を毎回選び直す方式では、避ける場所が上から右へ入れ替わる瞬間に中心が跳ぶ。）
+ *
+ * 避けるのが不可能なとき（領域が避ける長方形に覆われているなど）は、避けずに領域だけに収める。
  */
 export function maxScale(offsets: readonly Pt[], pref: Pt, inner: Rect, avoid: readonly Rect[]): { scale: number; center: Pt } {
-  const xs = offsets.map((p) => p[0]);
-  const ys = offsets.map((p) => p[1]);
-  const w = Math.max(...xs) - Math.min(...xs);
-  const h = Math.max(...ys) - Math.min(...ys);
+  const ext = extent(offsets);
+  const w = ext.maxX - ext.minX;
+  const h = ext.maxY - ext.minY;
   const hi = Math.max(1e-6, Math.min((inner.right - inner.left) / Math.max(w, 1e-6), (inner.bottom - inner.top) / Math.max(h, 1e-6)));
+  const rectAt = (s: number) => ({
+    left: inner.left - ext.minX * s,
+    right: inner.right - ext.maxX * s,
+    top: inner.top - ext.minY * s,
+    bottom: inner.bottom - ext.maxY * s,
+  });
+  const clampInto = (r: Rect): Pt => [Math.min(r.right, Math.max(r.left, pref[0])), Math.min(r.bottom, Math.max(r.top, pref[1]))];
+  const fallback = () => ({ scale: hi * SAFETY, center: clampInto(rectAt(hi * SAFETY)) });
+  if (avoid.length === 0) return fallback();
 
-  const top = placeBox(offsets, hi, pref, inner, avoid);
-  if (top) return { scale: hi, center: top };
-  // 倍率を上げるほど置ける場所は減る（単調）。
-  const floor = hi * 1e-3;
-  if (!placeBox(offsets, floor, pref, inner, avoid)) return { scale: hi, center: placeBox(offsets, hi, pref, inner, []) ?? pref };
-  let lo = floor;
-  let up = hi;
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + up) / 2;
-    if (placeBox(offsets, mid, pref, inner, avoid)) lo = mid;
-    else up = mid;
+  // 長方形ごとに、分離線の法線を決める。
+  const normals: Pt[] = [];
+  let sMax = hi;
+  for (const r of avoid) {
+    const dirs: { n: Pt; s: number }[] = [];
+    let best = 0;
+    for (let deg = 0; deg < 360; deg += ANGLE_STEP_DEG) {
+      const t = (deg * Math.PI) / 180;
+      const n: Pt = [Math.cos(t), Math.sin(t)];
+      const s = scaleAlong(n, r, ext, offsets, inner, hi);
+      dirs.push({ n, s });
+      best = Math.max(best, s);
+    }
+    if (best <= hi * 1e-3) return fallback();
+    let vx = 0;
+    let vy = 0;
+    for (const { n, s } of dirs) {
+      const wt = Math.max(0, s - (1 - PLATEAU) * best);
+      vx += wt * n[0];
+      vy += wt * n[1];
+    }
+    const len = Math.hypot(vx, vy);
+    const n: Pt = len > 1e-12 ? [vx / len, vy / len] : dirs.reduce((a, b) => (b.s > a.s ? b : a)).n;
+    normals.push(n);
+    sMax = Math.min(sMax, scaleAlong(n, r, ext, offsets, inner, hi));
   }
-  return { scale: lo, center: placeBox(offsets, lo, pref, inner, avoid) as Pt };
+
+  const constraints = avoid.map((r, k) => {
+    const n = normals[k];
+    let mn = Infinity;
+    for (const [x, y] of offsets) mn = Math.min(mn, n[0] * x + n[1] * y);
+    const hR = Math.max(...cornersOf(r).map((c) => n[0] * c[0] + n[1] * c[1]));
+    return { n, mn, hR };
+  });
+  const regionAt = (s: number): Pt[] => {
+    const r = rectAt(s);
+    let poly: Pt[] = cornersOf(r);
+    if (r.left > r.right || r.top > r.bottom) return [];
+    for (const { n, mn, hR } of constraints) {
+      poly = clipHalfPlane(poly, n, hR - s * mn);
+      if (poly.length === 0) return [];
+    }
+    return poly;
+  };
+
+  let s = sMax * SLACK;
+  let region = regionAt(s);
+  if (region.length === 0) {
+    // 長方形が複数あるとき、個別に決めた向きでは同時に置けない場合がある。置ける倍率まで下げる。
+    let lo = 0;
+    let up = s;
+    for (let i = 0; i < 50; i++) {
+      const mid = (lo + up) / 2;
+      if (regionAt(mid).length > 0) lo = mid;
+      else up = mid;
+    }
+    s = lo * SAFETY;
+    region = regionAt(s);
+    if (region.length === 0 || s <= hi * 1e-3) return fallback();
+  }
+  return { scale: s, center: nearestInConvex(region, pref) };
 }

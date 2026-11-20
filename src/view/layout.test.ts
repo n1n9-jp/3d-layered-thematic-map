@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LABEL_ROOM, PROBE_PANEL, RIGHT_PANEL_W, computeLayout, convexHull, convexIntersectsRect, maxScale, paddedCenter, placeBox } from './layout';
+import { LABEL_ROOM, PROBE_PANEL, RIGHT_PANEL_W, computeLayout, convexHull, convexIntersectsRect, maxScale, paddedCenter } from './layout';
 import type { Pt, Rect } from './layout';
 
 describe('convexHull', () => {
@@ -54,39 +54,39 @@ describe('maxScale', () => {
     const r = maxScale(diamond, pref, inner, avoid);
     expect(r.scale).toBeGreaterThan(3.5);
     expect(convexIntersectsRect(placed(r.scale, r.center), avoid[0])).toBe(false);
-    // 領域の内側
     for (const p of placed(r.scale, r.center)) {
       expect(p[0]).toBeGreaterThanOrEqual(-1e-6);
       expect(p[0]).toBeLessThanOrEqual(1000 + 1e-6);
       expect(p[1]).toBeGreaterThanOrEqual(-1e-6);
       expect(p[1]).toBeLessThanOrEqual(500 + 1e-6);
     }
-    // これ以上は大きくできない
-    expect(placeBox(diamond, r.scale * 1.02, pref, inner, avoid)).toBeNull();
   });
-  it('避けても倍率を保てるほど広いなら、倍率は領域だけで決まる', () => {
+  it('避けても倍率を保てるほど広いなら、倍率は領域だけで決まり、中心は希望の位置', () => {
     const avoid: Rect[] = [{ left: 0, top: 450, right: 100, bottom: 500 }];
-    expect(maxScale(diamond, pref, inner, avoid).scale).toBeCloseTo(5);
+    const r = maxScale(diamond, pref, inner, avoid);
+    expect(r.scale).toBeGreaterThan(5 * 0.985); // 避けるときは最大より 1% ほど小さくして、置ける範囲に幅を残す
+    expect(r.scale).toBeLessThanOrEqual(5 + 1e-9);
+    expect(Math.hypot(r.center[0] - 500, r.center[1] - 250)).toBeLessThan(6);
   });
   it('どこにも置けないときは、避けずに領域だけに収める', () => {
     const avoid: Rect[] = [{ left: -10, top: -10, right: 1010, bottom: 510 }];
-    expect(maxScale(diamond, pref, inner, avoid).scale).toBeCloseTo(5);
+    const r = maxScale(diamond, pref, inner, avoid);
+    expect(r.scale).toBeCloseTo(5);
+    expect(Number.isFinite(r.center[0]) && Number.isFinite(r.center[1])).toBe(true);
   });
-});
-
-describe('placeBox', () => {
-  const sq: Pt[] = [[-10, -10], [10, -10], [10, 10], [-10, 10]];
-  const inner: Rect = { left: 0, top: 0, right: 100, bottom: 100 };
-  it('希望の位置が空いていればそこ', () => {
-    expect(placeBox(sq, 1, [50, 50], inner, [{ left: 0, top: 80, right: 20, bottom: 100 }])).toEqual([50, 50]);
-  });
-  it('重なるときは、重ならない最も近い位置へ動かす', () => {
-    const avoid: Rect[] = [{ left: 40, top: 40, right: 60, bottom: 60 }];
-    const c = placeBox(sq, 1, [50, 50], inner, avoid) as Pt;
-    expect(c).not.toBeNull();
-    const poly = sq.map((p) => [c[0] + p[0], c[1] + p[1]] as const);
-    expect(convexIntersectsRect(poly, avoid[0])).toBe(false);
-    // 4方向のどれかへ 20 動かした位置（箱の半幅10 + 避ける領域の半幅10）
-    expect(Math.hypot(c[0] - 50, c[1] - 50)).toBeCloseTo(20);
+  it('外形・領域・避ける領域を少しずつ変えると、倍率も中心も連続的に変わる', () => {
+    let prev: { scale: number; center: Pt } | null = null;
+    for (let k = 0; k <= 400; k++) {
+      const h = 40 + k * 0.5; // 外形の縦を 40〜240 に変える
+      const o: Pt[] = [[-100, 0], [100, 0], [0, -h], [0, h]];
+      const avoid: Rect[] = [{ left: 0, top: 330, right: 330, bottom: 500 }];
+      const r = maxScale(o, pref, inner, avoid);
+      expect(Number.isFinite(r.scale) && r.scale > 0).toBe(true);
+      if (prev) {
+        expect(Math.abs(r.scale - prev.scale) / prev.scale).toBeLessThan(0.01);
+        expect(Math.hypot(r.center[0] - prev.center[0], r.center[1] - prev.center[1])).toBeLessThan(5);
+      }
+      prev = r;
+    }
   });
 });

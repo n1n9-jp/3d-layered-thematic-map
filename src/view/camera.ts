@@ -26,6 +26,11 @@ const HALF = (maxX - minX) / 2;
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** 描画領域に大きさがあるか（幅も高さも 1px 以上）。ないときは視点の計算も投影もできない。 */
+export function hasSize(size: Size | null | undefined): size is Size {
+  return !!size && size.width >= 1 && size.height >= 1;
+}
+
 function viewport(vs: View4, width: number, height: number) {
   const vp = VIEW.makeViewport({ width, height, viewState: vs });
   if (!vp) throw new Error('viewport を作れませんでした');
@@ -59,6 +64,7 @@ function solve([a, b, c, d]: Mat2, sx: number, sy: number): [number, number] {
  */
 export function fitView(opts: { rotationX: number; rotationOrbit: number; top: number; size: Size; layout?: Layout }): Pick<ViewState, 'target' | 'zoom'> {
   const { rotationX, rotationOrbit, top, size } = opts;
+  if (!hasSize(size)) throw new Error('描画領域に大きさがありません');
   const { padding, avoid } = opts.layout ?? computeLayout(size);
   const center: [number, number, number] = [CENTER[0], CENTER[1], top / 2];
   // padding なしの View は、target を画面の中心に置く。箱の角の、そこからの相対位置を zoom 0 で測る。
@@ -103,6 +109,7 @@ export function nearestAngle(target: number, from: number): number {
 
 /** 表示確認用：与えた viewState で点を画面へ投影する。 */
 export function projectPoint(vs: View4, size: Size, p: [number, number, number]): [number, number] {
+  if (!hasSize(size)) throw new Error('描画領域に大きさがありません');
   const [x, y] = viewport(vs, size.width, size.height).project(p);
   return [x, y];
 }

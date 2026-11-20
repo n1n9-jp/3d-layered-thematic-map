@@ -12,7 +12,7 @@ import { useMapStore, viewQuery } from '../store';
 import type { MapState, ViewState } from '../store';
 import type { BoundaryData } from '../types';
 import { boundaryLayer, boundaryPaths } from './boundaryLines';
-import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
+import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
 import type { Size } from './camera';
 import { RIGHT_PANEL_W } from './layout';
 import { getSliderActive, subscribeSliderActive } from './sliderActivity';
@@ -83,7 +83,9 @@ export default function StackView() {
     if (!el) return;
     const measure = () => {
       const r = el.getBoundingClientRect();
-      setSize((s) => (s && s.width === r.width && s.height === r.height ? s : { width: r.width, height: r.height }));
+      // 幅か高さが 1px に満たない間は「まだ大きさがない」として扱う（視点の計算も投影もしない）。
+      const next = hasSize(r) ? { width: r.width, height: r.height } : null;
+      setSize((s) => (s === next || (s && next && s.width === next.width && s.height === next.height) ? s : next));
     };
     measure();
     const ro = new ResizeObserver(measure);

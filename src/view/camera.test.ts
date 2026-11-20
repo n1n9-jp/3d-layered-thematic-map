@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { OrbitView } from '@deck.gl/core';
 import { EXTENT } from '../config';
-import { LIMITS, SOLO_ANGLES, fitView, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
+import { LIMITS, SOLO_ANGLES, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
 import type { Size } from './camera';
-import { computeLayout, paddedCenter } from './layout';
+import { computeLayout, convexHull, convexIntersectsRect, paddedCenter } from './layout';
 
 const corners = (top: number) =>
   [EXTENT.minX, EXTENT.maxX].flatMap((x) =>
@@ -62,6 +62,57 @@ describe('fitView', () => {
     const z = (top: number) => fitView({ rotationX: 20, rotationOrbit: 45, top, size, layout }).zoom;
     expect(z(80000)).toBeLessThan(z(48000));
     expect(z(48000)).toBeLessThan(z(0));
+  });
+});
+
+describe('間隔スライダーを動かしたときの連続性', () => {
+  const RIGHT = 256;
+  const center = (top: number): [number, number, number] => [(EXTENT.minX + EXTENT.maxX) / 2, (EXTENT.minY + EXTENT.maxY) / 2, top / 2];
+  // 窓の大きさ（描画領域は右のパネルの幅を除いた範囲）。冒頭の4つは、位置が跳んでいた再現条件。
+  const windows: [number, number][] = [[1400, 1000], [1920, 1000], [1400, 700], [1400, 900], [1000, 700], [1280, 800], [800, 600], [1664, 1000]];
+  const angles: [number, number][] = [[20, 45], [35, 120], [60, 300], [12, 10]];
+  for (const [w, h] of windows)
+    for (const [rotationX, rotationOrbit] of angles)
+      it(`${w}x${h} rx=${rotationX} ro=${rotationOrbit}: 間隔を 0〜20km で 10m 刻みに動かすと、箱の中心は 1 刻みあたり 2px を超えて動かず、避ける領域に重ならない`, () => {
+        const size: Size = { width: w - RIGHT, height: h };
+        const layout = computeLayout(size);
+        let prev: [number, number] | null = null;
+        let prevZoom = 0;
+        let worst = 0;
+        for (let spacing = 0; spacing <= 20000; spacing += 10) {
+          const top = 4 * spacing;
+          const f = fitView({ rotationX, rotationOrbit, top, size, layout });
+          expect(Number.isFinite(f.zoom) && f.target.every(Number.isFinite)).toBe(true);
+          const vs = { ...f, rotationX, rotationOrbit };
+          const c = projectPoint(vs, size, center(top));
+          if (prev) {
+            worst = Math.max(worst, Math.hypot(c[0] - prev[0], c[1] - prev[1]));
+            expect(Math.abs(f.zoom - prevZoom)).toBeLessThan(0.02); // 倍率も連続（10m で 1.4% 未満）
+          }
+          prev = c;
+          prevZoom = f.zoom;
+          if (f.zoom > LIMITS.minZoom + 1e-9 && f.zoom < LIMITS.maxZoom - 1e-9) {
+            const hull = convexHull(corners(top).map((p) => projectPoint(vs, size, p)));
+            for (const r of layout.avoid) expect(convexIntersectsRect(hull, r)).toBe(false);
+          }
+        }
+        expect(worst).toBeLessThanOrEqual(2);
+      });
+});
+
+describe('描画領域に大きさがないとき', () => {
+  it('幅か高さが 1px に満たなければ、大きさがないとみなす', () => {
+    expect(hasSize({ width: 0, height: 700 })).toBe(false);
+    expect(hasSize({ width: 800, height: 0 })).toBe(false);
+    expect(hasSize({ width: 0.5, height: 700 })).toBe(false);
+    expect(hasSize(null)).toBe(false);
+    expect(hasSize({ width: 1, height: 1 })).toBe(true);
+  });
+  it('小さな領域でも fitView は落ちず、有限の値を返す', () => {
+    for (const [width, height] of [[1, 1], [1, 700], [44, 700], [200, 5], [100, 100], [330, 300]]) {
+      const f = fitView({ rotationX: 20, rotationOrbit: 45, top: 48000, size: { width, height } });
+      expect(Number.isFinite(f.zoom) && f.target.every(Number.isFinite)).toBe(true);
+    }
   });
 });
 
