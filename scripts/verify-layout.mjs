@@ -105,15 +105,26 @@ async function open(browser, base, size, query = '') {
   return { ctx, page, errors, w, h };
 }
 
+/** 最上段の平面の、東京駅付近（23区の中）の画面上の位置。 */
+async function topPlanePoint(page) {
+  const info = await page.evaluate(() => {
+    const r = document.querySelector('canvas').getBoundingClientRect();
+    const s = window.__store.getState();
+    return { left: r.left, top: r.top, width: r.width, height: r.height, vs: s.viewState, spacing: s.spacing };
+  });
+  const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ width: info.width, height: info.height, viewState: info.vs });
+  const [x, y] = vp.project([1550, 130, 4 * info.spacing]);
+  return [Math.round(info.left + x), Math.round(info.top + y)];
+}
+
 async function viewConsistency(browser, base, size) {
   console.log(`\n[${size}] 固定前・カーソルを置いた状態・固定後・解除後の視点`);
-  const { ctx, page, errors, w, h } = await open(browser, base, size);
+  const { ctx, page, errors } = await open(browser, base, size);
   const v0 = (await getState(page)).view;
   check((await mode(page)) === 'empty', `固定前：列は手がかり（mode=empty）。${fmt(v0)}`);
   check(await page.isVisible('[data-testid=info-hint]'), '固定前：操作の手がかりが見える');
 
-  const hx = Math.round(w * 0.3);
-  const hy = Math.round(h * 0.5);
+  const [hx, hy] = await topPlanePoint(page);
   await page.mouse.move(hx, hy);
   await page.mouse.move(hx + 1, hy + 1);
   await page.mouse.move(hx, hy);
@@ -231,11 +242,12 @@ async function interactions(browser, base, size) {
   check(s4.probe === null && (await mode(page)) === 'empty', 'Esc で解除できる');
 
   // 5. 「解除」ボタンで解除（もう一度固定してから）
-  await page.mouse.move(300, 500);
-  await page.mouse.move(301, 501);
-  await page.mouse.move(300, 500);
+  const [px, py] = await topPlanePoint(page);
+  await page.mouse.move(px, py);
+  await page.mouse.move(px + 1, py + 1);
+  await page.mouse.move(px, py);
   await waitFor(page, () => window.__store.getState().probe !== null);
-  await page.mouse.click(300, 500);
+  await page.mouse.click(px, py);
   await waitFor(page, () => window.__store.getState().probePinned);
   await settle(page, 2500);
   check((await mode(page)) === 'pinned', '再び固定できる');
