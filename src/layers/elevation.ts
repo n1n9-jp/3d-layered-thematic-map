@@ -11,6 +11,11 @@ export interface ElevationLayerData extends ElevationData {
   image: ImageData;
 }
 
+/** 小数1桁に丸める。-0.05〜0 は丸めると -0 になるので、+0 に直す（パネルに「-0」と出さない）。 */
+export function roundTo1(v: number): number {
+  return Math.round(v * 10) / 10 + 0;
+}
+
 const elevation: LayerModule<ElevationLayerData> = {
   id: 'elevation',
   label: '標高',
@@ -45,7 +50,7 @@ const elevation: LayerModule<ElevationLayerData> = {
     return [
       v === null
         ? { label: '標高', value: null }
-        : { label: '標高', value: Math.round(v * 10) / 10, unit: 'm' },
+        : { label: '標高', value: roundTo1(v), unit: 'm' },
     ];
   },
   legend: LEGEND_STOPS.map(({ value, label }) => ({

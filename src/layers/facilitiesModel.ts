@@ -4,6 +4,8 @@ import type { FacilityCollection, FacilityKind, Position, ProbeValue } from '../
 import { formatDistance } from './format';
 
 export const FACILITY_COUNT_RADIUS = 500;
+/** 「最寄りの施設」を探す距離の上限（最寄り駅の探索と同じ 1km）。 */
+export const FACILITY_NEAREST_RADIUS = 1000;
 
 export const FACILITY_KIND_LABEL: Record<FacilityKind, string> = { school: '学校', hospital: '病院' };
 
@@ -41,7 +43,7 @@ export function sampleFacilities(data: FacilityData, x: number, y: number): Prob
     if (data.kind[h.index] === 'school') schools++;
     else hospitals++;
   }
-  const nearest = data.index.nearest(x, y);
+  const nearest = data.index.nearest(x, y, FACILITY_NEAREST_RADIUS);
   return [
     { label: '500m以内', value: `学校 ${schools}、病院 ${hospitals}` },
     {
