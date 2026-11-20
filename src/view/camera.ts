@@ -1,6 +1,11 @@
 import { OrbitView } from '@deck.gl/core';
-import { EXTENT } from '../config';
+import { DEFAULT_ANGLES, EXTENT, VIEW_LIMITS } from '../config';
 import type { ViewState } from '../store';
+import { computeLayout, maxScale, paddedCenter } from './layout';
+import type { Layout, Padding, Pt, Size } from './layout';
+
+export { DEFAULT_ANGLES };
+export type { Layout, Padding, Size };
 
 /**
  * 平行投影の OrbitView。
@@ -9,20 +14,9 @@ import type { ViewState } from '../store';
 export const VIEW = new OrbitView({ orthographic: true, fovy: 5 });
 
 /** viewState に合成する制限値（コントローラではなく viewState が持つ）。下から見上げないよう minRotationX は正。 */
-export const LIMITS = { minZoom: -9, maxZoom: -1, minRotationX: 8, maxRotationX: 90 } as const;
-
-/** 初期視点の角度。 */
-export const DEFAULT_ANGLES = { rotationX: 25, rotationOrbit: 45 } as const;
+export const LIMITS = VIEW_LIMITS;
 /** 単独表示の視点（真上、北が上）。 */
 export const SOLO_ANGLES = { rotationX: 90, rotationOrbit: 0 } as const;
-
-/** 画面に収めるときの余白（px）。右はレイヤー名のぶん広くとる。 */
-export const PAD = { left: 32, right: 132, vertical: 48 } as const;
-
-export interface Size {
-  width: number;
-  height: number;
-}
 
 type View4 = Pick<ViewState, 'target' | 'rotationX' | 'rotationOrbit' | 'zoom'>;
 
@@ -56,31 +50,34 @@ function solve([a, b, c, d]: Mat2, sx: number, sy: number): [number, number] {
 }
 
 /**
- * 高さ 0〜top の箱（EXTENT × 積層全体）が余白つきで画面に収まる target と zoom。
- * 箱は画面上で、レイヤー名のぶんを右に空けて中央に置く。
+ * 高さ 0〜top の箱（EXTENT × 積層全体）が、`layout` の領域（padding の内側）に収まり、
+ * 避ける長方形と重ならない最大の zoom と、そのときの target。
+ * 箱は、領域の中心になるべく近く、避ける長方形と重ならない位置に置く。そのために target を画面の中心から横・縦へずらす。
+ *
+ * deck.gl の View の `padding` は使わない。平行投影の OrbitView では、padding によるずれが
+ * 奥行きに比例して大きくなり、位置が合わなくなるため。
  */
-export function fitView(opts: { rotationX: number; rotationOrbit: number; top: number; size: Size }): Pick<ViewState, 'target' | 'zoom'> {
+export function fitView(opts: { rotationX: number; rotationOrbit: number; top: number; size: Size; layout?: Layout }): Pick<ViewState, 'target' | 'zoom'> {
   const { rotationX, rotationOrbit, top, size } = opts;
+  const { padding, avoid } = opts.layout ?? computeLayout(size);
   const center: [number, number, number] = [CENTER[0], CENTER[1], top / 2];
+  // padding なしの View は、target を画面の中心に置く。箱の角の、そこからの相対位置を zoom 0 で測る。
   const vp = viewport({ target: center, rotationX, rotationOrbit, zoom: 0 }, size.width, size.height);
-
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  const mid = vp.project(center);
+  const offsets: Pt[] = [];
   for (const x of [minX, maxX])
     for (const y of [minY, maxY])
       for (const z of [0, top]) {
         const [px, py] = vp.project([x, y, z]);
-        x0 = Math.min(x0, px); x1 = Math.max(x1, px);
-        y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+        offsets.push([px - mid[0], py - mid[1]]);
       }
 
-  const availW = Math.max(1, size.width - PAD.left - PAD.right);
-  const availH = Math.max(1, size.height - 2 * PAD.vertical);
-  const scale = Math.min(availW / Math.max(1e-6, x1 - x0), availH / Math.max(1e-6, y1 - y0));
+  const inner = { left: padding.left, top: padding.top, right: size.width - padding.right, bottom: size.height - padding.bottom };
+  const { scale, center: place } = maxScale(offsets, paddedCenter(size, padding), inner, avoid);
   const zoom = clamp(Math.log2(scale), LIMITS.minZoom, LIMITS.maxZoom);
 
-  // 箱の中心（= target）が画面の中心に来る。これを、余白の左右差のぶん横へずらす。
-  const shiftPx = (PAD.left - PAD.right) / 2;
-  const [dx, dy] = solve(jacobian(rotationX, rotationOrbit), shiftPx, 0);
+  // 箱の中心（= target）は画面の中心に来る。これを、置く位置のずれのぶんだけ target を動かして直す。
+  const [dx, dy] = solve(jacobian(rotationX, rotationOrbit), place[0] - size.width / 2, place[1] - size.height / 2);
   const s = 2 ** zoom;
   return { zoom, target: [center[0] - dx / s, center[1] - dy / s, center[2]] };
 }

@@ -2,6 +2,7 @@ import ProbePanel from './probe/ProbePanel';
 import LayerPanel from './panel/LayerPanel';
 import SpacingSlider from './panel/SpacingSlider';
 import StackView from './view/StackView';
+import { PANEL } from './view/layout';
 
 const panelStyle = {
   position: 'absolute',
@@ -16,7 +17,21 @@ export default function App() {
   return (
     <>
       <StackView />
-      <div style={{ ...panelStyle, top: 12, right: 12, width: 220, display: 'grid', gap: 12 }}>
+      <div
+        style={{
+          ...panelStyle,
+          top: PANEL.margin,
+          right: PANEL.margin,
+          width: PANEL.width,
+          padding: PANEL.padding,
+          boxSizing: 'content-box',
+          maxHeight: `calc(100% - ${2 * (PANEL.margin + PANEL.padding)}px)`, // 収まらないときは中をスクロールする
+          overflowY: 'auto',
+          display: 'grid',
+          alignContent: 'start',
+          gap: 12,
+        }}
+      >
         <SpacingSlider />
         <LayerPanel />
       </div>
