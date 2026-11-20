@@ -3,7 +3,7 @@ import { OrbitView } from '@deck.gl/core';
 import { DATA_OUTLINE, EXTENT } from '../config';
 import { DATA_BOX, LIMITS, SOLO_ANGLES, fitStack, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, rayToPolygon, spreadLabels } from './camera';
 import type { Size } from './camera';
-import { RIGHT_PANEL_W, closeupWidth, computeLayout, convexHull, convexIntersectsRect, paddedCenter } from './layout';
+import { GUTTER, LABEL_ROOM, RIGHT_PANEL_W, computeLayout, convexHull, convexIntersectsRect, infoColumnWidth, paddedCenter } from './layout';
 
 const corners = (top: number) =>
   [EXTENT.minX, EXTENT.maxX].flatMap((x) =>
@@ -21,8 +21,8 @@ describe('fitView', () => {
   for (const size of sizes)
     for (const [rotationX, rotationOrbit] of [[20, 45], [10, 0], [60, 120], [90, 0], [45, 300]])
       for (const top of [0, 20000, 48000, 80000])
-        it(`${size.width}x${size.height} rx=${rotationX} ro=${rotationOrbit} top=${top}: 箱が余白の内側に収まり、探針パネルと重ならない`, () => {
-          const layout = computeLayout(size);
+        it(`${size.width}x${size.height} rx=${rotationX} ro=${rotationOrbit} top=${top}: 箱が余白の内側に収まり、情報の列と重ならない`, () => {
+          const layout = computeLayout(size, infoColumnWidth(size.width + RIGHT_PANEL_W));
           const f = fitView({ rotationX, rotationOrbit, top, size, layout });
           const vs = { ...f, rotationX, rotationOrbit };
           const pts = corners(top).map((p) => projectPoint(vs, size, p));
@@ -35,7 +35,7 @@ describe('fitView', () => {
             expect(size.width - Math.max(...xs)).toBeGreaterThanOrEqual(right - 1);
             expect(Math.min(...ys)).toBeGreaterThanOrEqual(pt - 1);
             expect(size.height - Math.max(...ys)).toBeGreaterThanOrEqual(bottom - 1);
-            // 左下の探針パネルの長方形に、箱の各辺が入り込まない（辺の上の点で確認）
+            // 情報の列（とレイヤー名の余白）の長方形に、箱の各辺が入り込まない（辺の上の点で確認）
             const r = layout.avoid[0];
             const edge: number[][] = [];
             for (let i = 0; i < pts.length; i++)
@@ -203,57 +203,76 @@ describe('labelAnchors（データのある範囲）', () => {
   });
 });
 
-describe('fitStack（クローズアップが出る前後で、地図の大きさは変わらない）', () => {
-  const windows: [number, number][] = [[1400, 1000], [1000, 700], [1920, 1080], [1280, 800], [1600, 900]];
+describe('fitStack（情報の列を避けて、できるだけ大きく、空き領域の中央に置く）', () => {
+  const windows: [number, number][] = [[1400, 1000], [1000, 700], [2000, 1100], [1920, 1080], [1280, 800], [1600, 900]];
   const angles: [number, number][] = [[20, 45], [12, 0], [60, 120], [90, 0], [45, 300]];
+  const outline = (f: ReturnType<typeof fitStack>, a: [number, number], top: number, size: { width: number; height: number }) =>
+    DATA_OUTLINE.flatMap(([x, y]) => [0, top].map((z) => projectPoint({ ...f, rotationX: a[0], rotationOrbit: a[1] }, size, [x, y, z])));
   for (const [w, h] of windows)
-    for (const [rotationX, rotationOrbit] of angles)
+    for (const a of angles)
       for (const top of [0, 24000, 48000, 80000]) {
         const size = { width: w - RIGHT_PANEL_W, height: h };
-        const cw = closeupWidth(w);
-        const opts = { rotationX, rotationOrbit, top, size, closeupWidth: cw };
-        it(`${w}x${h} rx=${rotationX} ro=${rotationOrbit} top=${top}: zoom は出る前後で同じ。位置は、出ると左へだけ動き（縦は動かない）、右の領域には入らない`, () => {
-          const off = fitStack({ ...opts, closeupOn: false });
-          const on = fitStack({ ...opts, closeupOn: true });
-          expect(off.zoom).toBe(on.zoom);
-          const vs = (f: typeof on) => ({ ...f, rotationX, rotationOrbit });
-          // 23区のデータのある範囲の画面上の外形（全段）
-          const outline = (f: typeof on) => DATA_OUTLINE.flatMap(([x, y]) => [0, top].map((z) => projectPoint(vs(f), size, [x, y, z])));
-          const onPts = outline(on);
-          const offPts = outline(off);
-          const clampedZoom = on.zoom <= LIMITS.minZoom + 1e-9 || on.zoom >= LIMITS.maxZoom - 1e-9;
-          if (clampedZoom) return;
-          // 出ているとき：クローズアップ（とレイヤー名の余白）、探針パネルに重ならない
-          const closeupRect = { left: size.width - cw - 80, top: 0, right: size.width, bottom: size.height };
-          const probeRect = computeLayout(size).avoid[0];
-          expect(convexIntersectsRect(convexHull(onPts), closeupRect)).toBe(false);
-          expect(convexIntersectsRect(convexHull(onPts), probeRect)).toBe(false);
-          // 出ていないとき：探針パネルには重ならない（クローズアップの領域は空いている）
-          expect(convexIntersectsRect(convexHull(offPts), probeRect)).toBe(false);
-          // 位置は左へだけ動く（右端が、出ていないときより左。縦は同じ）
-          const rightEdge = (pts: [number, number][]) => Math.max(...pts.map((p) => p[0]));
-          const topEdge = (pts: [number, number][]) => Math.min(...pts.map((p) => p[1]));
-          expect(rightEdge(onPts)).toBeLessThanOrEqual(rightEdge(offPts) + 1e-6);
-          expect(topEdge(onPts)).toBeCloseTo(topEdge(offPts), 6);
+        const cw = infoColumnWidth(w);
+        it(`${w}x${h} rx=${a[0]} ro=${a[1]} top=${top}: 23区のデータは、列（とレイヤー名の余白）にも画面の端にも重ならず、同じ引数なら同じ視点`, () => {
+          const opts = { rotationX: a[0], rotationOrbit: a[1], top, size, columnWidth: cw };
+          const f = fitStack(opts);
+          expect(fitStack(opts)).toEqual(f);
+          if (f.zoom <= LIMITS.minZoom + 1e-9 || f.zoom >= LIMITS.maxZoom - 1e-9) return;
+          const pts = outline(f, a, top, size);
+          const column = { left: size.width - cw - LABEL_ROOM, top: 0, right: size.width, bottom: size.height };
+          expect(convexIntersectsRect(convexHull(pts), column)).toBe(false);
+          for (const [x, y] of pts) {
+            expect(x).toBeGreaterThanOrEqual(-1e-6);
+            expect(x).toBeLessThanOrEqual(size.width + 1e-6);
+            expect(y).toBeGreaterThanOrEqual(GUTTER - 1e-6);
+            expect(y).toBeLessThanOrEqual(size.height - GUTTER + 1e-6);
+          }
         });
       }
 
-  it('間隔スライダーを動かしても、出る前後の zoom は同じで、zoom は連続的に変わる', () => {
+  it('列を避けるので、列のない配置より大きくはならず、縦の長さで決まる広い画面では、列の有無で倍率が変わらない', () => {
+    const size = { width: 2000 - RIGHT_PANEL_W, height: 1100 };
+    const base = { rotationX: 20, rotationOrbit: 45, top: 48000, size };
+    const withColumn = fitStack({ ...base, columnWidth: infoColumnWidth(2000) });
+    const noColumn = fitView({ ...base, box: DATA_BOX });
+    expect(withColumn.zoom).toBeLessThanOrEqual(noColumn.zoom + 1e-9);
+    expect(withColumn.zoom).toBeCloseTo(noColumn.zoom, 1); // 避けるときは、置ける最大より 1% ほど小さくする（SLACK）
+    // 横の長さで決まる画面では、列のぶん小さい
+    const narrow = { ...base, size: { width: 1400 - RIGHT_PANEL_W, height: 1000 } };
+    expect(fitStack({ ...narrow, columnWidth: infoColumnWidth(1400) }).zoom).toBeLessThan(fitView({ ...narrow, box: DATA_BOX }).zoom);
+  });
+
+  it('広い画面では、23区のデータが、列の左の空き領域の中央に収まる（左右の余白が等しい。レイヤー名のぶんを右に空ける）', () => {
+    const size = { width: 2000 - RIGHT_PANEL_W, height: 1100 };
+    const cw = infoColumnWidth(2000);
+    const a: [number, number] = [20, 45];
+    const f = fitStack({ rotationX: a[0], rotationOrbit: a[1], top: 48000, size, columnWidth: cw });
+    const xs = outline(f, a, 48000, size).map((p) => p[0]);
+    const mid = (Math.min(...xs) + Math.max(...xs)) / 2;
+    expect(mid).toBeCloseTo((GUTTER + (size.width - cw) - LABEL_ROOM) / 2, 1);
+    expect(Math.min(...xs)).toBeGreaterThan(GUTTER);
+  });
+
+  it('間隔スライダーを動かすと、zoom は連続的に変わる', () => {
     const size = { width: 1144, height: 1000 };
     let prev: number | null = null;
     for (let top = 0; top <= 80000; top += 1000) {
-      const a = fitStack({ rotationX: 20, rotationOrbit: 45, top, size, closeupWidth: 480, closeupOn: false });
-      const b = fitStack({ rotationX: 20, rotationOrbit: 45, top, size, closeupWidth: 480, closeupOn: true });
-      expect(a.zoom).toBe(b.zoom);
+      const a = fitStack({ rotationX: 20, rotationOrbit: 45, top, size, columnWidth: 480 });
       if (prev !== null) expect(Math.abs(a.zoom - prev)).toBeLessThan(0.1);
       prev = a.zoom;
     }
   });
 
-  it('クローズアップが出る前の地図は、クローズアップを避けない配置（出ていない配置）より小さい（出た後に合わせる）', () => {
+  it('位置も連続的に変わる（間隔を 1 km 動かしても、画面上の外形の中心は数 px しか動かない）', () => {
     const size = { width: 1144, height: 1000 };
-    const common = fitStack({ rotationX: 20, rotationOrbit: 45, top: 48000, size, closeupWidth: 480, closeupOn: false });
-    const alone = fitView({ rotationX: 20, rotationOrbit: 45, top: 48000, size, box: DATA_BOX });
-    expect(common.zoom).toBeLessThan(alone.zoom);
+    const a: [number, number] = [20, 45];
+    let prev: number | null = null;
+    for (let top = 12000; top <= 40000; top += 1000) {
+      const f = fitStack({ rotationX: a[0], rotationOrbit: a[1], top, size, columnWidth: 480 });
+      const xs = outline(f, a, top, size).map((p) => p[0]);
+      const mid = (Math.min(...xs) + Math.max(...xs)) / 2;
+      if (prev !== null) expect(Math.abs(mid - prev)).toBeLessThan(15);
+      prev = mid;
+    }
   });
 });

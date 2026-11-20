@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
-import Closeup from './closeup/Closeup';
-import ProbePanel from './probe/ProbePanel';
+import InfoColumn from './info/InfoColumn';
 import Credits from './panel/Credits';
 import LayerPanel from './panel/LayerPanel';
 import SpacingSlider from './panel/SpacingSlider';
 import ViewButtons from './panel/ViewButtons';
 import StackView from './view/StackView';
-import { useMapStore } from './store';
-import { PANEL, PROBE_PANEL, closeupWidth } from './view/layout';
+import { PANEL, infoColumnWidth } from './view/layout';
 
 const panelStyle = {
   position: 'absolute',
@@ -22,8 +20,6 @@ const panelStyle = {
 const CREDITS_BOTTOM = 3;
 /** 出典の1行が画面の下端から占める高さ（px）の見込み。右上のパネルはこの上までに収める。 */
 const CREDITS_RESERVE = 32;
-/** 出典の1行を、左下の探針パネルの右に置くための、画面の左端からの余白（px）。 */
-const CREDITS_LEFT = PROBE_PANEL.width + 2 * PANEL.margin;
 
 function useWindowWidth(): number {
   const [w, setW] = useState(() => window.innerWidth);
@@ -36,14 +32,13 @@ function useWindowWidth(): number {
 }
 
 export default function App() {
-  // 探針が固定されているあいだ、全体の積層の右端に重ねてクローズアップを出す。全体の積層の大きさは、出入りで変わらない（位置だけが動く）。
-  const pinned = useMapStore((s) => (s.probePinned ? s.probe : null));
+  // 全体の地図の右に、「選んだ地点の情報」の列を常に置く（幅は中身によらず一定）。地図の大きさと位置も、探針の有無や固定で変わらない。
   const windowWidth = useWindowWidth();
-  const cw = closeupWidth(windowWidth);
+  const cw = infoColumnWidth(windowWidth);
   return (
     <>
-      <StackView closeupWidth={cw} />
-      {pinned && <Closeup x={pinned.x} y={pinned.y} width={cw} />}
+      <StackView columnWidth={cw} />
+      <InfoColumn width={cw} />
       <div
         style={{
           ...panelStyle,
@@ -63,17 +58,14 @@ export default function App() {
         <SpacingSlider />
         <LayerPanel />
       </div>
-      <div style={{ position: 'absolute', left: 12, bottom: 12, color: '#fff', font: '14px sans-serif' }}>
-        <ProbePanel />
-      </div>
-      {/* 出典（常に1行）。右下に置き、右上のパネルと左下の探針パネルの間の、積層の下余白に収める。詳細はほかのパネルに重なって開く。 */}
+      {/* 出典（常に1行）。右下に置き、積層の下余白に収める。詳細はほかのパネルに重なって開く。 */}
       <Credits
         style={{
           position: 'absolute',
           right: PANEL.margin,
           bottom: CREDITS_BOTTOM,
           zIndex: 10,
-          maxWidth: `min(640px, calc(100vw - ${CREDITS_LEFT + PANEL.margin}px))`,
+          maxWidth: `min(640px, calc(100vw - ${2 * PANEL.margin}px))`,
         }}
       />
     </>

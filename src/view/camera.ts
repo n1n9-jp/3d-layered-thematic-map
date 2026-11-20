@@ -106,13 +106,6 @@ export function fitView(opts: {
   top: number;
   size: Size;
   layout?: Layout;
-  /**
-   * 倍率と縦の位置は `layout` で決め、横の位置だけを、この配置の中心へ右に寄せる（寄せられるだけ。左へは動かさない）。
-   * この配置の余白（padding）の中心と、領域の右端で決まり、避ける長方形（avoid）は使わない。
-   * 全体の地図で、クローズアップが出る前後の倍率を同じにして、位置も横だけが動くようにするために使う：
-   * 倍率と縦の位置はクローズアップのぶんを空けた配置（出た後）で決め、出る前は、そのまま右へ寄る。
-   */
-  placeLayout?: Layout;
   /** 積層の平面。既定は描画範囲全体。クローズアップでは、切り出した円を渡す。 */
   box?: PlaneBox;
   /** zoom の範囲。既定は全体の地図の上下限。 */
@@ -146,16 +139,17 @@ export function fitView(opts: {
       }
   }
   const innerOf = (p: Padding) => ({ left: p.left, top: p.top, right: size.width - p.right, bottom: size.height - p.bottom });
-  const { scale, center: fitted } = maxScale(offsets, paddedCenter(size, padding), innerOf(padding), avoid, { avoidOffsets });
-  const zoom = clamp(Math.log2(scale), zoomLimits.min, zoomLimits.max);
-  let place = fitted;
-  if (opts.placeLayout) {
-    const pl = opts.placeLayout;
-    const s = 2 ** zoom;
-    const rightLimit = size.width - pl.padding.right - Math.max(...offsets.map((o) => o[0])) * s; // 外枠が余白の右端に着く中心
-    const wanted = paddedCenter(size, pl.padding)[0];
-    place = [Math.max(fitted[0], Math.min(wanted, rightLimit)), fitted[1]];
+  // 置きたい中心。layout.center があれば、見えるデータのある範囲の中心をそこへ（外枠の中心は、倍率に応じてその分ずれる）。
+  const centered = paddedCenter(size, padding);
+  let pref: Pt | ((s: number) => Pt) = centered;
+  if (layout.center && avoidOffsets) {
+    const xs = avoidOffsets.map((o) => o[0]);
+    const dataMidX = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const want = layout.center;
+    pref = (s) => [want[0] - s * dataMidX, want[1]];
   }
+  const { scale, center: place } = maxScale(offsets, pref, innerOf(padding), avoid, { avoidOffsets });
+  const zoom = clamp(Math.log2(scale), zoomLimits.min, zoomLimits.max);
   // 箱の中心（= target）は画面の中心に来る。これを、置く位置のずれのぶんだけ target を動かして直す。
   const [dx, dy] = solve(jacobian(rotationX, rotationOrbit), place[0] - size.width / 2, place[1] - size.height / 2);
   const s = 2 ** zoom;
@@ -181,11 +175,9 @@ export function rayToPolygon(cx: number, cy: number, dx: number, dy: number, pol
 }
 
 /**
- * 全体の積層（データのある範囲 `DATA_BOX`）の視点。クローズアップが出る前も後も、拡大率（zoom）は同じにする。
- *
- * 拡大率と位置は、クローズアップが出ている配置（幅 closeupWidth の領域とレイヤー名の余白を空けた配置）で、積層が収まる最大のもの。
- * closeupOn が false のときは、同じ拡大率・同じ縦の位置のまま、横だけをクローズアップのない領域の中心へ右に寄せる。
- * したがって、クローズアップが出入りしても、地図の大きさは変わらず、位置は左右にだけ動く。
+ * 全体の積層（データのある範囲 `DATA_BOX`）の視点。
+ * 拡大率と位置は、右端の情報の列（幅 columnWidth の領域とレイヤー名の余白）を避けて、積層が収まる最大のもの。
+ * 列は中身の有無にかかわらず常に同じ幅を占めるので、探針の有無・固定の前後で、地図の大きさも位置も変わらない。
  * size は描画領域（右上のパネルの左側の全体）の大きさ。
  */
 export function fitStack(opts: {
@@ -193,17 +185,10 @@ export function fitStack(opts: {
   rotationOrbit: number;
   top: number;
   size: Size;
-  closeupWidth: number;
-  closeupOn: boolean;
+  columnWidth: number;
 }): Pick<ViewState, 'target' | 'zoom'> {
-  const { size, closeupWidth, closeupOn, ...angles } = opts;
-  return fitView({
-    ...angles,
-    size,
-    box: DATA_BOX,
-    layout: computeLayout(size, { closeupWidth }),
-    placeLayout: closeupOn ? undefined : computeLayout(size),
-  });
+  const { size, columnWidth, ...angles } = opts;
+  return fitView({ ...angles, size, box: DATA_BOX, layout: computeLayout(size, columnWidth) });
 }
 
 /**

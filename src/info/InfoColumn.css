@@ -1,0 +1,206 @@
+/* 「選んだ地点の情報」の列。全体の地図の右隣に、中身の有無にかかわらず常に同じ幅で置く。 */
+.ic {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #05070b;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e8e8e8;
+  font: 12px/1.4 sans-serif;
+  z-index: 1;
+}
+
+.ic-hint {
+  padding: 14px 14px;
+  color: #9aa;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.ic-hint p {
+  margin: 0 0 8px;
+}
+
+.ic-head {
+  flex: none;
+  padding: 10px 12px 4px;
+}
+
+.ic-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ic-district {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-pin {
+  flex: none;
+  font-size: 11px;
+  color: #ffb000;
+}
+
+.ic-release {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.ic-coords {
+  font-size: 11px;
+  color: #8a9;
+  white-space: nowrap;
+}
+
+.ic-dim {
+  color: #777;
+}
+
+.ic-btn,
+.cu-btn {
+  font: 12px sans-serif;
+  color: #d7dde8;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.ic-btn {
+  font-size: 11px;
+  padding: 0 6px;
+  color: #ffb000;
+  background: transparent;
+  border-color: rgba(255, 176, 0, 0.5);
+}
+
+.ic-btn:hover,
+.cu-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.ic-btn:focus-visible,
+.cu-btn:focus-visible {
+  outline: 2px solid #5ab4ff;
+  outline-offset: 1px;
+}
+
+.cu-btn[aria-pressed='true'] {
+  color: #1a1200;
+  background: #ffb000;
+  border-color: #ffb000;
+  font-weight: 600;
+}
+
+.cu-radius {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+/* 座標と半径のボタンの行。 */
+.ic-closeup-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 2px 12px 8px;
+}
+
+.ic-canvas {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 120px;
+  background: #000;
+}
+
+/* 表の領域。収まらないときは、表の部分だけをスクロールする（見出しとクローズアップは常に見える）。 */
+.ic-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 52%;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.ic-scroll-solo {
+  flex: 0 1 auto;
+  max-height: none;
+  border-top: none;
+}
+
+.ic-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.ic-col-name {
+  width: 6em;
+}
+
+.ic-table th,
+.ic-table td {
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+  font-weight: 400;
+}
+
+.ic-table th:first-child,
+.ic-table td:first-child {
+  padding-left: 12px;
+}
+
+.ic-table th:last-child,
+.ic-table td:last-child {
+  padding-right: 12px;
+}
+
+.ic-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #0b0f16;
+  color: #9aa;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.ic-table tbody th {
+  color: #9bd;
+}
+
+.ic-table tbody tr + tr > * {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 長い路線名や施設名は、語の途中ではなく、文節などの区切りで折り返す。区切りがなければ、はみ出さないよう折る。 */
+.ic-table td,
+.ic-table th {
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  line-break: strict;
+}
+
+.ic-v + .ic-v {
+  margin-top: 1px;
+}

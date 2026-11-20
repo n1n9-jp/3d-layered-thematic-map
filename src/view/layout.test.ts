@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLOSEUP, LABEL_ROOM, PROBE_PANEL, RIGHT_PANEL_W, closeupWidth, computeLayout, convexHull, convexIntersectsRect, maxScale, paddedCenter } from './layout';
+import { GUTTER, INFO_COLUMN, LABEL_ROOM, RIGHT_PANEL_W, computeLayout, convexHull, convexIntersectsRect, infoColumnWidth, maxScale, paddedCenter } from './layout';
 import type { Pt, Rect } from './layout';
 
 describe('convexHull', () => {
@@ -23,13 +23,14 @@ describe('convexIntersectsRect', () => {
 });
 
 describe('computeLayout', () => {
-  it('右にレイヤー名のぶん、左下に探針パネルの避ける領域をとる', () => {
+  it('右にレイヤー名のぶんの余白をとり、列がなければ避ける領域はない（左下のブロックはない）', () => {
     const l = computeLayout({ width: 1400 - RIGHT_PANEL_W, height: 1000 });
     expect(l.padding.right).toBe(LABEL_ROOM);
-    expect(l.avoid[0]).toEqual({ left: 0, top: 1000 - PROBE_PANEL.height, right: PROBE_PANEL.width, bottom: 1000 });
+    expect(l.avoid).toEqual([]);
+    expect(l.center).toBeUndefined();
   });
   it('狭い画面でも領域が潰れない', () => {
-    const l = computeLayout({ width: 300, height: 300 });
+    const l = computeLayout({ width: 300, height: 300 }, 380);
     expect(300 - l.padding.left - l.padding.right).toBeGreaterThanOrEqual(100);
   });
   it('paddedCenter は padding の内側の中心', () => {
@@ -91,18 +92,29 @@ describe('maxScale', () => {
   });
 });
 
-describe('closeupWidth', () => {
-  it('パネルを除いた幅の 31.5%。1400 px の画面では 360 px', () => {
-    expect(closeupWidth(1400)).toBe(Math.round((1400 - RIGHT_PANEL_W) * CLOSEUP.share));
-    expect(closeupWidth(1400)).toBe(360);
+describe('infoColumnWidth', () => {
+  it('小さい画面では下限（380 px）、大きい画面では上限（560 px）。1400 px の画面では下限', () => {
+    expect(infoColumnWidth(1400)).toBe(INFO_COLUMN.minWidth);
+    expect(infoColumnWidth(1000)).toBe(INFO_COLUMN.minWidth);
+    expect(infoColumnWidth(300)).toBe(INFO_COLUMN.minWidth);
+    expect(infoColumnWidth(2000)).toBe(INFO_COLUMN.maxWidth);
+    expect(infoColumnWidth(3000)).toBe(INFO_COLUMN.maxWidth);
   });
-  it('小さい画面では下限（340 px）、大きい画面では上限（560 px）', () => {
-    expect(closeupWidth(1000)).toBe(CLOSEUP.minWidth);
-    expect(closeupWidth(300)).toBe(CLOSEUP.minWidth);
-    expect(closeupWidth(3000)).toBe(CLOSEUP.maxWidth);
+  it('中間の幅では、パネルを除いた幅の 33%', () => {
+    expect(infoColumnWidth(1700)).toBe(Math.round((1700 - RIGHT_PANEL_W) * INFO_COLUMN.share));
+    expect(infoColumnWidth(1700)).toBeGreaterThan(INFO_COLUMN.minWidth);
+    expect(infoColumnWidth(1700)).toBeLessThan(INFO_COLUMN.maxWidth);
   });
-  it('1400 px 幅で、クローズアップの左に 784 px 残る（レイヤー名のぶんの余白を引いても積層が収まる）', () => {
-    expect(1400 - RIGHT_PANEL_W - closeupWidth(1400)).toBe(784);
+  it('画面の幅に対して単調に増える', () => {
+    let prev = 0;
+    for (let w = 300; w <= 3000; w += 10) {
+      const v = infoColumnWidth(w);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+  });
+  it('1400 px 幅で、列の左に 764 px 残る（レイヤー名のぶんの余白を引いても積層が収まる）', () => {
+    expect(1400 - RIGHT_PANEL_W - infoColumnWidth(1400)).toBe(764);
   });
 });
 
@@ -151,13 +163,33 @@ describe('maxScale（避ける長方形と外形が別のとき、長方形が�
   });
 });
 
-describe('computeLayout（クローズアップの領域）', () => {
-  it('closeupWidth を渡すと、右端にその幅（とレイヤー名のぶん）の長方形を避ける', () => {
+describe('computeLayout（情報の列）', () => {
+  it('columnWidth を渡すと、右端にその幅（とレイヤー名のぶん）の長方形を避ける。避けるのはそれだけ', () => {
     const size = { width: 1144, height: 1000 };
-    const l = computeLayout(size, { closeupWidth: 480 });
-    expect(l.avoid).toHaveLength(2);
-    expect(l.avoid[1]).toEqual({ left: 1144 - 480 - LABEL_ROOM, top: 0, right: 1144, bottom: 1000 });
-    expect(computeLayout(size).avoid).toHaveLength(1);
-    expect(computeLayout(size, { closeupWidth: 0 }).avoid).toHaveLength(1);
+    const l = computeLayout(size, 480);
+    expect(l.avoid).toEqual([{ left: 1144 - 480 - LABEL_ROOM, top: 0, right: 1144, bottom: 1000 }]);
+    expect(computeLayout(size).avoid).toHaveLength(0);
+    expect(computeLayout(size, 0).avoid).toHaveLength(0);
+  });
+  it('データのある範囲の中心は、列の左の空き領域（レイヤー名のぶんを除く）の中央。縦は領域の中央', () => {
+    const size = { width: 1744, height: 1100 };
+    const l = computeLayout(size, 560);
+    expect(l.center).toEqual([(GUTTER + (1744 - 560) - LABEL_ROOM) / 2, 550]);
+  });
+});
+
+describe('maxScale（置きたい中心が倍率で決まるとき）', () => {
+  const diamond: Pt[] = [[-100, 0], [100, 0], [0, -50], [0, 50]];
+  it('関数で渡した中心の位置を、倍率に応じて使う（置ける範囲の中なら、そのまま中心になる）', () => {
+    const inner: Rect = { left: 0, top: 0, right: 4000, bottom: 500 }; // 縦で倍率が決まり、横に余裕がある
+    const r = maxScale(diamond, (s) => [1000 + s * 10, 250], inner, []);
+    expect(r.scale).toBeCloseTo(5);
+    expect(r.center[0]).toBeCloseTo(1000 + r.scale * 10, 3);
+    expect(r.center[1]).toBeCloseTo(250);
+  });
+  it('置ける範囲の外を指しても、いちばん近い置ける位置になる', () => {
+    const inner: Rect = { left: 0, top: 0, right: 4000, bottom: 500 };
+    const r = maxScale(diamond, () => [-500, 250], inner, []);
+    expect(r.center[0]).toBeCloseTo(500, 3); // 外形の左端が領域の左端に着く
   });
 });

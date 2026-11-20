@@ -1,7 +1,8 @@
 /**
  * 画面の配置（純粋な計算）。
  * 描画領域は、右上のパネル（間隔スライダーとレイヤー一覧）の左側。
- * その中で、左下の探針パネルを避けて積層を置くための余白と、避ける長方形を決める。
+ * その右端に「選んだ地点の情報」の列（常に幅を確保する）が重なる。積層は、その列を避けて置く。
+ * ここでは、積層を置くための余白と、避ける長方形を決める。
  * 座標は描画領域の左上が原点。
  */
 
@@ -35,19 +36,16 @@ export const RIGHT_PANEL_W = PANEL.width + 2 * PANEL.padding + PANEL.margin;
 export const LABEL_ROOM = 80;
 /** 画面の端との最小の隙間（px）。 */
 export const GUTTER = 24;
-/** 左下の探針パネル（固定表示時の最大の高さを見込む）が占める幅と高さ（px）。 */
-export const PROBE_PANEL = { width: 330, height: 360 } as const;
-
 /**
- * クローズアップの領域（右上のパネルのすぐ左）の幅の範囲（px）と、パネルを除いた画面の幅に対する割合。
- * 領域の高さは画面いっぱい（下端は出典の1行を避ける）。
+ * 「選んだ地点の情報」の列（右上のパネルのすぐ左）の幅の範囲（px）と、パネルを除いた画面の幅に対する割合。
+ * 列の高さは画面いっぱい（下端は出典の1行を避ける）。中身の有無にかかわらず、この幅を常に確保する。
  */
-export const CLOSEUP = { minWidth: 340, maxWidth: 560, share: 0.315 } as const;
+export const INFO_COLUMN = { minWidth: 380, maxWidth: 560, share: 0.33 } as const;
 
-/** クローズアップの領域の幅（px）。windowWidth は画面の幅。 */
-export function closeupWidth(windowWidth: number): number {
+/** 情報の列の幅（px）。windowWidth は画面の幅。 */
+export function infoColumnWidth(windowWidth: number): number {
   const available = Math.max(0, windowWidth - RIGHT_PANEL_W);
-  return Math.min(CLOSEUP.maxWidth, Math.max(CLOSEUP.minWidth, Math.round(available * CLOSEUP.share)));
+  return Math.min(INFO_COLUMN.maxWidth, Math.max(INFO_COLUMN.minWidth, Math.round(available * INFO_COLUMN.share)));
 }
 
 /** クローズアップの積層の外側の余白（px）。右は、レイヤー名のぶん。避ける長方形はない。 */
@@ -61,24 +59,32 @@ export interface Layout {
   padding: Padding;
   /** 積層が重ならないようにする長方形。 */
   avoid: Rect[];
+  /**
+   * 積層のうち、データのある範囲の画面上の中心を置きたい位置（描画領域の左上が原点、px）。
+   * 指定がなければ、積層の外枠の中心を、padding の内側の中心に寄せる。
+   * 外枠の角が、避ける領域の下に入るとき、外枠の中心ではなく、見えるデータのほうを空き領域の中央に置くために使う。
+   */
+  center?: Pt;
 }
 
 const MIN_SAFE = 160;
 
 /**
  * size は描画領域の大きさ（右上のパネルの左側の全体）。
- * closeupWidth を渡すと、その右端にクローズアップの領域（幅 closeupWidth、高さは領域いっぱい）があるものとして、
- * 積層がそこに重ならないようにする。右脇のレイヤー名は積層の右に出るので、クローズアップの左に LABEL_ROOM のぶん空ける。
+ * columnWidth は、その右端にある情報の列の幅（高さは領域いっぱい）。積層はこの列に重ならないようにする。
+ * 右脇のレイヤー名は積層の右に出るので、列の左に LABEL_ROOM のぶん空ける。
+ * 避ける長方形は、この列だけ（出典の1行は、下の余白 GUTTER に収まる）。
  */
-export function computeLayout(size: Size, opts: { closeupWidth?: number } = {}): Layout {
+export function computeLayout(size: Size, columnWidth = 0): Layout {
+  if (!(columnWidth >= 0)) columnWidth = 0;
   const right = Math.min(LABEL_ROOM, Math.max(GUTTER, size.width - GUTTER - MIN_SAFE));
   const padding: Padding = { left: GUTTER, right, top: GUTTER, bottom: GUTTER };
-  const avoid: Rect[] = [
-    { left: 0, top: size.height - PROBE_PANEL.height, right: PROBE_PANEL.width, bottom: size.height },
-  ];
-  const cw = opts.closeupWidth ?? 0;
-  if (cw > 0) avoid.push({ left: Math.max(0, size.width - cw - LABEL_ROOM), top: 0, right: size.width, bottom: size.height });
-  return { padding, avoid };
+  const avoid: Rect[] = [];
+  if (columnWidth === 0) return { padding, avoid };
+  avoid.push({ left: Math.max(0, size.width - columnWidth - LABEL_ROOM), top: 0, right: size.width, bottom: size.height });
+  // 列の左の空き領域（GUTTER から列の左端まで）の中央に、データのある範囲を置く。右脇のレイヤー名（LABEL_ROOM）は、データの右に付くので、そのぶん左へ寄せる。
+  const free = Math.max(GUTTER + MIN_SAFE, size.width - columnWidth);
+  return { padding, avoid, center: [(GUTTER + free - LABEL_ROOM) / 2, paddedCenter(size, padding)[1]] };
 }
 
 /** padding の内側の領域の中心。 */
@@ -224,7 +230,7 @@ const JOINT_ITERATIONS = 22;
 
 /**
  * 外形 offsets（zoom 0 での、箱の中心からの相対位置。点対称）を、領域 inner に収め、avoid の長方形のどれにも重ならないように置く。
- * 倍率はなるべく大きく、中心はなるべく pref の近くにする。
+ * 倍率はなるべく大きく、中心はなるべく pref の近くにする（pref は、倍率から決まる位置を返す関数でもよい）。
  *
  * 避け方は「長方形と外形を分ける直線の向き」を1つ決め、外形をその直線の片側に置く条件にする。
  * この条件のもとでは、置ける中心の集まりが凸多角形になるので、倍率が決まれば、pref にいちばん近い中心が1つに決まる。
@@ -240,7 +246,7 @@ const JOINT_ITERATIONS = 22;
  */
 export function maxScale(
   offsets: readonly Pt[],
-  pref: Pt,
+  prefAt: Pt | ((scale: number) => Pt),
   inner: Rect,
   avoid: readonly Rect[],
   opts: { avoidOffsets?: readonly Pt[] } = {},
@@ -256,10 +262,14 @@ export function maxScale(
     top: inner.top - ext.minY * s,
     bottom: inner.bottom - ext.maxY * s,
   });
-  const clampInto = (r: Rect): Pt => [Math.min(r.right, Math.max(r.left, pref[0])), Math.min(r.bottom, Math.max(r.top, pref[1]))];
+  const prefOf = (s: number): Pt => (typeof prefAt === 'function' ? prefAt(s) : prefAt);
+  const clampInto = (r: Rect, s: number): Pt => {
+    const pref = prefOf(s);
+    return [Math.min(r.right, Math.max(r.left, pref[0])), Math.min(r.bottom, Math.max(r.top, pref[1]))];
+  };
   const fallback = () => {
     const s0 = hi * SAFETY;
-    return { scale: s0, center: clampInto(rectAt(s0)) };
+    return { scale: s0, center: clampInto(rectAt(s0), s0) };
   };
   if (avoid.length === 0) return fallback();
 
@@ -322,7 +332,7 @@ export function maxScale(
 
   let constraints = avoid.map((r, k) => constraintFor(r, normals[k]));
   if (avoid.length > 1) {
-    // 長方形ごとに最もよい向きが、同時には置けないことがある（たとえば、左下のパネルと右端のクローズアップ）。
+    // 長方形ごとに最もよい向きが、同時には置けないことがある（たとえば、左下と右端の2つの領域）。
     // 1つずつ、ほかの向きを固定して、全体で置ける最大の倍率が最も大きくなる向きに選び直す（最大に近い向きの重み付き平均）。
     for (let pass = 0; pass < JOINT_PASSES; pass++) {
       for (let k = 0; k < avoid.length; k++) {
@@ -368,5 +378,5 @@ export function maxScale(
     region = regionAt(s);
     if (region.length === 0 || s <= hi * 1e-3) return fallback();
   }
-  return { scale: s, center: nearestInConvex(region, pref) };
+  return { scale: s, center: nearestInConvex(region, prefOf(s)) };
 }

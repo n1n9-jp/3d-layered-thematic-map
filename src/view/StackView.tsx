@@ -68,17 +68,16 @@ interface Saved {
 
 interface Props {
   /**
-   * クローズアップの領域の幅（px）。クローズアップは、この描画領域の右端に重ねて置かれる。
-   * クローズアップが出ているかどうかにかかわらず、積層はこの幅を空けた配置で拡大率を決める（出入りで大きさが変わらないように）。
+   * 情報の列の幅（px）。列は、この描画領域の右端に重ねて置かれ、中身の有無にかかわらず常にある。
+   * 積層は、この幅を避けた配置で拡大率と位置を決める（探針の有無や固定の前後で、大きさも位置も変わらない）。
    */
-  closeupWidth: number;
+  columnWidth: number;
 }
 
-export default function StackView({ closeupWidth }: Props) {
+export default function StackView({ columnWidth }: Props) {
   const state = useMapStore();
   const { order, visible, solo, spacing, data, status, viewState, closeupRadius } = state;
-  const closeupOn = state.probePinned && state.probe !== null;
-  const closeup = closeupOn && state.probe ? { ...state.probe, r: closeupRadius } : null;
+  const closeup = state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
 
   /* ---------- 画面の大きさ ---------- */
   const [box, size] = useElementSize<HTMLDivElement>();
@@ -140,13 +139,12 @@ export default function StackView({ closeupWidth }: Props) {
   readyRef.current = ready;
   const sizeRef = useRef<Size | null>(null);
   sizeRef.current = size;
-  /** クローズアップの幅と、出ているかどうか。視点を収めるとき、拡大率は幅から、中心は出ているかどうかから決める。 */
-  const closeupRef = useRef({ width: closeupWidth, on: closeupOn });
-  closeupRef.current = { width: closeupWidth, on: closeupOn };
+  const columnWidthRef = useRef(columnWidth);
+  columnWidthRef.current = columnWidth;
   /** 積層が収まる視点（target と zoom）。 */
   const fit = useCallback(
     (a: { rotationX: number; rotationOrbit: number; top: number }, sz: Size) =>
-      fitStack({ ...a, size: sz, closeupWidth: closeupRef.current.width, closeupOn: closeupRef.current.on }),
+      fitStack({ ...a, size: sz, columnWidth: columnWidthRef.current }),
     [],
   );
 
@@ -190,20 +188,7 @@ export default function StackView({ closeupWidth }: Props) {
     const vs = useMapStore.getState().viewState;
     const next = { ...vs, ...fit({ rotationX: vs.rotationX, rotationOrbit: vs.rotationOrbit, top }, size) };
     if (!sameView(vs, next)) useMapStore.getState().setViewState(next);
-  }, [ready, size, top, transition, closeupWidth, fit]);
-
-  // クローズアップが出入りしたとき、地図の大きさは変えず、位置だけをアニメーションで動かす（自動で収めている間だけ）。
-  const prevCloseupOn = useRef(closeupOn);
-  const topRef = useRef(top);
-  topRef.current = top;
-  useEffect(() => {
-    if (!ready || !size || prevCloseupOn.current === closeupOn) return;
-    prevCloseupOn.current = closeupOn;
-    if (!autoFit.current) return;
-    const vs = useMapStore.getState().viewState;
-    const next = { ...vs, ...fit({ rotationX: vs.rotationX, rotationOrbit: vs.rotationOrbit, top: topRef.current }, size) };
-    if (!sameView(vs, next)) startTransition(next);
-  }, [ready, size, closeupOn, fit, startTransition]);
+  }, [ready, size, top, transition, columnWidth, fit]);
 
   // 単独表示の開始と解除。
   useEffect(() => {
@@ -348,7 +333,7 @@ export default function StackView({ closeupWidth }: Props) {
   const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
 
   return (
-    // 右上のパネルの左までを描画領域にする。クローズアップは、この右端に重なって出る。
+    // 右上のパネルの左までを描画領域にする。情報の列は、この右端に重なる。
     <div ref={box} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: RIGHT_PANEL_W, background: '#000' }}>
       {ready && (
         <DeckGL

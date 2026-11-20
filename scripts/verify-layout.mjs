@@ -1,0 +1,276 @@
+#!/usr/bin/env node
+// 画面の配置と操作の確認（実データ向け）。
+//   node scripts/verify-layout.mjs [--url http://127.0.0.1:5173/] [--sizes 1400x1000,2000x1100,1000x700]
+// --url がなければ Vite を起動する。確認すること：
+//   1. 固定前・カーソルを置いた状態・固定後・解除後で、viewState の zoom と target が一致する（URL で固定して開いた場合も同じ）
+//   2. 右の列の中身が状態に応じて変わる（手がかり／区名と「この地点」／クローズアップと3列の表）
+//   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「解除」ボタンでの解除が動く
+// 1つでも外れれば、内容を表示して終了コード 1 で終わる。描画が遅い環境（1フレーム約2秒）を見込んで、待ちは長めにとる。
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const { values } = parseArgs({
+  options: {
+    url: { type: 'string' },
+    sizes: { type: 'string', default: '1400x1000,2000x1100,1000x700' },
+  },
+});
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const failures = [];
+const check = (ok, msg) => {
+  console.log(`${ok ? '  ok ' : '  NG '} ${msg}`);
+  if (!ok) failures.push(msg);
+};
+
+function freePort() {
+  return new Promise((res, rej) => {
+    const srv = createServer();
+    srv.unref();
+    srv.on('error', rej);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => res(port));
+    });
+  });
+}
+
+let vite = null;
+async function baseUrl() {
+  if (values.url) return values.url;
+  const port = await freePort();
+  vite = spawn(process.execPath, [resolve(ROOT, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: ROOT,
+    stdio: 'ignore',
+    detached: true,
+  });
+  const url = `http://127.0.0.1:${port}/`;
+  for (let i = 0; i < 200; i++) {
+    try {
+      if ((await fetch(url)).ok) return url;
+    } catch {
+      /* まだ */
+    }
+    await sleep(150);
+  }
+  throw new Error('Vite が起動しませんでした');
+}
+process.on('exit', () => {
+  if (vite) {
+    try {
+      process.kill(-vite.pid, 'SIGKILL');
+    } catch {
+      /* すでに終了 */
+    }
+  }
+});
+
+const { OrbitView } = await import(join(ROOT, 'node_modules/@deck.gl/core/dist/index.js'));
+
+const EPS = 1e-9;
+const sameView = (a, b) => Math.abs(a.zoom - b.zoom) < EPS && a.target.every((v, i) => Math.abs(v - b.target[i]) < 1e-6);
+const fmt = (v) => `zoom=${v.zoom.toFixed(6)} target=[${v.target.map((t) => t.toFixed(1)).join(', ')}]`;
+
+const getState = (page) =>
+  page.evaluate(() => {
+    const s = window.__store.getState();
+    return { view: s.viewState, probe: s.probe, pinned: s.probePinned, radius: s.closeupRadius };
+  });
+const mode = (page) => page.getAttribute('[data-testid=info-column]', 'data-mode');
+/** 描画が追いつく（2フレーム）まで待つ。 */
+const settle = async (page, ms = 1500) => {
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await sleep(ms);
+};
+const waitFor = (page, fn, arg, timeout = 60000) => page.waitForFunction(fn, arg, { timeout, polling: 100 });
+
+async function open(browser, base, size, query = '') {
+  const [w, h] = size.split('x').map(Number);
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text().split('\n')[0]));
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(base + query, { waitUntil: 'load' });
+  await waitFor(page, () => window.__ready === true);
+  await settle(page, 2500);
+  return { ctx, page, errors, w, h };
+}
+
+async function viewConsistency(browser, base, size) {
+  console.log(`\n[${size}] 固定前・カーソルを置いた状態・固定後・解除後の視点`);
+  const { ctx, page, errors, w, h } = await open(browser, base, size);
+  const v0 = (await getState(page)).view;
+  check((await mode(page)) === 'empty', `固定前：列は手がかり（mode=empty）。${fmt(v0)}`);
+  check(await page.isVisible('[data-testid=info-hint]'), '固定前：操作の手がかりが見える');
+
+  const hx = Math.round(w * 0.3);
+  const hy = Math.round(h * 0.5);
+  await page.mouse.move(hx, hy);
+  await page.mouse.move(hx + 1, hy + 1);
+  await page.mouse.move(hx, hy);
+  await waitFor(page, () => window.__store.getState().probe !== null);
+  await settle(page);
+  const s1 = await getState(page);
+  check((await mode(page)) === 'hover' && !s1.pinned, 'カーソルを置いた：列は区名と「この地点」（mode=hover）');
+  check(sameView(v0, s1.view), `カーソルを置いた状態の視点が固定前と一致。${fmt(s1.view)}`);
+  check((await page.locator('[data-testid=info-table] thead th').count()) === 2, 'カーソルを置いた：表は2列（レイヤー・この地点）');
+  const c1 = await page.textContent('[data-testid=info-column] .ic-coords');
+
+  await page.mouse.move(hx + 60, hy + 40);
+  await waitFor(page, (p) => window.__store.getState().probe.x !== p.x, s1.probe);
+  await settle(page, 500);
+  const c2 = await page.textContent('[data-testid=info-column] .ic-coords');
+  check(c1 !== c2, `カーソルを動かすと値が追従する（${c1} → ${c2}）`);
+
+  await page.mouse.click(hx + 60, hy + 40);
+  await waitFor(page, () => window.__store.getState().probePinned);
+  await settle(page, 3000);
+  const s2 = await getState(page);
+  check((await mode(page)) === 'pinned', '固定後：列はクローズアップと表（mode=pinned）');
+  check(sameView(v0, s2.view), `固定後の視点が固定前と一致。${fmt(s2.view)}`);
+  check((await page.locator('[data-testid=info-table] thead th').count()) === 3, '固定後：表は3列（レイヤー・この地点・半径 ○ km 内）');
+  check((await page.textContent('[data-testid=info-area-title]')) === '半径 2 km 内', '固定後：表の見出しが「半径 2 km 内」');
+  check(await page.isVisible('[data-testid=closeup]'), '固定後：クローズアップが見える');
+  const rows = await page.locator('[data-testid=info-table] tbody tr').count();
+  check(rows === 5, `固定後：表に5レイヤーの行がある（${rows}）`);
+
+  await page.keyboard.press('Escape');
+  await waitFor(page, () => !window.__store.getState().probePinned);
+  await settle(page, 1500);
+  const s3 = await getState(page);
+  check(sameView(v0, s3.view), `解除後の視点が固定前と一致。${fmt(s3.view)}`);
+  check(s3.probe === null && (await mode(page)) === 'empty', '解除後：探針が消え、列は手がかりに戻る');
+  check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
+  await ctx.close();
+
+  // URL で固定して開いた場合も、同じ視点
+  for (const q of ['?probe=8172,-1342&radius=5000', '?probe=1550,130']) {
+    const o = await open(browser, base, size, q);
+    const st = await getState(o.page);
+    check(sameView(v0, st.view) && st.pinned, `${q} で開いた視点が固定前と一致。${fmt(st.view)}`);
+    check((await mode(o.page)) === 'pinned', `${q}：列は固定中の中身`);
+    check(o.errors.length === 0, `${q}：ブラウザのエラーなし`);
+    await o.ctx.close();
+  }
+}
+
+async function interactions(browser, base, size) {
+  console.log(`\n[${size}] 固定した印のドラッグ・クローズアップの中のクリック・半径・解除`);
+  const { ctx, page, errors } = await open(browser, base, size, '?probe=1550,130');
+  const s0 = await getState(page);
+
+  // 1. 固定した印（真ん中の段の輪）をドラッグ
+  const info = await page.evaluate(() => {
+    const r = document.querySelector('canvas').getBoundingClientRect();
+    const s = window.__store.getState();
+    return { left: r.left, top: r.top, width: r.width, height: r.height, vs: s.viewState, probe: s.probe, spacing: s.spacing };
+  });
+  const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ width: info.width, height: info.height, viewState: info.vs });
+  const [rx, ry] = vp.project([info.probe.x, info.probe.y, 2 * info.spacing]);
+  const mx = info.left + rx;
+  const my = info.top + ry;
+  await page.mouse.move(mx, my);
+  await sleep(300);
+  await page.mouse.down();
+  await page.mouse.move(mx - 90, my + 40, { steps: 10 });
+  await page.mouse.up();
+  await waitFor(page, (b) => {
+    const p = window.__store.getState().probe;
+    return p.x !== b.x || p.y !== b.y;
+  }, s0.probe);
+  await settle(page, 2500);
+  const s1 = await getState(page);
+  check(Math.hypot(s1.probe.x - s0.probe.x, s1.probe.y - s0.probe.y) > 500, `印のドラッグで中心が動く（${Math.round(s0.probe.x)},${Math.round(s0.probe.y)} → ${Math.round(s1.probe.x)},${Math.round(s1.probe.y)}）`);
+  check(sameView(s0.view, s1.view) && s1.view.rotationOrbit === s0.view.rotationOrbit && s1.view.rotationX === s0.view.rotationX, 'ドラッグしても視点は回らず、大きさも位置も変わらない');
+  check(s1.pinned && (await mode(page)) === 'pinned', 'ドラッグ後も固定中');
+  const coords1 = await page.textContent('[data-testid=info-coords]');
+  check(coords1.includes(Math.round(s1.probe.x).toLocaleString('ja-JP')), `右の列の座標が追従する（${coords1}）`);
+
+  // 2. クローズアップの中をクリック
+  const box = await page.evaluate(() => {
+    const r = document.querySelector('.cu-canvas').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await page.mouse.click(box.x + 80, box.y);
+  await waitFor(page, (b) => {
+    const p = window.__store.getState().probe;
+    return p.x !== b.x || p.y !== b.y;
+  }, s1.probe);
+  await settle(page, 2500);
+  const s2 = await getState(page);
+  const moved = Math.hypot(s2.probe.x - s1.probe.x, s2.probe.y - s1.probe.y);
+  check(moved > 300 && moved < 3000, `クローズアップの中のクリックで中心が動く（${Math.round(moved)} m）`);
+  check(sameView(s0.view, s2.view), 'クリック後も全体の地図の視点は変わらない');
+
+  // 3. 半径の切り替え
+  const area = () => page.textContent('[data-testid=info-area-title]');
+  await page.getByRole('button', { name: '5 km', exact: true }).click();
+  await waitFor(page, () => window.__store.getState().closeupRadius === 5000);
+  await settle(page, 2500);
+  check((await area()) === '半径 5 km 内', '半径 5 km：表の見出しが「半径 5 km 内」');
+  await page.getByRole('button', { name: '1 km', exact: true }).click();
+  await waitFor(page, () => window.__store.getState().closeupRadius === 1000);
+  await settle(page, 2000);
+  check((await area()) === '半径 1 km 内', '半径 1 km：表の見出しが「半径 1 km 内」');
+  check(sameView(s0.view, (await getState(page)).view), '半径を切り替えても全体の地図の視点は変わらない');
+
+  // 4. Esc で解除
+  await page.keyboard.press('Escape');
+  await waitFor(page, () => !window.__store.getState().probePinned);
+  await settle(page, 1500);
+  const s4 = await getState(page);
+  check(s4.probe === null && (await mode(page)) === 'empty', 'Esc で解除できる');
+
+  // 5. 「解除」ボタンで解除（もう一度固定してから）
+  await page.mouse.move(300, 500);
+  await page.mouse.move(301, 501);
+  await page.mouse.move(300, 500);
+  await waitFor(page, () => window.__store.getState().probe !== null);
+  await page.mouse.click(300, 500);
+  await waitFor(page, () => window.__store.getState().probePinned);
+  await settle(page, 2500);
+  check((await mode(page)) === 'pinned', '再び固定できる');
+  await page.getByRole('button', { name: '解除', exact: true }).click();
+  await waitFor(page, () => !window.__store.getState().probePinned);
+  await settle(page, 1000);
+  const s5 = await getState(page);
+  check(s5.probe === null && (await mode(page)) === 'empty', '「解除」ボタンで解除できる');
+  check(sameView(s0.view, s5.view), '解除後も視点は変わらない');
+
+  // 6. 配置：列と右上のパネルが重ならず、列は画面の高さいっぱい
+  const rects = await page.evaluate(() => {
+    const r = (sel) => {
+      const e = document.querySelector(sel);
+      if (!e) return null;
+      const b = e.getBoundingClientRect();
+      return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+    };
+    return { column: r('[data-testid=info-column]'), vw: window.innerWidth, vh: window.innerHeight };
+  });
+  check(rects.column.top === 0 && rects.column.bottom === rects.vh, '右の列は画面の高さいっぱい');
+  check(rects.column.right <= rects.vw - 256 + 1, '右の列は右上のパネルと重ならない');
+  check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
+  await ctx.close();
+}
+
+let browser;
+try {
+  const base = await baseUrl();
+  browser = await chromium.launch();
+  const sizes = values.sizes.split(',');
+  for (const size of sizes) await viewConsistency(browser, base, size);
+  await interactions(browser, base, sizes[0]);
+} finally {
+  await browser?.close().catch(() => {});
+}
+console.log(failures.length === 0 ? '\nすべて合格' : `\n不合格 ${failures.length} 件:\n${failures.map((f) => `  - ${f}`).join('\n')}`);
+process.exit(failures.length === 0 ? 0 : 1);
