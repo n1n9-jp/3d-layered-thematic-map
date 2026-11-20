@@ -21,6 +21,8 @@ export interface MapState {
   /** レイヤー間隔（m） */
   spacing: number;
   viewState: ViewState;
+  /** true の間は、画面の大きさや積層の高さに合わせて視点を自動で収め直す（利用者が視点を動かすと false）。 */
+  autoFit: boolean;
   /** ローカル座標（m） */
   probe: { x: number; y: number } | null;
   probePinned: boolean;
@@ -31,6 +33,7 @@ export interface MapState {
   setVisible(id: LayerId, v: boolean): void;
   setSolo(id: LayerId | null): void;
   setViewState(v: MapState['viewState']): void;
+  setAutoFit(v: boolean): void;
   setProbe(p: MapState['probe']): void;
   setProbePinned(v: boolean): void;
 }
@@ -132,6 +135,7 @@ const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
 
 export const useMapStore = create<MapState>()((set) => ({
   ...initialStateFromQuery(typeof location === 'undefined' ? '' : location.search),
+  autoFit: true,
   data: {},
   status: Object.fromEntries(DATA_KEYS.map((k) => [k, 'idle'])) as Record<DataKey, LayerStatus>,
 
@@ -148,6 +152,7 @@ export const useMapStore = create<MapState>()((set) => ({
   setVisible: (id, v) => set((s) => ({ visible: { ...s.visible, [id]: v } })),
   setSolo: (id) => set({ solo: id }),
   setViewState: (v) => set({ viewState: v }),
+  setAutoFit: (v) => set({ autoFit: v }),
   setProbe: (p) => set({ probe: p }),
   setProbePinned: (v) => set({ probePinned: v }),
 }));

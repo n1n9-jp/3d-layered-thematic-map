@@ -2,6 +2,7 @@ import ProbePanel from './probe/ProbePanel';
 import Credits from './panel/Credits';
 import LayerPanel from './panel/LayerPanel';
 import SpacingSlider from './panel/SpacingSlider';
+import ViewButtons from './panel/ViewButtons';
 import StackView from './view/StackView';
 import { PANEL, PROBE_PANEL } from './view/layout';
 
@@ -40,6 +41,7 @@ export default function App() {
           gap: 12,
         }}
       >
+        <ViewButtons />
         <SpacingSlider />
         <LayerPanel />
       </div>

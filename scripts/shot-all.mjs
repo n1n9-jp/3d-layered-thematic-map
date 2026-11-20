@@ -7,7 +7,11 @@
 //   --data fixture     全シナリオのクエリに data=fixture を足す
 //   --only <a,b,...>   指定した名前のシナリオだけ撮る
 // 終了コード: 読み込みに失敗したシナリオ、またはエラーのあったシナリオが1つでもあれば 1。使い方の誤りは 2。
-// シナリオの形式: { name, query, size: "WxH", actions: [{ type: "hover", x: "center"|<px>, y: "center"|<px> }], criteria }
+// シナリオの形式: { name, query, size: "WxH", actions: [...], criteria }
+//   actions の要素:
+//     { type: "hover", x: "center"|<px>, y: "center"|<px> }                        マウスを動かす
+//     { type: "click", button: <ボタンの名前>, settled?: { rotationX, rotationOrbit } }   名前のボタンを押す。settled があれば、
+//       視点がその角度（方位は360度の違いを無視）になり、描画が追いつくまで待つ（視点のボタン用）
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -154,6 +158,22 @@ async function runActions(page, actions, viewport) {
       await page.mouse.move(x + 1, y + 1); // pick を確実に走らせる
       await page.mouse.move(x, y);
       await sleep(300);
+    } else if (a.type === 'click') {
+      await page.getByRole('button', { name: a.button, exact: true }).click();
+      if (a.settled) {
+        await page.waitForFunction(
+          ({ rotationX, rotationOrbit }) => {
+            const v = window.__store.getState().viewState;
+            const d = (((v.rotationOrbit - rotationOrbit) % 360) + 360) % 360;
+            return Math.abs(v.rotationX - rotationX) < 0.01 && Math.min(d, 360 - d) < 0.01;
+          },
+          a.settled,
+          { timeout: READY_TIMEOUT_MS, polling: 100 },
+        );
+        // 最後の視点が描画されるのを待つ（描画が遅い環境では1フレームに数秒かかる）。
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      }
+      await sleep(500);
     } else {
       throw new Error(`未知の操作です: ${a.type}`);
     }

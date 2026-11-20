@@ -1,0 +1,66 @@
+.vb {
+  font: 13px/1.3 sans-serif;
+  color: #eee;
+}
+.vb button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.vb button:focus-visible {
+  outline: 2px solid #6cb6ff;
+  outline-offset: 1px;
+}
+
+.vb-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.vb-title {
+  font-weight: 600;
+}
+.vb-hint {
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+.vb-row {
+  display: grid;
+  gap: 4px;
+}
+.vb-row + .vb-row {
+  margin-top: 4px;
+}
+.vb-presets {
+  grid-template-columns: repeat(3, 1fr);
+}
+.vb-rotate {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* 見た目は、レイヤー一覧の「単独表示」ボタンに揃える。 */
+.vb-btn {
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #303030;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.vb-btn:hover:not(:disabled) {
+  background: #404040;
+}
+.vb-btn[aria-pressed='true'] {
+  border-color: #6cb6ff;
+  background: #1d4263;
+}
+.vb-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.vb-arrow {
+  margin-right: 4px;
+}

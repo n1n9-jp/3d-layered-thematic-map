@@ -15,6 +15,8 @@ import { boundaryLayer, boundaryPaths } from './boundaryLines';
 import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitView, hasSize, labelAnchors, nearestAngle, projectPoint, spreadLabels } from './camera';
 import type { Size } from './camera';
 import { RIGHT_PANEL_W } from './layout';
+import { resolveAngles, subscribeViewCommand } from './viewPresets';
+import type { Angles } from './viewPresets';
 import { getSliderActive, subscribeSliderActive } from './sliderActivity';
 import { useDisplayedZ } from './useDisplayedZ';
 import type { ZMap } from './useDisplayedZ';
@@ -40,6 +42,12 @@ const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQu
 
 /** 視点を切り替えるアニメーションの長さ（ms）。 */
 const TRANSITION_MS = 700;
+/**
+ * アニメーションの終了を deck.gl が知らせてこないときのための、遅い側の保険（ms）。
+ * 描画が遅い環境（1フレーム約2秒の実データ）でも、アニメーションの最後のフレームが来る前に打ち切らないよう、長めにとる。
+ * 通常は、終了の知らせ（onViewStateChange）か利用者の操作で、これより早く終わる。
+ */
+const TRANSITION_FAILSAFE_MS = TRANSITION_MS + 4000;
 /** レイヤー名どうしの縦の最小間隔（px）。 */
 const LABEL_GAP = 20;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -115,13 +123,27 @@ export default function StackView() {
   const [transition, setTransition] = useState(false);
   /** true の間は、画面の大きさや積層の高さに合わせて target と zoom を追従させる（利用者が視点を動かすまで）。 */
   const autoFit = useRef(true);
+  /** autoFit を変える。ボタンの選択中表示のために、store にも写す。 */
+  const setAutoFit = useCallback((v: boolean) => {
+    autoFit.current = v;
+    useMapStore.getState().setAutoFit(v);
+  }, []);
   const saved = useRef<Saved | null>(null);
   const clearTimer = useRef<number>(0);
   const prevSolo = useRef<LayerId | null>(null);
+  /** 視点のボタンで移動中の、行き先の角度。連打しても、補間途中の値ではなく行き先から数える。 */
+  const goal = useRef<Angles | null>(null);
+  const readyRef = useRef(false);
+  readyRef.current = ready;
+  const sizeRef = useRef<Size | null>(null);
+  sizeRef.current = size;
 
   const startTransition = useCallback((next: ViewState) => {
     window.clearTimeout(clearTimer.current);
-    clearTimer.current = window.setTimeout(() => setTransition(false), TRANSITION_MS + 150);
+    clearTimer.current = window.setTimeout(() => {
+      setTransition(false);
+      goal.current = null;
+    }, TRANSITION_FAILSAFE_MS);
     setTransition(true);
     useMapStore.getState().setViewState(next);
   }, []);
@@ -136,18 +158,18 @@ export default function StackView() {
 
     const view3D = { rotationX, rotationOrbit, ...fitView({ rotationX, rotationOrbit, top: topOf(targets), size }) };
     if (zoom !== null) view3D.zoom = zoom;
-    autoFit.current = zoom === null;
+    setAutoFit(zoom === null);
 
     if (solo !== null) {
       saved.current = { view: view3D, auto: autoFit.current };
-      autoFit.current = true;
+      setAutoFit(true);
       set({ ...SOLO_ANGLES, ...fitView({ ...SOLO_ANGLES, top: 0, size }) });
     } else {
       set(view3D);
     }
     prevSolo.current = solo;
     setReady(true);
-  }, [ready, size, solo, targets]);
+  }, [ready, size, solo, targets, setAutoFit]);
 
   // 画面の大きさや積層の高さが変わったら、収まるように追従する（アニメーション中は行わない）。
   const top = topOf(shown);
@@ -166,7 +188,7 @@ export default function StackView() {
     const vs = useMapStore.getState().viewState;
     if (solo !== null) {
       if (!saved.current) saved.current = { view: vs, auto: autoFit.current };
-      autoFit.current = true;
+      setAutoFit(true);
       startTransition({
         ...SOLO_ANGLES,
         rotationOrbit: nearestAngle(SOLO_ANGLES.rotationOrbit, vs.rotationOrbit),
@@ -175,7 +197,7 @@ export default function StackView() {
     } else if (saved.current) {
       const prev = saved.current;
       saved.current = null;
-      autoFit.current = prev.auto;
+      setAutoFit(prev.auto);
       const rotationOrbit = nearestAngle(prev.view.rotationOrbit, vs.rotationOrbit);
       startTransition(
         prev.auto
@@ -187,7 +209,22 @@ export default function StackView() {
           : { ...prev.view, rotationOrbit },
       );
     }
-  }, [ready, size, solo, startTransition]);
+  }, [ready, size, solo, startTransition, setAutoFit]);
+
+  // 視点のボタン。決まった視点や、方位を45度回した視点へアニメーションで移り、そこで積層が収まるように合わせる。
+  // 単独表示のあいだは受け付けない（2D 表示に固定されている）。
+  useEffect(
+    () =>
+      subscribeViewCommand((cmd) => {
+        const sz = sizeRef.current;
+        if (!readyRef.current || !sz || useMapStore.getState().solo !== null) return;
+        const angles = resolveAngles(cmd, goal.current ?? useMapStore.getState().viewState);
+        goal.current = angles;
+        setAutoFit(true);
+        startTransition({ ...angles, ...fitView({ ...angles, top: topOf(targetsRef.current), size: sz }) });
+      }),
+    [startTransition, setAutoFit],
+  );
 
   const onViewStateChange = useCallback(
     ({ viewState: v, interactionState }: { viewState: Record<string, unknown>; interactionState?: Record<string, boolean | undefined> }) => {
@@ -195,7 +232,8 @@ export default function StackView() {
       if (!is.inTransition) {
         window.clearTimeout(clearTimer.current);
         setTransition(false);
-        if (is.isDragging || is.isPanning || is.isRotating || is.isZooming) autoFit.current = false;
+        goal.current = null;
+        if (is.isDragging || is.isPanning || is.isRotating || is.isZooming) setAutoFit(false);
       }
       const vs = v as unknown as ViewState;
       const t = vs.target;
