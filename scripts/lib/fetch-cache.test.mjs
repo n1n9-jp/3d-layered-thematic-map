@@ -56,9 +56,10 @@ describe('保存先', () => {
     expect(existsSync(path.join(ROOT_DIR, 'package.json'))).toBe(true);
   });
 
-  it('既定値: 試行3回、タイムアウト60秒', () => {
+  it('既定値: 試行3回、ヘッダー待ち60秒、本文の途絶え60秒', () => {
     expect(DEFAULTS.maxAttempts).toBe(3);
-    expect(DEFAULTS.timeoutMs).toBe(60_000);
+    expect(DEFAULTS.headersTimeoutMs).toBe(60_000);
+    expect(DEFAULTS.bodyIdleTimeoutMs).toBe(60_000);
   });
 });
 
@@ -114,8 +115,30 @@ describe('fetchCached', () => {
     expect(existsSync(cachePath(url))).toBe(false);
   });
 
-  it('4xx は再試行せずすぐ失敗する', async () => {
-    for (const status of [400, 403, 404, 429]) {
+  it('429 は 5xx と同じく再試行し、成功すれば保存する', async () => {
+    const url = route((req, res, n) => {
+      if (n < 3) {
+        res.statusCode = 429;
+        res.end('slow down');
+      } else res.end('ok');
+    });
+    expect((await fetchCached(url)).toString()).toBe('ok');
+    expect(count(url)).toBe(3);
+    expect(existsSync(cachePath(url))).toBe(true);
+  });
+
+  it('429 が続けば試行回数で諦める', async () => {
+    const url = route((req, res) => {
+      res.statusCode = 429;
+      res.end();
+    });
+    await expect(fetchCached(url)).rejects.toThrow(/HTTP 429/);
+    expect(count(url)).toBe(3);
+    expect(existsSync(cachePath(url))).toBe(false);
+  });
+
+  it('429 以外の 4xx は再試行せずすぐ失敗する', async () => {
+    for (const status of [400, 401, 403, 404, 410]) {
       const url = route((req, res) => {
         res.statusCode = status;
         res.end('no');
@@ -135,26 +158,94 @@ describe('fetchCached', () => {
     expect(count(url)).toBe(2);
   });
 
-  it('タイムアウトしたら失敗し、再試行もする', async () => {
-    FETCH_SETTINGS.timeoutMs = 150;
+  it('ヘッダーが届かないままなら、headersTimeoutMs で中断して再試行する', async () => {
+    FETCH_SETTINGS.headersTimeoutMs = 150;
     FETCH_SETTINGS.maxAttempts = 2;
     const url = route(() => {
       /* 応答しない */
     });
     const started = Date.now();
-    await expect(fetchCached(url)).rejects.toThrow();
+    await expect(fetchCached(url)).rejects.toThrow(/ヘッダー/);
     expect(count(url)).toBe(2);
     expect(Date.now() - started).toBeLessThan(5000);
     expect(existsSync(cachePath(url))).toBe(false);
   });
 
-  it('本文の受信が止まってもタイムアウトする', async () => {
-    FETCH_SETTINGS.timeoutMs = 150;
+  it('本文の受信が止まったら、bodyIdleTimeoutMs で中断する', async () => {
+    FETCH_SETTINGS.bodyIdleTimeoutMs = 150;
     FETCH_SETTINGS.maxAttempts = 1;
     const url = route((req, res) => {
       res.writeHead(200, { 'content-length': '1000' });
       res.write('partial');
     });
-    await expect(fetchCached(url)).rejects.toThrow();
+    const started = Date.now();
+    await expect(fetchCached(url)).rejects.toThrow(/本文/);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(existsSync(cachePath(url))).toBe(false);
+  });
+
+  it('本文を少しずつ送り続ける応答は、合計が両方の上限を超えても中断されない', async () => {
+    // 上限はどちらも 200ms。ヘッダーまで 120ms、その後 25 個のチャンクを 20ms 間隔（合計 500ms 超）で送る。
+    FETCH_SETTINGS.headersTimeoutMs = 200;
+    FETCH_SETTINGS.bodyIdleTimeoutMs = 200;
+    FETCH_SETTINGS.maxAttempts = 1;
+    const chunk = Buffer.alloc(1000, 5);
+    const url = route((req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { 'content-length': String(chunk.length * 25) });
+        let sent = 0;
+        const timer = setInterval(() => {
+          res.write(chunk);
+          if (++sent === 25) {
+            clearInterval(timer);
+            res.end();
+          }
+        }, 20);
+      }, 120);
+    });
+    const started = Date.now();
+    const buf = await fetchCached(url);
+    expect(Date.now() - started).toBeGreaterThan(450);
+    expect(buf.equals(Buffer.alloc(chunk.length * 25, 5))).toBe(true);
+    expect(count(url)).toBe(1);
+    expect(existsSync(cachePath(url))).toBe(true);
+  });
+
+  it('ヘッダー待ちの時間は本文の受信に持ち越さない（ヘッダー待ちが上限近くでも、本文が続けば完了する）', async () => {
+    FETCH_SETTINGS.headersTimeoutMs = 300;
+    FETCH_SETTINGS.bodyIdleTimeoutMs = 300;
+    FETCH_SETTINGS.maxAttempts = 1;
+    const url = route((req, res) => {
+      setTimeout(() => {
+        res.writeHead(200);
+        res.write('a');
+        setTimeout(() => res.write('b'), 200);
+        setTimeout(() => res.end('c'), 400);
+      }, 250);
+    });
+    expect((await fetchCached(url)).toString()).toBe('abc');
+  });
+
+  it('本文の途絶えの上限は、ヘッダー待ちとは別に効く', async () => {
+    // ヘッダー待ちの上限は十分長く、本文の途絶えの上限だけが短い
+    FETCH_SETTINGS.headersTimeoutMs = 5000;
+    FETCH_SETTINGS.bodyIdleTimeoutMs = 100;
+    FETCH_SETTINGS.maxAttempts = 1;
+    const url = route((req, res) => {
+      res.writeHead(200);
+      res.write('a');
+      setTimeout(() => res.end('b'), 400); // 途絶えが 400ms > 100ms
+    });
+    await expect(fetchCached(url)).rejects.toThrow(/本文/);
+  });
+
+  it('ヘッダー待ちの上限は、本文の途絶えの上限とは別に効く', async () => {
+    FETCH_SETTINGS.headersTimeoutMs = 100;
+    FETCH_SETTINGS.bodyIdleTimeoutMs = 5000;
+    FETCH_SETTINGS.maxAttempts = 1;
+    const url = route((req, res) => {
+      setTimeout(() => res.end('late'), 400);
+    });
+    await expect(fetchCached(url)).rejects.toThrow(/ヘッダー/);
   });
 });

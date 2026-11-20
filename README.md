@@ -51,6 +51,8 @@
 | `stations.geojson` | Point | `name`（駅名）, `operator`, `line` |
 | `facilities.geojson` | Point | `kind`（`school` / `hospital`）, `name`, `subtype`（学校種別・病院/診療所の別など） |
 
+ファイルサイズの上限は、1ファイル 10MB、`public/data/` 全体で 30MB です（1MB = 1024 × 1024 byte）。
+
 標高は格子データです。
 
 - `elevation.bin`：Float32（リトルエンディアン）の格子。行は北から南、列は西から東の順。データなしは NaN

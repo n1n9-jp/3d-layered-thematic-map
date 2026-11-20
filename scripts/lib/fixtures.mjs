@@ -2,6 +2,7 @@
 // 乱数は種を固定した mulberry32 のみを使うので、何度実行しても同じ出力になる。
 import { EXTENT } from './projection.mjs';
 import { ELEVATION_SPEC } from './validate.mjs';
+import { createWards } from './wards.mjs';
 
 export const CITY_RADIUS = 13000;
 const SEED = 20240601;
@@ -88,7 +89,8 @@ function makePopulation(rand) {
 
 // ---- 標高 ------------------------------------------------------------------
 
-function makeElevation(rand) {
+/** 区の多角形の内側のセルだけに値を入れ、外側は NaN にする（検証スクリプトと同じ判定）。 */
+function makeElevation(rand, wards) {
   const { width, height, cellSize } = ELEVATION_SPEC;
   const phase = [rand() * 6.28, rand() * 6.28, rand() * 6.28];
   const data = new Float32Array(width * height);
@@ -98,7 +100,7 @@ function makeElevation(rand) {
     const y = EXTENT.maxY - (row + 0.5) * cellSize; // 行は北から南
     for (let col = 0; col < width; col++) {
       const x = EXTENT.minX + (col + 0.5) * cellSize; // 列は西から東
-      if (Math.hypot(x, y) > CITY_RADIUS) {
+      if (!wards.contains(x, y)) {
         data[row * width + col] = NaN;
         continue;
       }
@@ -262,7 +264,7 @@ export function generateFixtures() {
   const rand = mulberry32(SEED);
   const boundary = makeBoundary(rand);
   const population = makePopulation(rand);
-  const elevation = makeElevation(rand);
+  const elevation = makeElevation(rand, createWards(boundary.features));
   const roads = makeRoads(rand);
   const { rail, stations } = makeRail(rand);
   const facilities = makeFacilities(rand);
