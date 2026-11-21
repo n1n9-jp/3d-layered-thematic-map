@@ -6,6 +6,7 @@ import type { CloseupCircle } from '../closeup/closeupModel';
 import type { CloseupCut } from '../closeup/cut';
 import { registry } from '../layers';
 import { installProbeKeys, releaseProbe } from '../probe/controller';
+import { releaseSection } from '../section/controller';
 import { installSectionKeys } from '../section/controller';
 import SectionBody from '../section/SectionPanel';
 import { cachedDistrictLookup } from '../probe/district';
@@ -61,14 +62,6 @@ function Head({ p, pinned }: { p: Point; pinned: boolean }) {
           {district ?? '区の外'}
         </span>
         {pinned && <span className="ic-pin">● 固定中</span>}
-        {pinned && (
-          <span className="ic-release">
-            <span className="ic-dim">Esc か</span>
-            <button type="button" className="ic-btn" onClick={releaseProbe}>
-              解除
-            </button>
-          </span>
-        )}
       </div>
       {!pinned && <div className="ic-coords">{coordsText(p)}</div>}
     </header>
@@ -176,6 +169,10 @@ function PinnedBody({ p }: { p: Point }) {
 function ModeBar() {
   const mode = useMapStore((s) => s.mode);
   const setMode = useMapStore((s) => s.setMode);
+  const pinned = useMapStore((s) => s.probePinned);
+  const hasSection = useMapStore((s) => s.section !== null || s.sectionStart !== null);
+  // いまの読み方で選んでいるもの（固定した地点、引いた線）を消す。読み方の切り替えと同じ並びの右端に置く。
+  const clear = mode === 'section' ? (hasSection ? releaseSection : null) : pinned ? releaseProbe : null;
   return (
     <div className="ic-modes" data-testid="mode-bar">
       <span className="ic-modes-label">読み方</span>
@@ -187,6 +184,14 @@ function ModeBar() {
           断面
         </button>
       </div>
+      {clear && (
+        <span className="ic-release">
+          <span className="ic-dim">Esc か</span>
+          <button type="button" className="ic-btn" onClick={clear} data-testid={mode === 'section' ? 'section-clear' : 'probe-clear'}>
+            消す
+          </button>
+        </span>
+      )}
     </div>
   );
 }

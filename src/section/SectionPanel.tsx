@@ -437,12 +437,6 @@ export default function SectionBody() {
           <span className="sc-len" data-testid="section-length">
             {formatLength(length)}
           </span>
-          <span className="ic-release">
-            <span className="ic-dim">Esc か</span>
-            <button type="button" className="ic-btn" onClick={releaseSection} data-testid="section-clear">
-              消す
-            </button>
-          </span>
         </div>
         <Ends line={line} />
       </header>

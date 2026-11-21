@@ -4,7 +4,7 @@
 // --url がなければ Vite を起動する。確認すること：
 //   1. 固定前・カーソルを置いた状態・固定後・解除後で、viewState の zoom と target が一致する（URL で固定して開いた場合も同じ）
 //   2. 右の列の中身が状態に応じて変わる（手がかり／区名と「この地点」／クローズアップと3列の表）
-//   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「解除」ボタンでの解除が動く
+//   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「消す」ボタンでの解除が動く
 //   4. 「断面」（URL の section= で開く）でも、全体の地図の大きさと位置が変わらない。線を消す・「地点」へ戻す・「断面」へ戻すでも同じ
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。描画が遅い環境（1フレーム約2秒）を見込んで、待ちは長めにとる。
 import { createRequire } from 'node:module';
@@ -270,7 +270,7 @@ async function interactions(browser, base, size) {
   const s4 = await getState(page);
   check(s4.probe === null && (await mode(page)) === 'empty', 'Esc で解除できる');
 
-  // 5. 「解除」ボタンで解除（もう一度固定してから）
+  // 5. 「消す」ボタンで解除（もう一度固定してから）
   const [px, py] = await topPlanePoint(page);
   await page.mouse.move(px, py);
   await page.mouse.move(px + 1, py + 1);
@@ -280,11 +280,11 @@ async function interactions(browser, base, size) {
   await waitFor(page, () => window.__store.getState().probePinned);
   await settle(page, 2500);
   check((await mode(page)) === 'pinned', '再び固定できる');
-  await page.getByRole('button', { name: '解除', exact: true }).click();
+  await page.getByRole('button', { name: '消す', exact: true }).click();
   await waitFor(page, () => !window.__store.getState().probePinned);
   await settle(page, 1000);
   const s5 = await getState(page);
-  check(s5.probe === null && (await mode(page)) === 'empty', '「解除」ボタンで解除できる');
+  check(s5.probe === null && (await mode(page)) === 'empty', '「消す」ボタンで解除できる');
   check(sameView(s0.view, s5.view), '解除後も視点は変わらない');
 
   // 6. 配置：列と右上のパネルが重ならず、列は画面の高さいっぱい
