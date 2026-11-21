@@ -41,61 +41,83 @@
   background: transparent;
 }
 
-/* 表の領域を使い回すが、グラフは中の余白を自分で決める。 */
-.sc-scroll {
+/*
+ * チャートを置く領域。各チャートは、全体の地図の対応する段と同じ高さに、絶対位置で置く（段の高さが変わると、一緒に動く）。
+ * 置けないとき（段が近すぎる、真上、単独表示）は、上から順に同じ高さの枠を並べる（data-layout="stacked"）。
+ */
+.sc-stage {
   flex: 1 1 0;
-  max-height: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 0;
   position: relative;
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.sc-body {
-  padding: 0 12px;
+/* 揃える／縦並びが切り替わった直後だけ、滑らかに移る。 */
+.sc-stage[data-settling] .sc-cell,
+.sc-stage[data-settling] .sc-axis {
+  transition: top 0.3s ease;
 }
 
-.sc-chart {
-  padding: 8px 0 4px;
+.sc-cell {
+  position: absolute;
+  left: 12px;
+  right: 12px;
 }
 
-.sc-chart + .sc-chart {
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+.sc-cell > .sc-svg {
+  position: absolute;
+  left: 0;
+  display: block;
+  overflow: visible; /* 縦軸の上端・下端の目盛りの文字が、枠の外へ少しはみ出してよい */
 }
 
-.sc-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 17px;
-}
-
+/* レイヤー名。枠の縦の中心に合わせる（全体の地図の、段の右脇の名前と同じ高さ）。 */
 .sc-name {
-  flex: none;
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
   font-size: 12.5px;
   font-weight: 600;
   color: #9bd;
+  line-height: 1.25;
 }
 
-/* カーソルの位置の値。グラフにカーソルがあるときだけ出る（行の高さは変わらない）。 */
-.sc-read {
-  min-width: 0;
+.sc-cell[data-hot] .sc-name {
+  color: #fff;
+}
+
+/* 要約と、カーソルの位置の値を、枠の上の同じ場所に重ねる（2行まで。下に揃える）。 */
+.sc-text {
+  position: absolute;
+  top: 0;
+  display: grid;
+  align-items: end;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: #5adcff;
+  padding-bottom: 3px;
+  box-sizing: border-box;
+}
+
+.sc-text > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.3;
 }
 
 .sc-sum {
-  min-height: 16px;
-  padding-bottom: 3px;
-  font-size: 11.5px;
-  line-height: 1.35;
-  color: #b8c0cc;
+  font-size: 11px;
+  color: #aab2be;
 }
 
-.sc-svg {
-  display: block;
+/* カーソルの位置の値。グラフにカーソルがあるときだけ出る（要約に代わる）。 */
+.sc-read {
+  font-size: 11.5px;
+  color: #5adcff;
 }
 
 .sc-tick {
@@ -108,18 +130,15 @@
   font-weight: 600;
 }
 
-/* 横軸は、スクロールしても下端に見える。 */
+/* 横軸は、いちばん下のチャートの下に1つだけ。 */
 .sc-axis {
-  position: sticky;
-  bottom: 0;
-  margin: 0 -12px;
-  padding: 2px 12px 0;
-  background: #05070b;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  position: absolute;
+  left: 12px;
+  right: 12px;
 }
 
-.sc-body > div {
-  position: relative;
+.sc-axis svg {
+  display: block;
 }
 
 /* 「地点」「断面」の切り替え。 */

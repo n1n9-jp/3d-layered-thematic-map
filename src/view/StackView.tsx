@@ -16,6 +16,7 @@ import { installSectionDrag } from '../section/lineDrag';
 import { standHeight } from '../section/model';
 import { sectionCurtainLayer, sectionCursorLayers, sectionLineLayers, sectionPoleLayers, sectionStandLayers } from '../section/sectionLayers';
 import { useSectionTracks } from '../section/tracks';
+import { clearTierScreen, publishTierScreen } from '../section/tierScreen';
 import { asModelMatrix, layerZ, translationMatrix } from '../stack';
 import { useMapStore, viewQuery } from '../store';
 import type { MapState, ViewState } from '../store';
@@ -35,6 +36,18 @@ import { useDisplayedZ } from './useDisplayedZ';
 import type { ZMap } from './useDisplayedZ';
 
 const { minX, minY, maxX, maxY } = EXTENT;
+
+/** 断面で、右のチャートにカーソルがあるとき、ほかの段の描画を暗くする（不透明度に掛ける値）。 */
+const DIM_OPACITY = 0.38;
+const dimCache = new WeakMap<Layer, Layer>();
+/** レイヤーの不透明度だけを下げた複製。データも属性も作り直さない（同じレイヤーなら、同じ複製を返す）。 */
+function dimLayer(layer: Layer): Layer {
+  const cached = dimCache.get(layer);
+  if (cached) return cached;
+  const d = layer.clone({ opacity: ((layer.props.opacity as number | undefined) ?? 1) * DIM_OPACITY });
+  dimCache.set(layer, d);
+  return d;
+}
 
 type P3 = [number, number, number];
 const FRAME = [{ path: [[minX, minY, 0], [maxX, minY, 0], [maxX, maxY, 0], [minX, maxY, 0], [minX, minY, 0]] as P3[] }];
@@ -88,6 +101,8 @@ export default function StackView({ columnWidth }: Props) {
   const closeup = !sectionMode && state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
   const { line: sectionLine, tracks: sectionTracks } = useSectionTracks();
   const { sectionStart, sectionCursor, sectionHover } = state;
+  // 右のチャートにカーソルがあるとき、その段を残して、ほかの段を暗くする。
+  const focusId = sectionMode && sectionLine && state.sectionFocus?.from === 'chart' ? state.sectionFocus.id : null;
 
   /* ---------- 画面の大きさ ---------- */
   const [box, size] = useElementSize<HTMLDivElement>();
@@ -336,17 +351,21 @@ export default function StackView({ columnWidth }: Props) {
   const paths = useMemo(() => (status.boundary === 'ready' ? cachedBoundaryPaths(data.boundary as BoundaryData) : null), [status.boundary, data.boundary]);
 
   const stackLayers = [];
+  // 目立たせる段が（非表示にされるなどで）なくなっていれば、暗くしない。
+  const dimOthers = focusId !== null && shown[focusId] !== null;
   let prevZ: number | null = null;
   const visibleIds = LAYER_IDS.filter((id) => shown[id] !== null)
     .map((id) => ({ id, z: shown[id] as number, i: order.indexOf(id) }))
     .sort((a, b) => a.z - b.z || a.i - b.i);
   for (const [k, { id, z }] of visibleIds.entries()) {
+    // この段のレイヤー（平面、データ、区境界線、立てるグラフ、切り口の線）。別の段が目立たせられているときは、まとめて暗くする。
+    const group: Layer[] = [];
     const modelMatrix = asModelMatrix(translationMatrix(z));
     // 間隔 0 などで同じ高さに重なる段は、塗りと外枠を1枚ぶんだけ描く（重ねて濃くしない）。
     const first = prevZ === null || Math.abs(z - prevZ) > 1;
     prevZ = z;
     if (first)
-      stackLayers.push(
+      group.push(
         new SolidPolygonLayer({
           id: `plane-${id}`,
           data: PLANE,
@@ -369,24 +388,43 @@ export default function StackView({ columnWidth }: Props) {
           pickable: false,
         }),
       );
-    stackLayers.push(...rendered[id].map((l) => withHeight(l, targets[id] as number, z)));
+    group.push(...rendered[id].map((l) => withHeight(l, targets[id] as number, z)));
     // 同じ高さに重なる段の区境界線は、いちばん上の段にだけ描く（重ねて濃くしない）。
     const next = visibleIds[k + 1];
     const topOfGroup = !(next && Math.abs(next.z - z) <= 1);
-    if (paths && topOfGroup) stackLayers.push(boundaryLayer(paths, id, z));
+    if (paths && topOfGroup) group.push(boundaryLayer(paths, id, z));
     // 断面：その段の平面の後、1つ上の段の平面の前に、立てるグラフ、切り口の線と端点を描く。
     if (sectionMode) {
-      stackLayers.push(...stands[id].map((l) => withHeight(l, targets[id] as number, z)));
+      group.push(...stands[id].map((l) => withHeight(l, targets[id] as number, z)));
       if (topOfGroup) {
-        if (sectionLine) stackLayers.push(...sectionLineLayers(`section-${id}`, sectionLine, z));
-        else if (sectionStart && sectionCursor) stackLayers.push(...sectionLineLayers(`section-draft-${id}`, draftLine(sectionStart, sectionCursor), z, true));
+        if (sectionLine) group.push(...sectionLineLayers(`section-${id}`, sectionLine, z));
+        else if (sectionStart && sectionCursor) group.push(...sectionLineLayers(`section-draft-${id}`, draftLine(sectionStart, sectionCursor), z, true));
       }
     }
     // クローズアップで切り出している範囲を、各段に円で示す（同じ高さに重なる段には1本だけ）。
-    if (closeup && topOfGroup) stackLayers.push(circleLayer(`closeup-range-${id}`, closeup, z));
+    if (closeup && topOfGroup) group.push(circleLayer(`closeup-range-${id}`, closeup, z));
+    stackLayers.push(...(dimOthers && focusId !== id ? group.map(dimLayer) : group));
   }
 
   const labelLayers = stackLabelLayers({ tiers: visibleIds, viewState, size });
+
+  // 断面の右のチャートを、対応する段と同じ高さに置くために、各段の画面上の位置の素材を渡す（描画のフレームごと）。
+  // 視点が自動で収め直される状態なら、段の高さが目標に着いたあとの視点（落ち着いた先）も添える（揃えるか縦並びかを、途中の揺れで切り替えないため）。
+  const boxTop = box.current?.getBoundingClientRect().top ?? 0;
+  const goalTop = topOf(targets);
+  const fitted = useMemo<ViewState | null>(() => {
+    if (!sectionMode || !size || !state.autoFit) return null;
+    const a = goal.current ?? viewState;
+    const angles = { rotationX: a.rotationX, rotationOrbit: a.rotationOrbit };
+    return { ...angles, ...fit({ ...angles, top: goalTop }, size) } as ViewState;
+    // goal（視点のボタンの行き先）は ref。回転が動いている間は viewState の回転が変わるので、それで取り直す。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionMode, size, state.autoFit, goalTop, fit, viewState.rotationX, viewState.rotationOrbit]);
+  const goalView = fitted ?? viewState;
+  useLayoutEffect(() => {
+    if (sectionMode && size) publishTierScreen({ size, viewState, goalView, shown, goal: targets, top: boxTop });
+    else clearTierScreen();
+  }, [sectionMode, size, viewState, goalView, shown, targets, boxTop]);
 
   // 探針（「地点」）か、断面の両端の垂直線とカーソルの印（「断面」）。いちばん上に描く。
   const zsShown = visibleIds.map((t) => t.z);

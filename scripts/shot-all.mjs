@@ -16,8 +16,10 @@
 //     { type: "click-closeup", dx, dy }    クローズアップの積層の領域の中心から (dx, dy) px の位置をクリックする（地点が動くまで待つ）
 //     { type: "click-ground", x, y }       最上段の平面の、ローカル座標 (x, y)（m）の位置をクリックする（「断面」で線を引くときの始点・終点）
 //     { type: "hover-ground", x, y }       同じ位置にカーソルを置く（始点を置いたあとの、線の下書きを出す）
-//     { type: "hover-chart", fraction }    「断面」の右の列の、最初のグラフの横幅の fraction（0〜1）の位置にカーソルを置く（線に沿った距離が store に入るまで待つ）
-//     { type: "hover-map-line", t }        全体の地図の、断面の線の t（0〜1）の位置（真ん中の段の高さ）にカーソルを置く（線に沿った距離が store に入るまで待つ）
+//     { type: "hover-chart", fraction, layer? }    「断面」の右の列の、layer（レイヤー ID。省略すると最初のグラフ）のグラフの横幅の fraction（0〜1）の位置にカーソルを置く
+//       （線に沿った距離が store に入るまで待つ。カーソルを置くと、全体の地図の、対応する段以外が暗くなる）
+//     { type: "hover-map-line", t, tier? } 全体の地図の、断面の線の t（0〜1）の位置にカーソルを置く（線に沿った距離が store に入るまで待つ）。
+//       tier は下から数えた段の番号（0〜4。省略すると真ん中の 2）。その段の切り口の近くなら、右の対応するチャートが目立つ
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -242,10 +244,11 @@ async function runActions(page, actions, viewport) {
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       await sleep(1200);
     } else if (a.type === 'hover-chart') {
-      const box = await page.evaluate(() => {
-        const r = document.querySelector('[data-testid=section-plot]').getBoundingClientRect();
+      const box = await page.evaluate((layer) => {
+        const sel = layer ? `[data-testid=section-chart][data-layer=${layer}] [data-testid=section-plot]` : '[data-testid=section-plot]';
+        const r = document.querySelector(sel).getBoundingClientRect();
         return { x: r.left, y: r.top + r.height / 2, w: r.width };
-      });
+      }, a.layer ?? null);
       const x = box.x + box.w * a.fraction;
       await page.mouse.move(x - 5, box.y);
       await page.mouse.move(x, box.y);
@@ -259,7 +262,7 @@ async function runActions(page, actions, viewport) {
       const { OrbitView } = await import(join(ROOT, 'node_modules/@deck.gl/core/dist/index.js'));
       const vp = new OrbitView({ orthographic: true, fovy: 5 }).makeViewport({ width: info.width, height: info.height, viewState: info.vs });
       const { ax, ay, bx, by } = info.line;
-      const [px, py] = vp.project([ax + (bx - ax) * a.t, ay + (by - ay) * a.t, 2 * info.spacing]);
+      const [px, py] = vp.project([ax + (bx - ax) * a.t, ay + (by - ay) * a.t, (a.tier ?? 2) * info.spacing]);
       await page.mouse.move(info.left + px - 6, info.top + py);
       await page.mouse.move(info.left + px, info.top + py);
       await waitSectionHover(page);

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { LAYER_IDS } from '../config';
 import type { LayerId } from '../config';
@@ -11,6 +11,8 @@ import { layerZ } from '../stack';
 import { useMapStore } from '../store';
 import type { LayerStatus } from '../store';
 import type { BoundaryData, SectionLine, SectionMarks, SectionSeries, SectionTrack } from '../types';
+import { SUMMARY_H, placeCharts, stackedPlacement } from './alignment';
+import type { AlignMode, Placement, Tier } from './alignment';
 import { releaseSection } from './controller';
 import {
   bandQuads,
@@ -29,23 +31,30 @@ import {
   xToD,
 } from './model';
 import type { XScale } from './model';
+import { planeCenterY, useTierScreen } from './tierScreen';
+import type { TierScreen } from './tierScreen';
 import { useSectionTracks } from './tracks';
 import './SectionPanel.css';
 
-/** グラフの左（縦軸の目盛り）と右の余白（px）。すべてのグラフで同じ。 */
-const ML = 52;
-const MR = 12;
-/** グラフの縦の余白（px）。 */
-const PAD_Y = 3;
+/**
+ * グラフの左の余白（レイヤー名を置く）と右の余白（縦軸の目盛りを置く）（px）。すべてのグラフで同じ。
+ * 左の名前は、全体の地図の各段の右脇の名前と向かい合う（同じ高さ）。
+ */
+const ML = 58;
+const MR = 40;
+/** 枠の中の縦の余白（px）。 */
+const PAD_Y = 1;
+/** 列の左右の余白（px）。 */
+const SIDE = 12;
+/** 横軸の高さ（px）と、いちばん下のチャートとの隙間。 */
+const AXIS_H = 24;
+const AXIS_GAP = 6;
 /** カーソルの位置の線の色（全体の地図の、探針と同じ水色）。 */
 const CURSOR = '#5adcff';
 /** カーソルが指す交差や地物を探す範囲（px）。 */
 const READ_TOLERANCE_PX = 8;
 
 const LABELS = Object.fromEntries(LAYER_IDS.map((id) => [id, registry[id].label])) as Record<LayerId, string>;
-
-/** レイヤーごとのグラフの高さ（px）。 */
-const CHART_H: Record<LayerId, number> = { elevation: 70, population: 70, roads: 36, transit: 64, facilities: 56 };
 
 const rgb = (c: readonly number[]) => `rgb(${c[0]},${c[1]},${c[2]})`;
 const fix = (v: number) => v.toFixed(1);
@@ -57,22 +66,38 @@ function useDistrictOf(p: { x: number; y: number }): string | null {
   return ready && boundary ? cachedDistrictLookup(boundary as BoundaryData)(p.x, p.y) : null;
 }
 
-/** 要素の幅（px）。中身が空でも測れる（高さを条件にしない）。要素が後から現れても追う（コールバック ref）。 */
-function useElementWidth<T extends HTMLElement>() {
+interface Box {
+  width: number;
+  height: number;
+  /** ブラウザの画面での、要素の上端の位置（px）。全体の地図の各段の位置と同じ座標。 */
+  top: number;
+}
+
+/** 要素の幅・高さ・上端（px）。中身が空でも測れる。要素が後から現れても追う（コールバック ref）。 */
+function useElementBox<T extends HTMLElement>() {
   const [el, setEl] = useState<T | null>(null);
-  const [width, setWidth] = useState(0);
+  const [box, setBox] = useState<Box>({ width: 0, height: 0, top: 0 });
   useLayoutEffect(() => {
     if (!el) {
-      setWidth(0);
+      setBox({ width: 0, height: 0, top: 0 });
       return;
     }
-    const measure = () => setWidth(Math.floor(el.getBoundingClientRect().width));
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      // 子は枠線の内側（padding box）の上端から絶対位置で置かれるので、上端は枠線の分だけ下げて測る。
+      const next = { width: Math.floor(r.width), height: Math.floor(r.height), top: r.top + el.clientTop };
+      setBox((b) => (b.width === next.width && b.height === next.height && b.top === next.top ? b : next));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [el]);
-  return [setEl, width] as const;
+  return [setEl, box] as const;
 }
 
 /* ---------- 1枚のグラフ ---------- */
@@ -82,7 +107,10 @@ interface ChartProps {
   tracks: SectionTrack[];
   length: number;
   width: number;
+  frameH: number;
   hoverD: number | null;
+  /** 全体の地図で、この段の切り口の近くにカーソルがある、または、このチャートにカーソルがある。 */
+  hot: boolean;
   onHover(d: number | null): void;
 }
 
@@ -156,9 +184,9 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
   );
 }
 
-function Chart({ id, tracks, length, width, hoverD, onHover }: ChartProps) {
-  const ph = CHART_H[id];
-  const height = ph + 2 * PAD_Y;
+/** グラフの本体（レイヤー名、要約か値の読み、枠）。位置は、外側の Cell が決める。 */
+const Chart = memo(function Chart({ id, tracks, length, width, frameH, hoverD, hot, onHover }: ChartProps) {
+  const ph = frameH - 2 * PAD_Y;
   const pw = Math.max(1, width - ML - MR);
   const sc: XScale = { left: ML, width: pw, length };
   const series = tracks.find((t): t is SectionSeries => t.kind === 'series');
@@ -168,6 +196,7 @@ function Chart({ id, tracks, length, width, hoverD, onHover }: ChartProps) {
   const yTicks = series ? valueTicks(series.domain) : [];
   const yOfValue = (v: number) => (series ? PAD_Y + (1 - (v - series.domain[0]) / (series.domain[1] - series.domain[0])) * ph : 0);
   const R = nearRadius(id);
+  const tickX = ML + pw + 5;
 
   const readout = hoverD === null ? null : readoutText(tracks, hoverD, (READ_TOLERANCE_PX * length) / pw);
   const hoverValue = series && hoverD !== null ? valueAt(series, hoverD) : null;
@@ -180,39 +209,42 @@ function Chart({ id, tracks, length, width, hoverD, onHover }: ChartProps) {
   };
 
   return (
-    <div className="sc-chart" data-testid="section-chart" data-layer={id}>
-      <div className="sc-row">
-        <span className="sc-name">{LABELS[id]}</span>
-        <span className="sc-read" data-testid="section-readout">
+    <>
+      <span className="sc-name" style={{ top: SUMMARY_H, height: frameH, width: ML - 6 }}>
+        {LABELS[id]}
+      </span>
+      {/* 要約と、カーソルの位置の値は、同じ場所に重ねる（カーソルがあるあいだ、値が要約に代わる）。枠の上に置き、枠を狭めない。 */}
+      <div className="sc-text" style={{ left: ML, width: pw, height: SUMMARY_H }}>
+        <div className="sc-sum" data-testid="section-summary" style={hoverD !== null ? { visibility: 'hidden' } : undefined}>
+          {summaryLine(id, tracks)}
+          {capped !== null && series && <span className="ic-dim">（{series.domain[1].toLocaleString('ja-JP')} 超は頭打ち、白い太線）</span>}
+        </div>
+        <div className="sc-read" data-testid="section-readout">
           {hoverD !== null ? (readout ?? <span className="ic-dim">{series ? 'データなし' : '該当なし'}</span>) : ''}
-        </span>
+        </div>
       </div>
-      <div className="sc-sum" data-testid="section-summary">
-        {summaryLine(id, tracks)}
-        {capped !== null && series && <span className="ic-dim">（{series.domain[1].toLocaleString('ja-JP')} 超は頭打ち、白い太線。最大 {Math.round(capped).toLocaleString('ja-JP')}）</span>}
-      </div>
-      <svg className="sc-svg" width={width} height={height} role="img" aria-label={`${LABELS[id]}の断面`}>
-        <rect x={ML} y={PAD_Y} width={pw} height={ph} fill="#0b0f16" />
+      <svg className="sc-svg" style={{ top: SUMMARY_H }} width={width} height={frameH} role="img" aria-label={`${LABELS[id]}の断面`}>
+        <rect x={ML} y={0} width={pw} height={frameH} fill="#0b0f16" stroke={hot ? 'rgba(90,220,255,0.75)' : 'rgba(255,255,255,0.1)'} strokeWidth={1} data-testid="section-frame" />
         {xt.map((t) => (
           <line key={t.d} x1={fix(dToX(sc, t.d))} x2={fix(dToX(sc, t.d))} y1={PAD_Y} y2={PAD_Y + ph} stroke="rgba(255,255,255,0.07)" />
         ))}
         {yTicks.map((v) => (
           <g key={v}>
             <line x1={ML} x2={ML + pw} y1={fix(yOfValue(v))} y2={fix(yOfValue(v))} stroke="rgba(255,255,255,0.14)" />
-            <text x={ML - 4} y={yOfValue(v) + 3.5} textAnchor="end" className="sc-tick">
+            <text x={tickX} y={yOfValue(v) + 3.5} className="sc-tick">
               {v.toLocaleString('ja-JP')}
             </text>
           </g>
         ))}
         {hasNear && (
           <>
-            <text x={ML - 4} y={PAD_Y + 9} textAnchor="end" className="sc-tick">
+            <text x={tickX} y={PAD_Y + 9} className="sc-tick">
               左 {R}m
             </text>
-            <text x={ML - 4} y={PAD_Y + ph / 2 + 3.5} textAnchor="end" className="sc-tick">
+            <text x={tickX} y={PAD_Y + ph / 2 + 3.5} className="sc-tick">
               線上
             </text>
-            <text x={ML - 4} y={PAD_Y + ph - 2} textAnchor="end" className="sc-tick">
+            <text x={tickX} y={PAD_Y + ph - 2} className="sc-tick">
               右 {R}m
             </text>
           </>
@@ -224,20 +256,40 @@ function Chart({ id, tracks, length, width, hoverD, onHover }: ChartProps) {
             {series && hoverValue !== null && <circle cx={fix(dToX(sc, hoverD))} cy={fix(yOfValue(Math.min(series.domain[1], Math.max(series.domain[0], hoverValue))))} r={3.5} fill="#fff" stroke={CURSOR} strokeWidth={1.5} />}
           </g>
         )}
-        <rect x={ML} y={0} width={pw} height={height} fill="transparent" onPointerMove={handle} onPointerLeave={() => onHover(null)} style={{ cursor: 'crosshair' }} data-testid="section-plot" />
+        <rect x={ML} y={0} width={pw} height={frameH} fill="transparent" onPointerMove={handle} onPointerLeave={() => onHover(null)} style={{ cursor: 'crosshair' }} data-testid="section-plot" />
       </svg>
+    </>
+  );
+});
+
+/** 1つのチャートの置き場所。frame の縦の中心 center（領域の座標）に、枠が来るように置く。カーソルを置くと、全体の地図の対応する段を目立たせる。 */
+function Cell({ id, center, frameH, hot, children }: { id: LayerId; center: number; frameH: number; hot: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      className="sc-cell"
+      data-testid="section-chart"
+      data-layer={id}
+      data-hot={hot ? '' : undefined}
+      style={{ top: center - frameH / 2 - SUMMARY_H, height: SUMMARY_H + frameH }}
+      onPointerEnter={() => useMapStore.getState().setSectionFocus({ id, from: 'chart' })}
+      onPointerLeave={() => {
+        const s = useMapStore.getState();
+        if (s.sectionFocus?.from === 'chart' && s.sectionFocus.id === id) s.setSectionFocus(null);
+      }}
+    >
+      {children}
     </div>
   );
 }
 
-/** 横軸（線に沿った距離、km）。スクロールしても見えるよう、下端に貼り付く。カーソルの位置の距離も出す。 */
-function Axis({ length, width, hoverD }: { length: number; width: number; hoverD: number | null }) {
+/** 横軸（線に沿った距離、km）。いちばん下のチャートの下に1つだけ。全チャートと横の位置が揃う。カーソルの位置の距離も出す。 */
+function Axis({ length, width, hoverD, top }: { length: number; width: number; hoverD: number | null; top: number }) {
   const pw = Math.max(1, width - ML - MR);
   const sc: XScale = { left: ML, width: pw, length };
   const ticks = useMemo(() => distanceTicks(length), [length]);
   return (
-    <div className="sc-axis" data-testid="section-axis">
-      <svg width={width} height={24} role="img" aria-label="線に沿った距離（km）">
+    <div className="sc-axis" data-testid="section-axis" style={{ top, height: AXIS_H }}>
+      <svg width={width} height={AXIS_H} role="img" aria-label="線に沿った距離（km）">
         <line x1={ML} x2={ML + pw} y1={4} y2={4} stroke="rgba(255,255,255,0.35)" />
         {ticks.map((t) => (
           <g key={t.d}>
@@ -247,7 +299,7 @@ function Axis({ length, width, hoverD }: { length: number; width: number; hoverD
             </text>
           </g>
         ))}
-        <text x={ML - 4} y={19} textAnchor="end" className="sc-tick">
+        <text x={ML + pw + 5} y={19} className="sc-tick">
           km
         </text>
         {hoverD !== null && (
@@ -281,15 +333,51 @@ function Ends({ line }: { line: SectionLine }) {
   );
 }
 
-function Placeholder({ status, label }: { status: LayerStatus; label: string }) {
+function Placeholder({ status, label, frameH, width }: { status: LayerStatus; label: string; frameH: number; width: number }) {
   return (
-    <div className="sc-chart">
-      <div className="sc-row">
-        <span className="sc-name">{label}</span>
+    <>
+      <span className="sc-name" style={{ top: SUMMARY_H, height: frameH, width: ML - 6 }}>
+        {label}
+      </span>
+      <div className="sc-text ic-dim" style={{ left: ML, width: Math.max(1, width - ML - MR), height: SUMMARY_H }}>
+        <div className="sc-sum">{status === 'error' ? '読み込み失敗' : '読み込み中…'}</div>
       </div>
-      <div className="sc-sum ic-dim">{status === 'error' ? '読み込み失敗' : '読み込み中…'}</div>
-    </div>
+    </>
   );
+}
+
+/**
+ * 各チャートの置き場所。段の画面上の高さ（全体の地図が公開している）から決める。
+ * 揃えるか縦並びかは、前の置き方を覚えて、境目で行き来しないようにする。
+ * 全体の地図の状態がまだ追いついていない一瞬（段の数が合わない）は、前の置き方を変えずに、縦並びで置く。
+ */
+function usePlacement(ids: LayerId[], ts: TierScreen | null, stage: Box): { placement: Placement; synced: boolean } {
+  const prev = useRef<AlignMode>('aligned');
+  const region = { top: 2, bottom: stage.height - AXIS_H - AXIS_GAP };
+  const synced = ts !== null && stage.height > 0 && ids.every((id) => ts.shown[id] !== null && ts.goal[id] !== null);
+  if (!synced) return { placement: stackedPlacement(ids.map((id) => ({ id, y: 0, goalY: 0 })), region), synced };
+  const tiers: Tier[] = ids.map((id) => ({
+    id,
+    y: planeCenterY(ts, ts.shown[id] as number) - stage.top,
+    goalY: planeCenterY({ ...ts, viewState: ts.goalView }, ts.goal[id] as number) - stage.top,
+  }));
+  const placement = placeCharts({ tiers, region, prev: prev.current });
+  prev.current = placement.mode;
+  return { placement, synced };
+}
+
+/** 揃える／縦並びが切り替わった直後の短いあいだだけ true。そのあいだ、チャートは滑らかに移る（切り替えで跳ねない）。 */
+function useSettling(mode: AlignMode): boolean {
+  const [settling, setSettling] = useState(false);
+  const last = useRef(mode);
+  useEffect(() => {
+    if (last.current === mode) return;
+    last.current = mode;
+    setSettling(true);
+    const t = window.setTimeout(() => setSettling(false), 450);
+    return () => window.clearTimeout(t);
+  }, [mode]);
+  return settling;
 }
 
 /** 「断面」のときの、右の列の中身。 */
@@ -303,7 +391,15 @@ export default function SectionBody() {
   const solo = useMapStore((s) => s.solo);
   const spacing = useMapStore((s) => s.spacing);
   const status = useMapStore((s) => s.status);
-  const [box, width] = useElementWidth<HTMLDivElement>();
+  const focus = useMapStore((s) => s.sectionFocus);
+  const [stageRef, stage] = useElementBox<HTMLDivElement>();
+  const width = stage.width;
+  const ts = useTierScreen();
+  const ids = [...order].reverse().filter((id) => layerZ({ order, visible, solo, spacing }, id) !== null);
+  const { placement, synced } = usePlacement(ids, ts, stage);
+  const settling = useSettling(placement.mode);
+  const lastSlot = placement.slots[placement.slots.length - 1];
+  const axisTop = lastSlot ? lastSlot.center + placement.frameH / 2 + AXIS_GAP : 0;
 
   if (!line) {
     return (
@@ -332,7 +428,7 @@ export default function SectionBody() {
   }
 
   const length = lineLength(line);
-  const ids = [...order].reverse().filter((id) => layerZ({ order, visible, solo, spacing }, id) !== null);
+  const inner = Math.max(0, width - 2 * SIDE);
   return (
     <>
       <header className="ic-head" data-testid="section-head">
@@ -350,21 +446,31 @@ export default function SectionBody() {
         </div>
         <Ends line={line} />
       </header>
-      <div className="ic-scroll ic-scroll-solo sc-scroll" data-testid="section-scroll">
-        <div className="sc-body">
-          {/* 幅は、余白（padding）を除いたこの要素で測る。中身がまだ空でも測れるよう、高さは条件にしない。 */}
-          <div ref={box}>
-            {width > 0 &&
-              ids.map((id) =>
-                tracks[id] ? (
-                  <Chart key={id} id={id} tracks={tracks[id] as SectionTrack[]} length={length} width={width} hoverD={hoverD} onHover={setHover} />
+      {/* チャートを置く領域。各チャートは、全体の地図の対応する段と同じ高さに置く。置けないときは、上から順に並べる。 */}
+      <div
+        ref={stageRef}
+        className="sc-stage"
+        data-testid="section-scroll"
+        data-layout={placement.mode}
+        data-settling={settling ? '' : undefined}
+        style={synced ? undefined : { visibility: 'hidden' }} // 全体の地図の段の位置がまだ届かない一瞬は、仮の位置を見せない
+      >
+        {inner > 0 &&
+          ids.map((id) => {
+            const slot = placement.slots.find((s) => s.id === id);
+            if (!slot) return null;
+            const hot = focus?.id === id;
+            return (
+              <Cell key={id} id={id} center={slot.center} frameH={placement.frameH} hot={hot}>
+                {tracks[id] ? (
+                  <Chart id={id} tracks={tracks[id] as SectionTrack[]} length={length} width={inner} frameH={placement.frameH} hoverD={hoverD} hot={hot} onHover={setHover} />
                 ) : (
-                  <Placeholder key={id} status={status[id]} label={LABELS[id]} />
-                ),
-              )}
-            {width > 0 && <Axis length={length} width={width} hoverD={hoverD} />}
-          </div>
-        </div>
+                  <Placeholder status={status[id]} label={LABELS[id]} frameH={placement.frameH} width={inner} />
+                )}
+              </Cell>
+            );
+          })}
+        {inner > 0 && <Axis length={length} width={inner} hoverD={hoverD} top={axisTop} />}
       </div>
     </>
   );

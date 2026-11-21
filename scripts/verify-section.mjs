@@ -247,7 +247,7 @@ async function run(browser, base) {
   check(Math.abs(hv2 - 0.7 * len) < 0.03 * len, `地図の線の 70% の位置 → 線に沿った距離 ${Math.round(hv2)} m`);
   check((await page.locator('[data-testid=section-cursor]').count()) === 5, '右のグラフの全段に縦の線が出る');
   const cx = await page.$eval('[data-testid=section-chart][data-layer=elevation] [data-testid=section-cursor]', (e) => Number(e.getAttribute('x1')));
-  check(Math.abs((cx - 52) / (plot.w) - 0.7) < 0.03, `縦の線がグラフの 70% の位置にある（${((cx - 52) / plot.w * 100).toFixed(1)}%）`);
+  check(Math.abs((cx - 58) / (plot.w) - 0.7) < 0.03, `縦の線がグラフの 70% の位置にある（${((cx - 58) / plot.w * 100).toFixed(1)}%）`);
   await page.mouse.move(40, 40);
   await waitFor(page, () => window.__store.getState().sectionHover === null);
 

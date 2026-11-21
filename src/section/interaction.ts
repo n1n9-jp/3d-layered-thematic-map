@@ -73,6 +73,8 @@ export interface LineHeight {
   plane: number;
   /** 線を投影する高さ。段の平面（plane と同じ）か、その上に立てたグラフの中ほど・上端 */
   at: number;
+  /** その高さが属する段（レイヤー ID）。カーソルが近い段を知りたいときに付ける。 */
+  id?: string;
 }
 
 type Scr = readonly [number, number];
@@ -88,7 +90,7 @@ function nearOnSegment(p: Scr, a: Scr, b: Scr): { dist: number; t: number } {
 
 /**
  * 画素 (px, py) が、切り口の線（各高さに投影した線分のどれか）の近く（maxPx 以内）にあるときの、線に沿った距離（m）。
- * 複数の高さのうち、いちばん近いもの。近くなければ null。
+ * 複数の高さのうち、いちばん近いもの（その高さ height も返す）。近くなければ null。
  */
 export function distanceAlongLine(opts: {
   project: Project;
@@ -97,16 +99,16 @@ export function distanceAlongLine(opts: {
   px: number;
   py: number;
   maxPx: number;
-}): { d: number; dist: number } | null {
+}): { d: number; dist: number; height: LineHeight } | null {
   const { project, line, heights, px, py, maxPx } = opts;
   const len = lineLength(line);
   if (!(len > 0)) return null;
-  let best: { d: number; dist: number } | null = null;
+  let best: { d: number; dist: number; height: LineHeight } | null = null;
   for (const h of heights) {
     const a = project([line.ax, line.ay, h.at]);
     const b = project([line.bx, line.by, h.at]);
     const { dist, t } = nearOnSegment([px, py], [a[0], a[1]], [b[0], b[1]]);
-    if (dist <= maxPx && (!best || dist < best.dist)) best = { d: t * len, dist };
+    if (dist <= maxPx && (!best || dist < best.dist)) best = { d: t * len, dist, height: h };
   }
   return best;
 }

@@ -17,6 +17,11 @@ export interface ViewState {
 /** 全体の地図と右の列の操作：「地点」（探針とクローズアップ）か、「断面」（2点の線に沿った変化）。 */
 export type UiMode = 'point' | 'section';
 
+export interface SectionFocus {
+  id: LayerId;
+  from: 'chart' | 'map';
+}
+
 export interface MapState {
   /** 下→上 */
   order: LayerId[];
@@ -42,6 +47,11 @@ export interface MapState {
   sectionCursor: { x: number; y: number } | null;
   /** カーソルが指している、断面の線に沿った距離（m）。全体の地図と右のグラフのどちらにカーソルがあっても、この値で連動する。 */
   sectionHover: number | null;
+  /**
+   * 断面で、目立たせる段。from が 'chart' なら右のチャートにカーソルがあり、全体の地図の対応する段を目立たせる（ほかの段を暗くする）。
+   * 'map' なら全体の地図の切り口の近くにカーソルがあり、右の対応するチャートを目立たせる。
+   */
+  sectionFocus: SectionFocus | null;
   data: Partial<Record<DataKey, unknown>>;
   status: Record<DataKey, LayerStatus>;
   setSpacing(v: number): void;
@@ -58,6 +68,7 @@ export interface MapState {
   setSectionStart(p: MapState['sectionStart']): void;
   setSectionCursor(p: MapState['sectionCursor']): void;
   setSectionHover(d: number | null): void;
+  setSectionFocus(f: SectionFocus | null): void;
 }
 
 declare global {
@@ -184,6 +195,7 @@ export const useMapStore = create<MapState>()((set) => ({
   sectionStart: null,
   sectionCursor: null,
   sectionHover: null,
+  sectionFocus: null,
   data: {},
   status: Object.fromEntries(DATA_KEYS.map((k) => [k, 'idle'])) as Record<DataKey, LayerStatus>,
 
@@ -208,12 +220,14 @@ export const useMapStore = create<MapState>()((set) => ({
     set((s) => {
       if (m === s.mode) return {};
       // 切り替えのたびに、カーソルに付いてくる一時的な表示は消す。固定した探針と、断面の線は残す。
-      return { mode: m, sectionCursor: null, sectionHover: null, ...(m === 'section' && !s.probePinned ? { probe: null } : {}) };
+      return { mode: m, sectionCursor: null, sectionHover: null, sectionFocus: null, ...(m === 'section' && !s.probePinned ? { probe: null } : {}) };
     }),
   setSection: (line) => set({ section: line }),
   setSectionStart: (p) => set({ sectionStart: p }),
   setSectionCursor: (p) => set({ sectionCursor: p }),
   setSectionHover: (d) => set((s) => (s.sectionHover === d ? {} : { sectionHover: d })),
+  setSectionFocus: (f) =>
+    set((s) => (s.sectionFocus?.id === f?.id && s.sectionFocus?.from === f?.from ? {} : { sectionFocus: f })),
 }));
 
 if (typeof window !== 'undefined') {
