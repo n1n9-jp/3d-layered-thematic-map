@@ -325,6 +325,27 @@ node -e "import('./scripts/lib/projection.mjs').then(({ toLocal }) => console.lo
   - 地点 `(x, y)` を含むセルは `col = floor((x − minX) / cellSize)`、`row = floor((maxY − y) / cellSize)`
   - 23区の外と水面はデータなし（NaN）にします
 
+浸水想定（洪水・高潮）も格子データです（`scripts/build-flood.mjs` が作ります。画面のレイヤーには、まだ使っていません）。標高と同じ 50 m 格子（720×720、行は北から南、列は西から東、各セルの値はセルの中心での値。セルの中心の式や、地点を含むセルの求め方は、上の標高と同じ）に、**Uint8** で入れます。
+
+| ファイル | 内容 | 値 |
+| --- | --- | --- |
+| `flood-river.bin` | 洪水の浸水深ランク（想定最大規模） | 0 = 浸水なし、1〜6 = 浸水深のランク、255 = 23区の外 |
+| `flood-tide.bin` | 高潮の浸水深ランク（想定最大規模）。洪水と同じ区切り | 同上 |
+| `flood-river-duration.bin` | 洪水の浸水継続時間ランク | 0 = 浸水なし、1〜7 = 継続時間のランク、255 = 23区の外 |
+| `flood.json` | 格子の範囲と、ランクの意味、出典 | 下記 |
+
+- 255 は「セルの中心が23区の外」で、標高の NaN の範囲のうち区の外にあたる部分と同じです。区内のセルは 0〜6（継続時間は 0〜7）で、**区内なら、標高が NaN の水面のセルにも値が入ります**（想定の区域に川や運河が含まれていれば、その値。含まれていなければ 0）。
+- 浸水深のランク：1 = 0.5 m 未満、2 = 0.5〜3 m、3 = 3〜5 m、4 = 5〜10 m、5 = 10〜20 m、6 = 20 m 以上（下限を含み、上限を含まない。0.5 m ちょうどはランク 2）。
+- 浸水継続時間のランク：1 = 12 時間未満、2 = 12〜24 時間、3 = 1日〜3日、4 = 3日〜1週間、5 = 1週間〜2週間、6 = 2週間〜4週間、7 = 4週間以上。浸水深 0.5 m 以上が続く時間です。
+- `flood.json`：`{ width, height, cellSize, minX, minY, maxX, maxY, depthRanks, durationRanks, files, values, tideDurationNote, sources }`
+  - 範囲は `elevation.json` と同じです（`cellSize` 50、720×720）
+  - `depthRanks`（6件）、`durationRanks`（7件）：`{ rank, label }`。`label` は画面に出す日本語（`'0.5m 未満'`、`'3〜5m'`、`'1週間〜2週間'` など）。区間の数値として、`minM` / `maxM`（m。最後は `maxM` が null）、`minH` / `maxH`（時間）も付いています
+  - `files`：各ファイルの名前（`riverDepth`、`tideDepth`、`riverDuration`、`tideDuration`）。作っていないものは null
+  - `values`：`{ none: 0, outside: 255 }`
+  - `sources`：洪水（`river`）と高潮（`tide`）の出典（`name`、`publisher`、`url`、`attribution`（画面に出す出典の文面）、`vintage`、`scenario`、`notes`）
+- **高潮の浸水継続時間の格子（`flood-tide-duration.bin`）はありません。** 港湾局のデータは、計算期間が約1週間で、1週間を超えて浸水深 0.5 m 未満に引かなかったセルが「未解消」（999999 分）の特別値になっています。区内の継続時間のあるセル（約 7.6 万）の約 49% がこれで、洪水の 5〜7（1週間〜2週間、2週間〜4週間、4週間以上）には分けられません。理由は `flood.json` の `tideDurationNote` にあります（集計は `node scripts/build-flood.mjs --report-tide-duration`）。
+- 洪水は、多角形（浸水想定区域）の内側にセルの中心が入るかで決め、重なるセルは最大のランクです。高潮は、10 m セルの浸水深の、50 m セルの中の最大から決めます。
+
 各データは23区の範囲に絞ります（区の境界で切り抜くか、区に交差するものだけを残します）。
 
 ## 各レイヤーの内容
@@ -338,6 +359,20 @@ node -e "import('./scripts/lib/projection.mjs').then(({ toLocal }) => console.lo
 | 道路 | 高速道路・国道・都道府県道と、幅13 m 以上のその他の道路（通常部のみ。建設中は除く）。路線名（`name`）を持つのは高速道路だけ（国土数値情報の高速道路時系列データから付ける） |
 | 公共交通 | 鉄道の路線と駅。路線名は、法定上の線名 |
 | 施設 | 学校と病院の位置。学校は小・中・義務教育・中等教育・高等学校・特別支援・高専・短大・大学（幼稚園・専修学校・各種学校と、休校中のものは除く）。医療機関は病院のみ（診療所・歯科診療所は除く） |
+
+### 浸水想定の前提
+
+浸水想定（`flood*`。[データ仕様](#データ仕様publicdata)）の前提です。ハザードマップではなく、国と東京都が公表した想定を、50 m 格子にまとめたものです。
+
+| | 洪水 | 高潮 |
+| --- | --- | --- |
+| 元データ | 国土数値情報 洪水浸水想定区域（A31b）2025年度版。洪水予報河川・水位周知河川と、その他の河川を重ねたもの | 東京都港湾局 高潮浸水想定区域図（令和6年12月改定） |
+| 規模 | 想定最大規模（その川で想定し得る最大の降雨） | 想定最大規模（想定し得る最大の高潮。堤防等の決壊を見込む） |
+| 含まないもの | 支川の氾濫、高潮、内水（雨水が下水・排水路から溢れる浸水） | 河川の氾濫、内水 |
+| 浸水継続時間 | 浸水深 0.5 m 以上が続く時間 | （格子は作っていない。上のデータ仕様） |
+
+- どちらも「ある1つの災害のときの、最大の浸水」です。洪水と高潮が同時に起きる場合は想定していません。2つの格子は、別々の災害の想定として読みます。
+- 想定は、堤防などの施設が壊れる前提を含み、過去の実績や予報ではありません。区域の外が安全とは限りません。
 
 ## データの再生成
 
@@ -357,6 +392,7 @@ node scripts/build-population.mjs     #    250 m メッシュ（既定）
 node scripts/build-roads.mjs
 node scripts/build-transit.mjs
 node scripts/build-facilities.mjs
+node scripts/build-flood.mjs           #    浸水想定。標高との突き合わせ（確認）を出すので、標高の後に実行する
 node scripts/validate-data.mjs --require-all   # 3. 検証（全ファイルがそろっていることも求める）
 ```
 
@@ -372,8 +408,9 @@ node scripts/validate-data.mjs --require-all   # 3. 検証（全ファイルが�
 | `build-roads.mjs` | `roads.geojson` | 国土数値情報の道路データ（第1次地域区画 5339 の1ファイル。ZIP は約 58 MB、展開すると約 700 MB）と、高速道路時系列データ（約 8 MB。路線名の付与用）。ZIP は `.cache/` に保存し、展開は1行ずつ読み進めるので、700 MB をディスクに書き出すことはない | 12 秒（取得済みなら 6 秒） |
 | `build-transit.mjs` | `rail.geojson`, `stations.geojson` | 国土数値情報の鉄道データ（全国、約 15 MB）。区内に頂点がある路線と、区内にある駅を残す | 3 秒（取得済みなら 1 秒） |
 | `build-facilities.mjs` | `facilities.geojson` | 国土数値情報の学校データ（東京都、約 0.7 MB）と医療機関データ（東京都、約 5 MB） | 2 秒（取得済みなら 1 秒） |
+| `build-flood.mjs` | `flood.json`, `flood-river.bin`, `flood-tide.bin`, `flood-river-duration.bin` | 国土数値情報の洪水浸水想定区域データ（A31b、1次メッシュ 5339。洪水予報河川・水位周知河川の ZIP が約 115 MB（展開すると約 1.0 GB）、その他の河川の ZIP が約 35 MB（同 約 280 MB））と、東京都港湾局の高潮浸水想定区域図（浸水深、`shape(depth).zip` 約 45 MB。90 図郭の `.dbf` だけを読む）。ZIP は `.cache/` に保存し、洪水は展開しながら1行ずつ読むので、1 GB をディスクに書き出すことはない。洪水は走査線法でセルに塗り（セルの中心が多角形の内側か。重なるセルは最大のランク）、高潮は 10 m セル（約 186 万件）の浸水深の、50 m セルの中の最大から決める。`--check` で生成済みの出力だけを確認（地点、ランクごとのセル数、標高との突き合わせ）、`--preview dir` で確認用の画像（北が上）を書く、`--report-tide-duration` で高潮の継続時間の集計（出力は作らない） | 24 秒（取得済みなら。初回は取得の 15 秒ほどが加わる） |
 
-所要時間は、この README の手順をクラウド上の Linux 環境（回線は高速）で実行したときの実測です。全部で、初回は 1 分弱、`.cache/` に取得済みなら 20 秒ほどです。`.cache/` 全体は 120 MB 前後（標高タイルが約 22 MB）になります。回線や環境によって変わります。
+所要時間は、この README の手順をクラウド上の Linux 環境（回線は高速）で実行したときの実測です。浸水想定を除いて、全部で、初回は 1 分弱、`.cache/` に取得済みなら 20 秒ほどです。`.cache/` 全体は 120 MB 前後（標高タイルが約 22 MB）になります。浸水想定は、`.cache/` を約 195 MB 増やし、処理は 20 秒あまりかかります（洪水の約 82 万の地物を JSON として読む時間が大半です）。回線や環境によって変わります。
 
 ### 検証
 
@@ -382,9 +419,12 @@ node scripts/validate-data.mjs                   # public/data を、「デー�
 node scripts/validate-data.mjs --require-all     # 全ファイルがそろっていることも求める
 node scripts/validate-data.mjs public/data-fixture --require-all   # 仮データの検査
 node scripts/build-elevation.mjs --check         # 標高を既知の地点と照合する
+node scripts/build-flood.mjs --check             # 浸水想定を、既知の地点・標高と突き合わせる
 ```
 
 違反があると終了コード 1 で終わります（引数やディレクトリの誤りは 2）。ファイルが未作成のものは「未作成」と表示します。
+
+浸水想定（`flood.json` と `flood-*.bin`）は、ファイルのバイト数、値の範囲（浸水深 0〜6、継続時間 0〜7、255 = 区の外）、`flood.json` の範囲とランクの表と出典を検査します。`boundary.geojson` があれば、セルの中心が区の外のセルが 255 であること、区内のセルが 255 でないことも検査します。`flood-tide-duration.bin` は、あれば検査し、なくても違反にしません。仮データ（`public/data-fixture/`）には浸水想定がまだないので、`public/data-fixture` を `--require-all` で検査すると「浸水想定が未作成」になります（`scripts/lib/flood-fixture.mjs` の `generateFloodFixture` が、仮データの標高と区から、検査を通る仮の浸水想定を作ります）。
 
 ## スクリーンショット
 
@@ -501,9 +541,12 @@ import Credits from './panel/Credits';
 | 鉄道と駅 | 「国土数値情報（鉄道データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2025.html）を加工して作成 | 2025年12月31日 |
 | 学校 | 「国土数値情報（学校データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P29-2023.html）を加工して作成 | 2023年度 |
 | 病院 | 「国土数値情報（医療機関データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P04-2020.html）を加工して作成 | 2020年度 |
+| 浸水想定（洪水） | 「国土数値情報（洪水浸水想定区域データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A31b-2025.html）を加工して作成 | 2025年度版（想定最大規模） |
+| 浸水想定（高潮） | 東京都港湾局「高潮浸水想定区域図」（令和6年12月改定）（https://www.kouwan.metro.tokyo.lg.jp/jishin_kouwankyoku_oshirase/takashio/shinsuisoutei）を加工して作成 | 令和6年12月改定（想定最大規模） |
 
 利用規約：
 
 - 国土数値情報：https://nlftp.mlit.go.jp/ksj/other/agreement.html
 - 政府統計の総合窓口(e-Stat)：https://www.e-stat.go.jp/terms-of-use
 - 国土地理院コンテンツ利用規約：https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html
+- 東京都港湾局の高潮浸水想定区域図：クリエイティブ・コモンズ表示 4.0 国際（CC BY 4.0）https://creativecommons.org/licenses/by/4.0/deed.ja

@@ -5,6 +5,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { EXTENT } from './projection.mjs';
 import { createWards } from './wards.mjs';
+import { DEPTH_RANKS, DURATION_RANKS, FLOOD_FILES, OUTSIDE } from './flood.mjs';
 
 /** ファイルサイズの上限（1MB = 1024*1024 byte として扱う）。 */
 export const SIZE_LIMITS = {
@@ -398,6 +399,140 @@ export function validateElevation(meta, bin, { wards = null } = {}) {
   return finish(summary, v);
 }
 
+// ---- 浸水想定（洪水・高潮）------------------------------------------------------
+
+/**
+ * 浸水想定の格子（標高と同じ 720×720、50m）の仕様。値は Uint8 で、区の外は 255、区内で浸水なしは 0。
+ * required でないファイルは、あれば検査し、なくても違反にしない（高潮の浸水継続時間は、作れないことがある）。
+ */
+export const FLOOD_BINS = [
+  { key: 'riverDepth', file: FLOOD_FILES.riverDepth, maxRank: DEPTH_RANKS.length, required: true },
+  { key: 'tideDepth', file: FLOOD_FILES.tideDepth, maxRank: DEPTH_RANKS.length, required: true },
+  { key: 'riverDuration', file: FLOOD_FILES.riverDuration, maxRank: DURATION_RANKS.length, required: true },
+  { key: 'tideDuration', file: FLOOD_FILES.tideDuration, maxRank: DURATION_RANKS.length, required: false },
+];
+
+/** 検査の対象にするファイル名（flood.json と格子）。 */
+export const FLOOD_ALL_FILES = [FLOOD_FILES.meta, ...FLOOD_BINS.map((b) => b.file)];
+
+function rankListProblem(list, expected, name) {
+  if (!Array.isArray(list)) return `${name} が配列でない`;
+  if (list.length !== expected.length) return `${name} は ${expected.length} 件であること（実際: ${list.length}）`;
+  for (let i = 0; i < expected.length; i++) {
+    const item = list[i];
+    if (item === null || typeof item !== 'object') return `${name}[${i}] がオブジェクトでない`;
+    if (item.rank !== expected[i].rank) return `${name}[${i}].rank は ${expected[i].rank} であること（実際: ${show(item.rank)}）`;
+    if (!isNonEmptyString(item.label)) return `${name}[${i}].label が空でない文字列でない（実際: ${show(item.label)}）`;
+  }
+  return null;
+}
+
+/**
+ * flood.json（パース済み）と、格子（キーは FLOOD_BINS の key、値は Uint8Array / Buffer。なければ undefined）を検証する。
+ * wards（createWards の戻り値）を渡すと、セルの中心が区の外なのに 255 でない（または区内なのに 255）のセルを違反にする。
+ */
+export function validateFlood(meta, bins, { wards = null } = {}) {
+  const v = new Violations();
+  const summary = [];
+  const W = FLOOD_FILES.meta;
+
+  if (meta === null || typeof meta !== 'object') {
+    v.add(W, 'JSON がオブジェクトでない');
+    return finish(summary, v);
+  }
+  const num = (k) => typeof meta[k] === 'number' && Number.isFinite(meta[k]);
+  for (const k of ['width', 'height', 'cellSize', 'minX', 'minY', 'maxX', 'maxY']) {
+    if (!num(k)) v.add(W, `項目 ${k} が有限の数値でない（実際: ${show(meta[k])}）`);
+  }
+  const expectEq = (k, expected) => {
+    if (num(k) && meta[k] !== expected) v.add(W, `${k} は ${expected} であること（実際: ${meta[k]}）`);
+  };
+  expectEq('width', ELEVATION_SPEC.width);
+  expectEq('height', ELEVATION_SPEC.height);
+  expectEq('cellSize', ELEVATION_SPEC.cellSize);
+  expectEq('minX', EXTENT.minX);
+  expectEq('minY', EXTENT.minY);
+  expectEq('maxX', EXTENT.maxX);
+  expectEq('maxY', EXTENT.maxY);
+  for (const [key, expected] of [['depthRanks', DEPTH_RANKS], ['durationRanks', DURATION_RANKS]]) {
+    const p = rankListProblem(meta[key], expected, key);
+    if (p) v.add(W, p);
+  }
+  if (meta.sources === null || typeof meta.sources !== 'object') {
+    v.add(W, 'sources がオブジェクトでない');
+  } else {
+    for (const k of ['river', 'tide']) {
+      if (!isNonEmptyString(meta.sources[k]?.attribution)) v.add(W, `sources.${k}.attribution（出典の文面）が空でない文字列でない`);
+    }
+  }
+
+  const { width, height, cellSize } = ELEVATION_SPEC;
+  const expectedBytes = width * height;
+  const nonMissing = (b) => b !== undefined && b !== null;
+
+  for (const { key, file, maxRank, required } of FLOOD_BINS) {
+    const bin = bins[key];
+    if (!nonMissing(bin)) {
+      const declared = meta.files?.[key];
+      if (required) v.add(file, 'ファイルがない（flood.json があるのに、格子がない）');
+      else if (typeof declared === 'string') v.add(file, `ファイルがない（flood.json の files.${key} が ${show(declared)} になっている）`);
+      continue;
+    }
+    if (!required && meta.files?.[key] == null) {
+      v.add(W, `${file} があるのに、files.${key} が示していない（実際: ${show(meta.files?.[key])}）`);
+    }
+    if (bin.byteLength !== expectedBytes) {
+      v.add(file, `バイト数は width × height = ${expectedBytes} であること（実際: ${bin.byteLength}）`);
+      continue;
+    }
+    const counts = new Array(maxRank + 1).fill(0);
+    let outsideCells = 0;
+    let badValue = 0;
+    let firstBad = null;
+    let outsideNotMarked = 0;
+    let insideMarked = 0;
+    let firstCell = null;
+    for (let row = 0; row < height; row++) {
+      const y = EXTENT.maxY - (row + 0.5) * cellSize;
+      for (let col = 0; col < width; col++) {
+        const value = bin[row * width + col];
+        if (value === OUTSIDE) outsideCells += 1;
+        else if (value > maxRank) {
+          badValue += 1;
+          firstBad ??= { row, col, value };
+        } else counts[value] += 1;
+        if (wards) {
+          const x = EXTENT.minX + (col + 0.5) * cellSize;
+          const inside = wards.contains(x, y);
+          if (inside && value === OUTSIDE) {
+            insideMarked += 1;
+            firstCell ??= { row, col, x, y };
+          } else if (!inside && value !== OUTSIDE) {
+            outsideNotMarked += 1;
+            firstCell ??= { row, col, x, y };
+          }
+        }
+      }
+    }
+    if (badValue > 0) {
+      v.add(file, `値が 0〜${maxRank} と 255（区の外）以外のセルが ${badValue} 個ある（例: row ${firstBad.row}, col ${firstBad.col} = ${firstBad.value}）`);
+    }
+    if (outsideNotMarked > 0) {
+      v.add(file, `セルの中心がどの区にも含まれないのに 255 でないセルが ${outsideNotMarked} 個ある（例: row ${firstCell.row}, col ${firstCell.col}, 中心 x=${firstCell.x}, y=${firstCell.y}。区の外は 255 にする）`);
+    }
+    if (insideMarked > 0) {
+      v.add(file, `セルの中心が区の中なのに 255 のセルが ${insideMarked} 個ある（255 は区の外だけ。浸水なしは 0）`);
+    }
+    const inside = width * height - outsideCells;
+    const flooded = inside - counts[0];
+    summary.push(
+      `${file}: ${bin.byteLength.toLocaleString('en-US')} bytes、区の外 ${outsideCells}、区内 ${inside}（浸水 ${flooded}）、` +
+        `ランク別 ${counts.slice(1).map((n, i) => `${i + 1}=${n}`).join(' ')}`,
+    );
+  }
+  return finish(summary, v);
+}
+
 // ---- ファイルサイズ ---------------------------------------------------------
 
 /** @param {{name:string,size:number}[]} files */
@@ -517,6 +652,35 @@ export async function validateDirectory(dir, { requireAll = false } = {}) {
       const result = validateElevation(parsed.value, binBuf, { wards });
       if (boundaryUnusable) result.summary.push('区の外のセル: boundary.geojson に違反があるため検査していない');
       entries.push({ name: label, ...withStatus(result) });
+    }
+  }
+
+  // 浸水想定（flood.json と、flood-*.bin）。1つも作られていなければ「未作成」
+  {
+    const label = 'flood.json + flood-*.bin';
+    const metaBuf = await readIfExists(path.join(dir, FLOOD_FILES.meta));
+    const bins = {};
+    for (const { key, file } of FLOOD_BINS) bins[key] = (await readIfExists(path.join(dir, file))) ?? undefined;
+    if (metaBuf === null && Object.values(bins).every((b) => b === undefined)) {
+      entries.push({ name: label, ...missingResult(label, requireAll) });
+    } else if (metaBuf === null) {
+      entries.push({
+        name: label,
+        status: 'ng',
+        summary: [],
+        violations: [{ where: FLOOD_FILES.meta, message: 'ファイルがない（格子だけがある）' }],
+        violationCount: 1,
+      });
+    } else {
+      const parsed = parseJson(metaBuf, FLOOD_FILES.meta);
+      if (parsed.error) {
+        entries.push({ name: label, status: 'ng', summary: [], violations: [parsed.error], violationCount: 1 });
+      } else {
+        const result = validateFlood(parsed.value, bins, { wards });
+        if (boundaryUnusable) result.summary.push('区の外のセル: boundary.geojson に違反があるため検査していない');
+        else if (!wards) result.summary.push('区の外のセル: boundary.geojson がないので検査していない');
+        entries.push({ name: label, ...withStatus(result) });
+      }
     }
   }
 

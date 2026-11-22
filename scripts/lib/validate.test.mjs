@@ -6,6 +6,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { generateFixtures } from './fixtures.mjs';
+import { generateFloodFixture } from './flood-fixture.mjs';
+import { FLOOD_FILES } from './flood.mjs';
 import { DATA_DIR, ROOT_DIR } from './paths.mjs';
 import { createWards } from './wards.mjs';
 import {
@@ -15,12 +17,14 @@ import {
   validateDirectory,
   validateElevation,
   validateFileSizes,
+  validateFlood,
   validateGeoJson,
 } from './validate.mjs';
 
 const run = promisify(execFile);
 const fixtures = generateFixtures();
 const fixtureWards = createWards(fixtures.geojson['boundary.geojson'].features);
+const floodFixture = generateFloodFixture(fixtures.elevation.bin, fixtureWards);
 const clone = (x) => structuredClone(x);
 const messages = (r) => r.violations.map((v) => `${v.where}: ${v.message}`).join('\n');
 
@@ -288,6 +292,103 @@ describe('validateElevation の違反検出', () => {
   });
 });
 
+describe('validateFlood（浸水想定の格子）', () => {
+  const W = 720;
+  const meta = () => clone(floodFixture.meta);
+  const bins = () => ({
+    riverDepth: Buffer.from(floodFixture.bins.riverDepth),
+    tideDepth: Buffer.from(floodFixture.bins.tideDepth),
+    riverDuration: Buffer.from(floodFixture.bins.riverDuration),
+  });
+  const insideIndex = () => {
+    for (let i = 0; i < W * W; i++) if (floodFixture.bins.riverDepth[i] !== 255) return i;
+    throw new Error('区内のセルがない');
+  };
+  const outsideIndex = () => floodFixture.bins.riverDepth.indexOf(255);
+
+  it('仮データの浸水想定は、仕様を満たす（区との突き合わせも）', () => {
+    const r = validateFlood(meta(), bins(), { wards: fixtureWards });
+    expect(r.violationCount, messages(r)).toBe(0);
+    expect(r.summary.join('\n')).toContain('flood-river.bin');
+    expect(r.summary.join('\n')).toContain('ランク別');
+  });
+
+  it('flood.json の項目の違いを検出する（範囲・ランクの表・出典）', () => {
+    let m = meta();
+    m.width = 360;
+    m.minX = 0;
+    expect(messages(validateFlood(m, bins()))).toMatch(/width は 720/);
+    expect(messages(validateFlood(m, bins()))).toMatch(/minX は -19000/);
+    m = meta();
+    m.depthRanks.pop();
+    expect(messages(validateFlood(m, bins()))).toMatch(/depthRanks は 6 件/);
+    m = meta();
+    m.durationRanks[2].rank = 9;
+    expect(messages(validateFlood(m, bins()))).toMatch(/durationRanks\[2\]\.rank は 3/);
+    m = meta();
+    m.depthRanks[0].label = '';
+    expect(messages(validateFlood(m, bins()))).toMatch(/depthRanks\[0\]\.label/);
+    m = meta();
+    delete m.sources.tide.attribution;
+    expect(messages(validateFlood(m, bins()))).toMatch(/sources\.tide\.attribution/);
+    expect(messages(validateFlood(null, bins()))).toMatch(/オブジェクトでない/);
+  });
+
+  it('バイト数の不一致を検出する', () => {
+    const b = bins();
+    b.tideDepth = b.tideDepth.subarray(0, 100);
+    expect(messages(validateFlood(meta(), b))).toMatch(/flood-tide\.bin: バイト数は width × height = 518400/);
+  });
+
+  it('値の範囲を検出する（浸水深は 6、継続時間は 7 まで。255 は区の外）', () => {
+    const i = insideIndex();
+    let b = bins();
+    b.riverDepth[i] = 7;
+    expect(messages(validateFlood(meta(), b))).toMatch(/flood-river\.bin: 値が 0〜6 と 255.*が 1 個ある/);
+    b = bins();
+    b.tideDepth[i] = 6; // 範囲内
+    b.riverDuration[i] = 7; // 範囲内
+    expect(validateFlood(meta(), b).violationCount).toBe(0);
+    b.riverDuration[i] = 8;
+    expect(messages(validateFlood(meta(), b))).toMatch(/flood-river-duration\.bin: 値が 0〜7/);
+    b = bins();
+    b.riverDepth[i] = 254;
+    expect(validateFlood(meta(), b).violationCount).toBe(1);
+  });
+
+  it('区の外が 255 でないセルと、区内が 255 のセルを、区と突き合わせて検出する', () => {
+    const b = bins();
+    b.riverDepth[outsideIndex()] = 0;
+    b.tideDepth[insideIndex()] = 255;
+    const r = validateFlood(meta(), b, { wards: fixtureWards });
+    expect(messages(r)).toMatch(/flood-river\.bin: セルの中心がどの区にも含まれないのに 255 でないセルが 1 個/);
+    expect(messages(r)).toMatch(/flood-tide\.bin: セルの中心が区の中なのに 255 のセルが 1 個/);
+    expect(r.violationCount).toBe(2);
+    // 区を渡さなければ、この突き合わせはしない
+    expect(validateFlood(meta(), b).violationCount).toBe(0);
+  });
+
+  it('高潮の浸水継続時間は、なくてもよい。あるときは検査し、flood.json の files が示している必要がある', () => {
+    expect(validateFlood(meta(), bins()).violationCount).toBe(0); // なし（仮データの meta は files.tideDuration が null）
+    const b = bins();
+    b.tideDuration = Buffer.from(floodFixture.bins.riverDuration);
+    expect(messages(validateFlood(meta(), b))).toMatch(/files\.tideDuration が示していない/);
+    const m = meta();
+    m.files.tideDuration = FLOOD_FILES.tideDuration;
+    expect(validateFlood(m, b, { wards: fixtureWards }).violationCount).toBe(0);
+    b.tideDuration[insideIndex()] = 9;
+    expect(messages(validateFlood(m, b))).toMatch(/flood-tide-duration\.bin: 値が 0〜7/);
+    // meta が示しているのにファイルがない
+    expect(messages(validateFlood(m, bins()))).toMatch(/flood-tide-duration\.bin: ファイルがない/);
+  });
+
+  it('必須の格子がなければ違反', () => {
+    const b = bins();
+    delete b.riverDuration;
+    expect(messages(validateFlood(meta(), b))).toMatch(/flood-river-duration\.bin: ファイルがない/);
+  });
+});
+
 describe('validateFileSizes', () => {
   const MB = 1024 * 1024;
   it('範囲内なら違反なし', () => {
@@ -319,6 +420,10 @@ describe('validateDirectory', () => {
     }
     if (!skip.includes('elevation.json')) await writeFile(path.join(dir, 'elevation.json'), JSON.stringify(fixtures.elevation.meta));
     if (!skip.includes('elevation.bin')) await writeFile(path.join(dir, 'elevation.bin'), fixtures.elevation.bin);
+    const flood = { [FLOOD_FILES.meta]: JSON.stringify(floodFixture.meta) + '\n', [FLOOD_FILES.riverDepth]: floodFixture.bins.riverDepth, [FLOOD_FILES.tideDepth]: floodFixture.bins.tideDepth, [FLOOD_FILES.riverDuration]: floodFixture.bins.riverDuration };
+    for (const [name, content] of Object.entries(flood)) {
+      if (!skip.includes(name)) await writeFile(path.join(dir, name), content);
+    }
   }
 
   it('全ファイルが揃っていれば違反なし', () =>
@@ -380,6 +485,54 @@ describe('validateDirectory', () => {
       const elevation = report.entries.find((e) => e.name === 'elevation.json + elevation.bin');
       expect(elevation.status).toBe('ok');
       expect(elevation.summary.join('\n')).toContain('検査していない');
+    }));
+
+  it('浸水想定は、未作成ならほかと同じく検証対象から外し、--require-all では違反にする', () =>
+    withDir(async (dir) => {
+      await writeAll(dir, { skip: Object.values(FLOOD_FILES) });
+      const lenient = await validateDirectory(dir);
+      expect(lenient.ok, formatReport(lenient)).toBe(true);
+      expect(lenient.entries.find((e) => e.name === 'flood.json + flood-*.bin').status).toBe('missing');
+      const strict = await validateDirectory(dir, { requireAll: true });
+      expect(strict.ok).toBe(false);
+      expect(formatReport(strict)).toContain('flood.json + flood-*.bin');
+    }));
+
+  it('浸水想定は、flood.json と必須の格子がそろっていないと違反（片方だけ・1つ欠けている）', () =>
+    withDir(async (dir) => {
+      await writeAll(dir, { skip: [FLOOD_FILES.meta] });
+      const noMeta = await validateDirectory(dir);
+      expect(noMeta.ok).toBe(false);
+      expect(formatReport(noMeta)).toContain('flood.json: ファイルがない');
+      await writeAll(dir, { skip: [FLOOD_FILES.tideDepth] });
+      await rm(path.join(dir, FLOOD_FILES.tideDepth), { force: true });
+      const noBin = await validateDirectory(dir);
+      expect(noBin.ok).toBe(false);
+      expect(formatReport(noBin)).toContain('flood-tide.bin: ファイルがない');
+    }));
+
+  it('boundary.geojson と同じディレクトリでは、区の外の浸水想定の値を違反にする（件数を表示）', () =>
+    withDir(async (dir) => {
+      await writeAll(dir);
+      const b = Buffer.from(floodFixture.bins.riverDepth);
+      b[b.indexOf(255)] = 2; // 左上隅のセル
+      await writeFile(path.join(dir, FLOOD_FILES.riverDepth), b);
+      const report = await validateDirectory(dir, { requireAll: true });
+      expect(report.ok).toBe(false);
+      expect(report.entries.find((e) => e.name === 'flood.json + flood-*.bin').status).toBe('ng');
+      expect(formatReport(report)).toContain('255 でないセルが 1 個');
+    }));
+
+  it('boundary.geojson がなければ、浸水想定の区の範囲の検査はしない（理由を示す）', () =>
+    withDir(async (dir) => {
+      await writeAll(dir, { skip: ['boundary.geojson'] });
+      const b = Buffer.from(floodFixture.bins.riverDepth);
+      b[b.indexOf(255)] = 2;
+      await writeFile(path.join(dir, FLOOD_FILES.riverDepth), b);
+      const report = await validateDirectory(dir);
+      const entry = report.entries.find((e) => e.name === 'flood.json + flood-*.bin');
+      expect(entry.status).toBe('ok');
+      expect(entry.summary.join('\n')).toContain('boundary.geojson がないので検査していない');
     }));
 
   it('壊れた JSON は違反として報告する', () =>
