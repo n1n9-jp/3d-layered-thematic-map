@@ -152,7 +152,7 @@ async function run(browser, base) {
   check(s.line !== null && s.start === null, '2回クリック：線が決まる');
   check((await chartCount(page)) === 5, `右の列に5レイヤーのグラフが並ぶ（${await chartCount(page)}）`);
   const order = await page.$$eval('[data-testid=section-chart]', (els) => els.map((e) => e.getAttribute('data-layer')));
-  check(order.join() === 'facilities,transit,roads,population,elevation', `グラフは全体の地図の段の順（上の段が上）：${order.join(',')}`);
+  check(order.join() === 'shelters,transit,population,flood,elevation', `グラフは全体の地図の段の順（上の段が上）：${order.join(',')}`);
   const len0 = await length(page);
   console.log(`      線：(${Math.round(s.line.ax)},${Math.round(s.line.ay)}) → (${Math.round(s.line.bx)},${Math.round(s.line.by)}) 長さ ${len0}`);
   const sums = await page.$$eval('[data-testid=section-summary]', (els) => els.map((e) => e.textContent));

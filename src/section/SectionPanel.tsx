@@ -410,11 +410,10 @@ function SectionHeadline({ line }: { line: SectionLine }) {
   const pct = sum.length > 0 ? Math.round((100 * sum.severeLength) / sum.length) : 0;
   return (
     <div className="sc-headline" data-testid="section-headline" data-severe-m={Math.round(sum.severeLength)} data-shelters={sum.shelters}>
-      <div>
-        浸水 3m 以上の区間 <b data-testid="section-severe">{km(sum.severeLength)}</b>（線の {pct}%）。その区間から {sum.radius / 1000} km 以内の、洪水・高潮で使える避難場所は{' '}
-        <b data-testid="section-severe-shelters">{sum.shelters}</b> か所。
+      <div title={`想定：${SCENARIO_LABEL[scenario]}`}>
+        浸水 3m 以上：<b data-testid="section-severe">{km(sum.severeLength)}</b>（線の {pct}%）。その区間から {sum.radius / 1000} km 以内の、洪水・高潮用の避難場所：{' '}
+        <b data-testid="section-severe-shelters">{sum.shelters}</b> か所
       </div>
-      <div className="ic-dim">想定：{SCENARIO_LABEL[scenario]}</div>
     </div>
   );
 }
@@ -527,14 +526,13 @@ export default function SectionBody() {
   return (
     <>
       <header className="ic-head" data-testid="section-head">
-        <div className="ic-title">
+        <div className="ic-title sc-title-row">
           <span className="ic-district">断面</span>
           <span className="sc-len" data-testid="section-length">
             {formatLength(length)}
           </span>
+          <Ends line={line} />
         </div>
-        <Ends line={line} />
-        <SectionHeadline line={line} />
       </header>
       {/* チャートを置く領域。各チャートは、全体の地図の対応する段と同じ高さに置く。置けないときは、上から順に並べる。 */}
       <div
@@ -562,6 +560,7 @@ export default function SectionBody() {
           })}
         {inner > 0 && <Axis length={length} width={inner} hoverD={hoverD} top={axisTop} />}
       </div>
+      <SectionHeadline line={line} />
     </>
   );
 }

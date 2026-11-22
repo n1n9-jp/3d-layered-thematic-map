@@ -238,7 +238,7 @@ export default function InfoColumn({ width }: { width: number }) {
         <PinnedBody p={probe} />
       )}
       <footer className="ic-foot" data-testid="disclaimer">
-        試作です。避難の判断には使えません。実際の避難は、各区のハザードマップと避難情報に従ってください。
+        試作です。実際の避難は、各区のハザードマップと避難情報に従ってください。
       </footer>
     </section>
   );

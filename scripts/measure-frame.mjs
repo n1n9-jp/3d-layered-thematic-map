@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // 1フレームの描画にかかる時間を測る。「5枚すべて」と「1枚ずつ」（ほかの段を hidden にする）を表で出す。
 //   node scripts/measure-frame.mjs
-//   node scripts/measure-frame.mjs --only all,roads --frames 8 --extra "zoom=-3.5"
+//   node scripts/measure-frame.mjs --only all,flood --frames 8 --extra "zoom=-3.5"
 // オプション:
 //   --frames <n>    1構成あたりに測るフレーム数（既定 5）
-//   --only <a,b>    測る構成（all / none / elevation / population / roads / transit / facilities をカンマ区切り）。既定は全部
+//   --only <a,b>    測る構成（all / none / elevation / flood / population / transit / shelters をカンマ区切り）。既定は全部
 //   --extra <q>     全構成の URL に付け足すクエリ（例: "zoom=-3.5"）
 //   --size <WxH>    ビューポート（既定 1400x1000）
 //   --url <URL>     起動済みのサーバーを測る（Vite は起動しない）
@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const LAYERS = ['elevation', 'population', 'roads', 'transit', 'facilities'];
+const LAYERS = ['elevation', 'flood', 'population', 'transit', 'shelters'];
 const READY_TIMEOUT_MS = 60000;
 const SETTLE_MS = 3000;
 const LAUNCH_ARGS = (process.env.SHOT_CHROMIUM_ARGS ?? '').split(/\s+/).filter(Boolean);

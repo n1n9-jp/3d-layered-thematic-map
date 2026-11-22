@@ -188,7 +188,7 @@ async function run(browser, base) {
     const ys = await tierYs(o.page);
     const cs = await charts(o.page);
     const sorted = [...cs].sort((a, b) => a.cy - b.cy).map((c) => c.id);
-    check(sorted.join() === 'facilities,transit,roads,population,elevation', `${size}：チャートは段の順（上の段が上）`);
+    check(sorted.join() === 'shelters,transit,population,flood,elevation', `${size}：チャートは段の順（上の段が上）`);
     const axis = await o.page.evaluate(() => document.querySelector('[data-testid=section-axis]').getBoundingClientRect().top);
     check(axis >= Math.max(...cs.map((c) => c.bottom)) - 0.5, `${size}：横軸は、いちばん下のチャートの下に1つだけ（${await o.page.locator('[data-testid=section-axis]').count()} 個）`);
     check((await o.page.locator('[data-testid=section-axis]').count()) === 1, `${size}：横軸は1つ`);
@@ -209,7 +209,7 @@ async function run(browser, base) {
       const st = await stageBox(page);
       const offs = await measureOffsets(page);
       // いちばん上と下のチャートは、段が列の端に近いと、列の中へ寄せるので、ずれてよい。中の3つで測る。
-      const inner = offs.filter((x) => x.id !== 'facilities' && x.id !== 'elevation');
+      const inner = offs.filter((x) => x.id !== 'shelters' && x.id !== 'elevation');
       return { label, layout: st.layout, worst: Math.max(...inner.map((x) => Math.abs(x.off))), edge: Math.max(...offs.map((x) => Math.abs(x.off))), h: offs[0]?.h, n: offs.length };
     };
     await set(20000);
@@ -268,17 +268,17 @@ async function run(browser, base) {
     await settle(page, 3000);
     let cs = await charts(page);
     let order = [...cs].sort((a, b) => a.cy - b.cy).map((c) => c.id);
-    check(order[0] === 'elevation' && order.join() === 'elevation,facilities,transit,roads,population', `並べ替え：チャートの順番が変わる（上から ${order.join(',')}）`);
+    check(order[0] === 'elevation' && order.join() === 'elevation,shelters,transit,population,flood', `並べ替え：チャートの順番が変わる（上から ${order.join(',')}）`);
     let offs = await measureOffsets(page);
     check(Math.max(...offs.map((x) => Math.abs(x.off))) <= TOLERANCE, `並べ替え後も、チャートは段の高さに揃う（最大 ${Math.max(...offs.map((x) => Math.abs(x.off))).toFixed(2)}px）`);
     await page.evaluate(() => {
       const s = window.__store.getState();
-      s.setVisible('roads', false);
+      s.setVisible('transit', false);
       s.setVisible('population', false);
     });
     await settle(page, 3000);
     cs = await charts(page);
-    check(cs.length === 3 && !cs.some((c) => c.id === 'roads' || c.id === 'population'), `非表示の段のチャートは出ない（${cs.map((c) => c.id).join(',')}）`);
+    check(cs.length === 3 && !cs.some((c) => c.id === 'transit' || c.id === 'population'), `非表示の段のチャートは出ない（${cs.map((c) => c.id).join(',')}）`);
     offs = await measureOffsets(page);
     check(Math.max(...offs.map((x) => Math.abs(x.off))) <= TOLERANCE, `3段でも、チャートは段の高さに揃う（最大 ${Math.max(...offs.map((x) => Math.abs(x.off))).toFixed(2)}px）`);
     await o.ctx.close();
@@ -319,9 +319,9 @@ async function run(browser, base) {
     const ys = await tierYs(page);
     const base0 = await bandBrightness(page, ys);
     const cs = await charts(page);
-    const target = cs.find((c) => c.id === 'roads');
+    const target = cs.find((c) => c.id === 'population');
     const plot = await page.evaluate(() => {
-      const r = document.querySelector('[data-testid=section-chart][data-layer=roads] [data-testid=section-plot]').getBoundingClientRect();
+      const r = document.querySelector('[data-testid=section-chart][data-layer=population] [data-testid=section-plot]').getBoundingClientRect();
       return { x: r.left + r.width * 0.5, y: r.top + r.height / 2 };
     });
     await page.mouse.move(plot.x - 6, plot.y);
@@ -329,13 +329,13 @@ async function run(browser, base) {
     await waitFor(page, () => window.__store.getState().sectionFocus !== null);
     await settle(page, 2000);
     const f = await page.evaluate(() => window.__store.getState().sectionFocus);
-    check(f?.id === 'roads' && f?.from === 'chart', `道路のチャートにカーソル：目立たせる段は道路（${JSON.stringify(f)}）`);
+    check(f?.id === 'population' && f?.from === 'chart', `人口のチャートにカーソル：目立たせる段は人口（${JSON.stringify(f)}）`);
     const dim = await bandBrightness(page, ys);
     const ratio = Object.fromEntries(Object.keys(ys).map((id) => [id, dim[id] / base0[id]]));
     console.log(`      明るさの比（暗くしたとき / 通常）：${Object.entries(ratio).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(' / ')}`);
-    check(ratio.roads > 0.9, `対応する段（道路）はそのまま（${ratio.roads.toFixed(2)}）`);
-    check(['elevation', 'population', 'transit', 'facilities'].every((id) => ratio[id] < 0.8), 'ほかの段は暗くなる');
-    check((await page.locator('[data-testid=section-chart][data-layer=roads][data-hot]').count()) === 1, '道路のチャートの枠が強調される');
+    check(ratio.population > 0.9, `対応する段（人口）はそのまま（${ratio.population.toFixed(2)}）`);
+    check(['elevation', 'flood', 'transit', 'shelters'].every((id) => ratio[id] < 0.8), 'ほかの段は暗くなる');
+    check((await page.locator('[data-testid=section-chart][data-layer=population][data-hot]').count()) === 1, '人口のチャートの枠が強調される');
     check((await page.locator('[data-testid=section-cursor]').count()) === 5, '全チャート共通の縦の線は保たれる');
     void target;
     await page.mouse.move(40, 40);
