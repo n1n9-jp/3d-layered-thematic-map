@@ -118,7 +118,7 @@ describe('buildShelterData', () => {
     expect(deep.deep.polygons).toHaveLength(1);
     expect(deep.deep.hatch.length).toBeGreaterThan(2);
     expect(deep.deep.outline.length).toBe(1);
-    expect(deep.deep.labels).toEqual([{ position: [2500, 500], text: 'C区\n指定なし' }]);
+    expect(deep.deep.labels).toEqual([{ position: [2500, 500], text: 'C区\n指定なし', name: 'C区', status: '指定なし', kind: 'deep-none' }]);
     expect(deep.shallow).toEqual([]);
     expect(deep.unpubDeep).toEqual({ polygons: [], outline: [], labels: [] });
     // 浸水の想定を渡さなければ unrated（深い・小さいとは言わない）
@@ -132,7 +132,7 @@ describe('buildShelterData', () => {
     expect(deep.hatch.length).toBeGreaterThan(2);
     expect(deep.unpubDeep.polygons).toHaveLength(1);
     expect(deep.unpubDeep.outline).toHaveLength(1);
-    expect(deep.unpubDeep.labels).toEqual([{ position: [1500, 500], text: 'B区\n未公開' }]);
+    expect(deep.unpubDeep.labels).toEqual([{ position: [1500, 500], text: 'B区\n未公開', name: 'B区', status: '未公開', kind: 'unpublished-deep' }]);
     expect(deep.deep.polygons).toEqual([]); // 琥珀の斜線（指定がない区）には入れない
     const o = shelterOverview(deep);
     expect(o.unpublishedDeep).toEqual([{ name: 'B区', total: 0, severeShare: 0.745, floodedShare: 0.9 }]);

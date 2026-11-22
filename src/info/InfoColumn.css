@@ -214,10 +214,10 @@
 }
 .ov {
   container-type: inline-size;
-  padding: 12px 14px 8px;
+  padding: 8px 14px 6px;
 }
 .ov-title {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: clamp(14px, 3.3cqw, 18px);
   font-weight: 600;
   color: #fff;
@@ -227,7 +227,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 2px 10px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .ov-chip {
   flex: none;
@@ -252,8 +252,8 @@
   line-height: 1.35;
 }
 .ov-hero {
-  margin-bottom: 10px;
-  padding: 10px 12px 8px;
+  margin-bottom: 8px;
+  padding: 7px 12px 6px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
@@ -290,17 +290,17 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .ov-card {
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 10px 7px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
 }
 .ov-num {
-  margin: 2px 0 0;
+  margin: 0;
   font-size: clamp(26px, 8cqw, 46px);
   font-weight: 700;
   line-height: 1.15;
@@ -315,8 +315,8 @@
 }
 /* 浸水が深いのに、洪水・高潮用の指定がない区：この地図の主題。琥珀色で、見落とされないようにする。 */
 .ov-alert {
-  margin-bottom: 8px;
-  padding: 8px 12px;
+  margin-bottom: 6px;
+  padding: 6px 12px 7px;
   border: 2px solid rgba(255, 170, 30, 0.9);
   border-radius: 8px;
   background: rgba(255, 170, 30, 0.1);
@@ -324,11 +324,17 @@
 .ov-alert .ov-kicker {
   color: #ffc15a;
 }
-.ov-alert-main {
+/* 「5 区」の数字と、その見出しを横に並べる（縦に積むと、列の高さを余計に使う） */
+.ov-alert-head {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.ov-alert-count {
+  flex: none;
+  display: flex;
   align-items: baseline;
-  gap: 0 4px;
+  gap: 3px;
 }
 .ov-num-alert {
   font-size: clamp(30px, 10cqw, 56px);
@@ -339,14 +345,13 @@
 .ov-alert .ov-unit {
   font-size: clamp(14px, 3.4cqw, 20px);
   color: #ffc15a;
-  margin-right: 10px;
+  margin-left: 0;
 }
 .ov-alert-sub {
+  margin: 2px 0 0;
   font-size: 12px;
   line-height: 1.35;
   color: #e6c88e;
-  flex: 1 1 14em;
-  min-width: 0;
 }
 .ov-alert .ov-kicker {
   word-break: auto-phrase;
@@ -354,10 +359,10 @@
 }
 .ov-split {
   list-style: none;
-  margin: 6px 0 4px;
+  margin: 5px 0 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 4px;
   font-size: clamp(13px, 3.3cqw, 17px);
   line-height: 1.4;
   color: #fff;
@@ -373,6 +378,19 @@
 .ov-split b {
   font-weight: 700;
 }
+.nw {
+  white-space: nowrap;
+}
+/* 行の終わりに、1〜2文字だけが残らないよう、折り返しを均す。 */
+.ov-split li > span,
+.ov-split-note,
+.ov-gaps li > span,
+.ov-alert-sub,
+.ov-scen-note,
+.ov-note {
+  word-break: auto-phrase;
+  text-wrap: balance;
+}
 .ov-split-note {
   display: block;
   font-size: 12px;
@@ -387,12 +405,12 @@
 }
 .ov-gaps {
   list-style: none;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   padding: 0;
   display: grid;
-  gap: 4px;
+  gap: 2px;
   font-size: clamp(11px, 2.3cqw, 13px);
-  line-height: 1.5;
+  line-height: 1.4;
   color: #aeb8c6;
 }
 .ov-gaps li {
@@ -416,7 +434,7 @@
   display: block;
   width: 100%;
   margin: 0;
-  padding: 6px 0;
+  padding: 4px 0;
   text-align: left;
   font: inherit;
   font-size: clamp(12px, 2.6cqw, 14px);
@@ -449,7 +467,7 @@
 }
 .ic-hint-short {
   flex: none;
-  padding: 6px 14px 6px;
+  padding: 5px 14px 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   font-size: 11.5px;
   line-height: 1.5;
@@ -529,12 +547,22 @@
   color: #8fd3ff;
 }
 .ex-bars {
-  padding: 4px 0 6px;
+  padding: 2px 0 4px;
+}
+/* 23区全体の表は、見出しと想定を1行に並べる（収まらなければ折り返す） */
+.ex-bars .ex-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  margin-bottom: 2px;
 }
 .ex-bars .ex-title {
+  margin: 0;
   font-size: clamp(12.5px, 2.8cqw, 15px);
 }
 .ex-bars .ex-scenario {
+  margin: 0;
   font-size: clamp(11px, 2.4cqw, 13px);
 }
 .ex-bars .ex-table {
@@ -542,7 +570,8 @@
 }
 .ex-bars .ex-table th,
 .ex-bars .ex-table td {
-  padding: 4px 4px;
+  /* 狭い列では詰め、広い列では少し広げる */
+  padding: clamp(2px, 0.7cqw, 4px) 4px;
 }
 .ex-bars .ex-table th:first-child {
   width: 7.5em;
@@ -558,7 +587,7 @@
 /* 区分ごとの人口の横棒（色は浸水の段の配色）。人口の最大の区分を全幅とする。 */
 .ex-bar {
   display: block;
-  height: 14px;
+  height: 12px;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.05);
 }

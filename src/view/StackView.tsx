@@ -25,7 +25,10 @@ import { boundaryLayer, cachedBoundaryPaths } from './boundaryLines';
 import { DEFAULT_ANGLES, LIMITS, SOLO_ANGLES, VIEW, clamp, fitStack, nearestAngle } from './camera';
 import type { Size } from './camera';
 import { circleLayer } from '../closeup/closeupLayers';
-import { stackLabelLayers } from './labelLayers';
+import { stackLabelLayers, stackLabelRects } from './labelLayers';
+import { layoutWardLabels, wardLabelLayers } from './wardLabels';
+import { wardLabelsOf } from '../layers/shelters/model';
+import type { ShelterData } from '../layers/shelters/model';
 import { topOf, withHeight } from './layerHeights';
 import { useElementSize } from './useElementSize';
 import { RIGHT_PANEL_W } from './layout';
@@ -357,6 +360,32 @@ export default function StackView({ columnWidth }: Props) {
   const visibleIds = LAYER_IDS.filter((id) => shown[id] !== null)
     .map((id) => ({ id, z: shown[id] as number, i: order.indexOf(id) }))
     .sort((a, b) => a.z - b.z || a.i - b.i);
+
+  // 避難の段の区名の札。視点・画面の大きさ・段の高さが変わったときだけ置き場所を決め直す（マウスの移動では、決め直さない）。
+  const tiersKey = visibleIds.map((t) => `${t.id}:${t.z.toFixed(2)}`).join();
+  const shelterZ = visibleIds.find((t) => t.id === 'shelters')?.z ?? null;
+  const shelterData = status.shelters === 'ready' ? (data.shelters as ShelterData) : null;
+  const wardLayout = useMemo(() => {
+    if (!shelterData || shelterZ === null || !size) return null;
+    const tiers = tiersKey.split(',').map((s) => {
+      const [id, z] = s.split(':');
+      return { id: id as LayerId, z: Number(z) };
+    });
+    return layoutWardLabels({
+      labels: wardLabelsOf(shelterData),
+      viewState,
+      size,
+      z: shelterZ,
+      otherZs: tiers.filter((t) => t.id !== 'shelters').map((t) => t.z),
+      columnWidth,
+      layerNameRects: stackLabelRects({ tiers, viewState, size }),
+    });
+  }, [shelterData, shelterZ, size, tiersKey, viewState, columnWidth]);
+  const wardLabelLayerList = useMemo(() => (wardLayout ? wardLabelLayers(wardLayout) : []), [wardLayout]);
+  useEffect(() => {
+    window.__wardLabels = wardLayout;
+  }, [wardLayout]);
+
   for (const [k, { id, z }] of visibleIds.entries()) {
     // この段のレイヤー（平面、データ、区境界線、立てるグラフ、切り口の線）。別の段が目立たせられているときは、まとめて暗くする。
     const group: Layer[] = [];
@@ -393,6 +422,7 @@ export default function StackView({ columnWidth }: Props) {
     const next = visibleIds[k + 1];
     const topOfGroup = !(next && Math.abs(next.z - z) <= 1);
     if (paths && topOfGroup) group.push(boundaryLayer(paths, id, z));
+    if (id === 'shelters') group.push(...wardLabelLayerList);
     // 断面：その段の平面の後、1つ上の段の平面の前に、立てるグラフ、切り口の線と端点を描く。
     if (sectionMode) {
       group.push(...stands[id].map((l) => withHeight(l, targets[id] as number, z)));

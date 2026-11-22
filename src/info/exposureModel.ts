@@ -53,7 +53,7 @@ export function shareText(part: number, whole: number): string {
 export function scenarioNote(scenario: Exposure['scenario']): string {
   if (scenario === 'river') return '洪水だけの想定です（高潮は含みません）。';
   if (scenario === 'tide') return '高潮だけの想定です（洪水は含みません）。';
-  return '「大きいほう」は、洪水と高潮を足し合わせたものではなく、地点ごとに、深いほうの想定を採ったものです。';
+  return '足し合わせではなく、地点ごとに深いほうを採ったものです。';
 }
 
 export function exposureTable(e: Exposure): ExposureTable {

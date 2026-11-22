@@ -5,7 +5,7 @@ import type { Exposure } from '../aggregate/exposure';
 import type { FloodData } from '../layers/flood/model';
 import type { PopulationData } from '../layers/population';
 import { shelterOverview } from '../layers/shelters/model';
-import type { ShelterData } from '../layers/shelters/model';
+import type { ShelterData, WardGapSummary } from '../layers/shelters/model';
 import { useMapStore } from '../store';
 import type { ElevationData } from '../types';
 import type { CSSProperties } from 'react';
@@ -45,9 +45,11 @@ export function ExposureTable({
   const empty = bars ? t.rows.filter((r) => r.peopleValue <= 0 && r.key !== '0') : [];
   return (
     <section className={`ex${bars ? ' ex-bars' : ''}`} data-testid={testId} data-scenario={exposure.scenario}>
-      <h3 className="ex-title">{caption}</h3>
-      <div className="ex-scenario" data-testid={`${testId}-scenario`}>
-        想定：{t.scenario}
+      <div className="ex-head">
+        <h3 className="ex-title">{caption}</h3>
+        <div className="ex-scenario" data-testid={`${testId}-scenario`}>
+          想定：{t.scenario}
+        </div>
       </div>
       <table className="ex-table">
         <thead>
@@ -121,6 +123,20 @@ function Swatch({ kind }: { kind: 'hatch' | 'hatch-deep' | 'alert' | 'faint' }) 
   return <span className={`lp-swatch lp-swatch-${kind} ov-sw`} style={{ '--sw': color.join(',') } as CSSProperties} aria-hidden="true" />;
 }
 
+/** 「江戸川区 75%・足立区 60%」。区ごとのまとまりは、途中で折り返さない（区名が「江／東区」のように割れないように）。textContent は `wardSharesText` と同じ。 */
+function WardShares({ wards, testId }: { wards: readonly WardGapSummary[]; testId?: string }) {
+  return (
+    <span data-testid={testId}>
+      {wards.map((w, i) => (
+        <span key={w.name}>
+          {i > 0 && '・'}
+          <span className="nw">{wardSharesText([w])}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /**
  * 洪水・高潮用の避難場所が、このデータで区内に確認できない区。
  * 主題の枠は、浸水が深い区（指定がない区と、データ未公開の区を合わせた数）。内訳の2つは意味が違う（載っていて 0 件／載っていないので分からない）ので、数と区名を分けて出す。
@@ -131,17 +147,19 @@ function ShelterGaps({ o }: { o: ReturnType<typeof shelterOverview> }) {
     <>
       {o.deepWithoutShelter.length > 0 && (
         <section className="ov-alert" data-testid="overall-deep">
-          <div className="ov-kicker">
-            <Swatch kind="alert" />
-            浸水が深く、このデータで区内に洪水・高潮用の避難場所が確認できない区
-          </div>
-          <div className="ov-alert-main">
-            <span className="ov-num ov-num-alert" data-testid="overall-deep-count">
-              {o.deepWithoutShelter.length}
+          <div className="ov-alert-head">
+            <span className="ov-alert-count">
+              <span className="ov-num ov-num-alert" data-testid="overall-deep-count">
+                {o.deepWithoutShelter.length}
+              </span>
+              <span className="ov-unit">区</span>
             </span>
-            <span className="ov-unit">区</span>
-            <span className="ov-alert-sub">区名のあとの数字は、区の人口のうち深さ 3m 以上の区域に住む人の割合（どの区も {Math.round(DEEP_SHARE_THRESHOLD * 100)}% 以上）</span>
+            <div className="ov-kicker">
+              <Swatch kind="alert" />
+              浸水が深く、このデータで区内に洪水・高潮用の避難場所が確認できない区
+            </div>
           </div>
+          <p className="ov-alert-sub">数字は、区の人口のうち深さ 3m 以上の区域に住む人の割合（下の 2 行も同じ）</p>
           <ul className="ov-split">
             {o.deepNone.length > 0 && (
               <li data-testid="overall-deep-none">
@@ -150,10 +168,8 @@ function ShelterGaps({ o }: { o: ReturnType<typeof shelterOverview> }) {
                   <b>
                     指定がない <span data-testid="overall-deep-none-count">{o.deepNone.length}</span> 区
                   </b>
-                  ：<span data-testid="overall-deep-none-names">{wardSharesText(o.deepNone)}</span>
-                  <span className="ov-split-note">
-                    洪水・高潮用の指定が 0 件（地震・火事などの{o.deepNone.map((w) => `${w.total} か所`).join('・')}のみ）
-                  </span>
+                  ：<WardShares wards={o.deepNone} testId="overall-deep-none-names" />
+                  <span className="ov-split-note">洪水・高潮用の指定が 0 件（ほかの災害用のみ）</span>
                 </span>
               </li>
             )}
@@ -164,8 +180,8 @@ function ShelterGaps({ o }: { o: ReturnType<typeof shelterOverview> }) {
                   <b>
                     データ未公開 <span data-testid="overall-deep-unpublished-count">{o.unpublishedDeep.length}</span> 区
                   </b>
-                  ：<span data-testid="overall-deep-unpublished-names">{wardSharesText(o.unpublishedDeep)}</span>
-                  <span className="ov-split-note">このデータに指定緊急避難場所が載っていないので、あるかどうかは分かりません</span>
+                  ：<WardShares wards={o.unpublishedDeep} testId="overall-deep-unpublished-names" />
+                  <span className="ov-split-note">データに載っていないので、あるかは分かりません</span>
                 </span>
               </li>
             )}
@@ -177,7 +193,7 @@ function ShelterGaps({ o }: { o: ReturnType<typeof shelterOverview> }) {
           <li data-testid="overall-unpublished">
             <Swatch kind="hatch" />
             <span>
-              <b>データ未公開で浸水が小さい</b>：{wardSharesText(o.unpublishedShallow)}（深さ 3m 以上の区域に住む人の割合）。「ない」とは限りません。
+              <b>データ未公開で浸水が小さい</b>：<WardShares wards={o.unpublishedShallow} />。「ない」とは限りません。
             </span>
           </li>
         )}
@@ -185,7 +201,7 @@ function ShelterGaps({ o }: { o: ReturnType<typeof shelterOverview> }) {
           <li data-testid="overall-shallow">
             <Swatch kind="faint" />
             <span>
-              <b>指定がなく浸水が小さい</b>：{wardSharesText(o.shallowNone)}（同じ割合）。
+              <b>指定がなく浸水が小さい</b>：<WardShares wards={o.shallowNone} />
             </span>
           </li>
         )}
@@ -248,6 +264,12 @@ function Notes({ exposure, shelters }: { exposure: Exposure | null; shelters: Sh
                 {wardSharesText(o.unpublishedDeep) || '該当なし'}。<b>データ未公開</b>で浸水が小さい区：{wardSharesText(o.unpublishedShallow) || '該当なし'}。
                 <b>指定がない</b>で浸水が小さい区：{wardSharesText(o.shallowNone) || '該当なし'}。
               </p>
+              {o.deepNone.length > 0 && (
+                <p>
+                  「指定がない」浸水が深い区にも、洪水・高潮用ではない（地震・火事などの）避難場所は載っています：
+                  {o.deepNone.map((w) => `${w.name} ${w.total} か所`).join('・')}。
+                </p>
+              )}
             </>
           )}
         </div>
@@ -300,7 +322,7 @@ export default function Overall() {
               </span>
             </div>
             <p className="ov-note" data-testid="overall-flooded">
-              浸水が想定される区域全体（0.5m 未満を含む）では {head.flooded.approx}。正確な値は下の表にあります。
+              浸水が想定される区域全体（0.5m 未満を含む）：{head.flooded.approx}
             </p>
           </section>
           <div className="ov-pair">
@@ -320,7 +342,7 @@ export default function Overall() {
                   <span data-testid="overall-usable">{o.usable.toLocaleString('ja-JP')}</span>
                   <span className="ov-unit">か所</span>
                 </div>
-                <div className="ov-note">23区の合計。区による偏りが大きい</div>
+                <div className="ov-note">区による偏りが大きい</div>
               </section>
             )}
           </div>

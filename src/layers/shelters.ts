@@ -20,9 +20,10 @@ import {
   shelterSectionIndex,
   subsetShelters,
   summarizeShelters,
+  wardLabelsOf,
 } from './shelters/model';
 import { shareLabel } from '../aggregate/wardExposure';
-import type { ShelterData, ShelterKind } from './shelters/model';
+import type { ShelterData, ShelterKind, WardLabel } from './shelters/model';
 
 export type { ShelterData };
 
@@ -42,6 +43,35 @@ const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQu
 const getPosition = (d: Position) => d;
 const getRings = (d: PolygonRings) => d as never;
 const getSegment = (d: Position[]) => d;
+
+/** クローズアップの円の中の区名の札。目印（区の重心）の位置に、2行で出す。 */
+function closeupLabelLayer(
+  data: ShelterData,
+  common: { coordinateSystem: typeof COORDINATE_SYSTEM.CARTESIAN; modelMatrix: ReturnType<typeof asModelMatrix>; opacity: number; pickable: false },
+) {
+  return new TextLayer<WardLabel>({
+    ...common,
+    id: 'shelters-deep-label',
+    data: wardLabelsOf(data),
+    getPosition: (d) => [d.position[0], d.position[1], 0],
+    getText: (d) => d.text,
+    // 平面の拡縮に合わせて大きさを変える（小さい画面で、積層を覆わないように）。読める大きさ（9〜14 px）には収める
+    getSize: 800,
+    sizeUnits: 'meters',
+    sizeMinPixels: 9,
+    sizeMaxPixels: 14,
+    getColor: [...DEEP_NONE_COLOR, 255],
+    getTextAnchor: 'middle',
+    getAlignmentBaseline: 'center',
+    background: true,
+    getBackgroundColor: [8, 10, 16, 215],
+    backgroundPadding: [4, 2],
+    fontFamily: LABEL_FONT,
+    characterSet: 'auto',
+    fontSettings: { sdf: false, fontSize: 64 },
+    fontWeight: 700,
+  });
+}
 
 const shelters: LayerModule<ShelterData> = {
   id: 'shelters',
@@ -177,28 +207,8 @@ const shelters: LayerModule<ShelterData> = {
           billboard: false,
         });
       }),
-      new TextLayer<{ position: Position; text: string }>({
-        ...common,
-        id: 'shelters-deep-label',
-        data: [...data.deep.labels, ...data.unpubDeep.labels],
-        getPosition: (d) => [d.position[0], d.position[1], 0],
-        getText: (d) => d.text,
-        // 平面の拡縮に合わせて大きさを変える（小さい画面で、積層を覆わないように）。読める大きさ（9〜14 px）には収める
-        getSize: 800,
-        sizeUnits: 'meters',
-        sizeMinPixels: 9,
-        sizeMaxPixels: 14,
-        getColor: [...DEEP_NONE_COLOR, 255],
-        getTextAnchor: 'middle',
-        getAlignmentBaseline: 'center',
-        background: true,
-        getBackgroundColor: [8, 10, 16, 215],
-        backgroundPadding: [4, 2],
-        fontFamily: LABEL_FONT,
-        characterSet: 'auto',
-        fontSettings: { sdf: false, fontSize: 64 },
-        fontWeight: 700,
-      }),
+      // 区名の札は、全体の地図では、視点に合わせて目印から離して置く（`src/view/wardLabels.ts`）。クローズアップ（円で切り出したデータ）では、円が小さいので、目印の位置にそのまま出す
+      ...(data.clip ? [closeupLabelLayer(data, common)] : []),
     ];
   },
   sample: sampleShelters,

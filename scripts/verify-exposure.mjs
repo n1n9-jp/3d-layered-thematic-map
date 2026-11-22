@@ -192,7 +192,7 @@ for (const sc of ['max', 'river', 'tide']) {
   check((await page.textContent('[data-testid=overall-below] .ov-num')).trim() === approx(e.below.people), `${sc}：大きな数字（標高 0m 未満）${approx(e.below.people)}`);
   // 想定の表示が、数字の近くに出ていて、「大きいほう」は足し合わせでないと書いてある
   const scenText = await page.textContent('[data-testid=overall-scenario]');
-  check(sc === 'max' ? scenText.includes('大きいほう') && scenText.includes('足し合わせたものではなく') : scenText.includes(sc === 'river' ? '洪水だけ' : '高潮だけ'), `${sc}：想定の表示（${scenText.trim().slice(0, 40)}…）`);
+  check(sc === 'max' ? scenText.includes('大きいほう') && scenText.includes('足し合わせではなく') : scenText.includes(sc === 'river' ? '洪水だけ' : '高潮だけ'), `${sc}：想定の表示（${scenText.trim().slice(0, 40)}…）`);
 }
 const usable = await page.textContent('[data-testid=overall-usable]');
 check(num(usable) === exp.usable, `洪水・高潮で使える避難場所 ${exp.usable}（画面 ${usable}）`);

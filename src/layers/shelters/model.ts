@@ -119,9 +119,9 @@ export interface ShelterData {
    * 描画用：データ未公開で、浸水が深い区の、網掛けに重ねる琥珀の印。輪郭（塗り。間引いたもの）、縁の線（輪郭の線）、区名のラベル。
    * 切り出しでは、塗りは空、線は円で切ったもの
    */
-  unpubDeep: { polygons: PolygonRings[]; outline: Position[][]; labels: { position: Position; text: string }[] };
+  unpubDeep: { polygons: PolygonRings[]; outline: Position[][]; labels: WardLabel[] };
   /** 描画用：浸水が深いのに洪水・高潮用の指定がない区の輪郭（間引いたもの）、斜線の線分、縁の線（輪郭の線）。切り出しでは、塗りは空、線は円で切ったもの */
-  deep: { polygons: PolygonRings[]; hatch: Position[][]; outline: Position[][]; labels: { position: Position; text: string }[] };
+  deep: { polygons: PolygonRings[]; hatch: Position[][]; outline: Position[][]; labels: WardLabel[] };
   /** 描画用：浸水が小さく洪水・高潮用の指定がない区の輪郭（間引いたもの）。切り出しでは空 */
   shallow: PolygonRings[];
   summary: ShelterSummary;
@@ -130,6 +130,23 @@ export interface ShelterData {
   /** subset の結果のとき、切り出した円。この円の外の地点は sample が値なしにする */
   clip?: Circle;
 }
+
+/**
+ * 区名の札。position は札が指す区の目印（区の最大の外周の重心。ローカル座標）。
+ * 全体の地図では、札は目印から離して置く（`src/view/wardLabels.ts`）。クローズアップの円の中では、text を目印の位置にそのまま出す。
+ */
+export interface WardLabel {
+  position: Position;
+  /** 「足立区\n指定なし」のように、区名と、避難場所の状況の2行 */
+  text: string;
+  name: string;
+  /** 札の2行目。「指定なし」（データに載っていて洪水・高潮用が 0 件）か、「未公開」（データに載っていない） */
+  status: string;
+  kind: 'deep-none' | 'unpublished-deep';
+}
+
+/** 全体の地図に出す区名の札（浸水が深く、洪水・高潮用の避難場所が確認できない区）。 */
+export const wardLabelsOf = (data: Pick<ShelterData, 'deep' | 'unpubDeep'>): WardLabel[] => [...data.deep.labels, ...data.unpubDeep.labels];
 
 const KINDS: ShelterKind[] = ['usable', 'other', 'hospital'];
 
@@ -268,7 +285,11 @@ export function buildShelterData(
     }
     if (w.gap === 'deep-none' || w.gap === 'unpublished-deep') {
       const main = largestRing(w.polygons);
-      if (main) (w.gap === 'deep-none' ? deep : unpubDeep).labels.push({ position: ringCentroid(main), text: `${w.name}\n${w.gap === 'deep-none' ? '指定なし' : '未公開'}` });
+      if (main) {
+        const kind = w.gap === 'deep-none' ? 'deep-none' : 'unpublished-deep';
+        const status = kind === 'deep-none' ? '指定なし' : '未公開';
+        (kind === 'deep-none' ? deep : unpubDeep).labels.push({ position: ringCentroid(main), text: `${w.name}\n${status}`, name: w.name, status, kind });
+      }
     }
   }
 

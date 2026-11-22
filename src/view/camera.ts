@@ -219,6 +219,45 @@ export function projectPoint(vs: View4, size: Size, p: [number, number, number])
 }
 
 /**
+ * 1つの視点の投影器。多くの点を投影するときは、点ごとに viewport を作らず、これを使う。
+ * project は世界の点を画面（px）へ、unplane は画面の点を、高さ z の水平面の上の点（x, y）へ戻す（平行投影なので一意に決まる）。
+ */
+export function makeProjector(vs: View4, size: Size): {
+  project: (p: readonly [number, number, number]) => [number, number];
+  unplane: (px: readonly [number, number], z: number) => [number, number];
+} {
+  if (!hasSize(size)) throw new Error('描画領域に大きさがありません');
+  const vp = viewport(vs, size.width, size.height);
+  const project = (p: readonly [number, number, number]): [number, number] => {
+    const [x, y] = vp.project([p[0], p[1], p[2]]);
+    return [x, y];
+  };
+  // 平行投影なので、水平面から画面への写像は、高さごとに決まる一次式（画面 = M·(x, y) + b）。逆写像は、その逆行列で求める。
+  const STEP = 1000;
+  const [cx, cy] = vs.target;
+  const plane = new Map<number, { a: number; b: number; c: number; d: number; px0: number; py0: number }>();
+  const at = (z: number) => {
+    let m = plane.get(z);
+    if (!m) {
+      const p0 = project([cx, cy, z]);
+      const px = project([cx + STEP, cy, z]);
+      const py = project([cx, cy + STEP, z]);
+      m = { a: (px[0] - p0[0]) / STEP, b: (py[0] - p0[0]) / STEP, c: (px[1] - p0[1]) / STEP, d: (py[1] - p0[1]) / STEP, px0: p0[0], py0: p0[1] };
+      plane.set(z, m);
+    }
+    return m;
+  };
+  return {
+    project,
+    unplane: (px, z) => {
+      const m = at(z);
+      const [dx, dy] = solve([m.a, m.b, m.c, m.d], px[0] - m.px0, px[1] - m.py0);
+      return [cx + dx, cy + dy];
+    },
+  };
+}
+
+/**
  * 画面上の縦位置 ys（px）を、互いに gap 以上離す。動かす距離の二乗和が最小になる配置（隣り合うものはまとめて中心を保つ）。
  * 戻り値は ys と同じ並び。
  */

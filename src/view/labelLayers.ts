@@ -7,6 +7,7 @@ import { registry } from '../layers';
 import type { ViewState } from '../store';
 import { DATA_BOX, labelAnchors, projectPoint, spreadLabels } from './camera';
 import type { PlaneBox, Size } from './camera';
+import type { Rect } from './layout';
 
 type P3 = [number, number, number];
 type LabelDatum = { id: LayerId; text: string };
@@ -21,8 +22,48 @@ const HALO_OFFSETS: readonly [number, number][] = [
 const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQuanYi Zen Hei", sans-serif';
 /** レイヤー名どうしの縦の最小間隔（px）。 */
 const LABEL_GAP = 20;
+/** レイヤー名の文字の大きさ（px）と、段の右脇の位置からの右へのずれ（px）。 */
+const LABEL_FONT_PX = 14;
+const LABEL_BASE_OFFSET_X = 10;
 
 const LABELS: LabelDatum[] = LAYER_IDS.map((id) => ({ id, text: registry[id].label }));
+
+/** 各段のレイヤー名の、右脇の位置（世界座標）と、重なるときに画面の縦へ押し広げる量（px）。 */
+function stackLabelPlacement(opts: {
+  tiers: { id: LayerId; z: number }[];
+  viewState: Pick<ViewState, 'target' | 'rotationX' | 'rotationOrbit' | 'zoom'>;
+  size: Size | null;
+  box?: PlaneBox;
+}) {
+  const { tiers, viewState, size, box = DATA_BOX } = opts;
+  const anchors = labelAnchors(viewState.rotationX, viewState.rotationOrbit, tiers.map((t) => t.z), box);
+  const anchorById = new Map(tiers.map((t, i) => [t.id, anchors[i]]));
+  // 平面が近づいて名前が重なるときは、画面上で縦に押し広げて読めるようにする。
+  const screenY = size ? anchors.map((a) => projectPoint(viewState, size, a)[1]) : anchors.map(() => 0);
+  const spread = spreadLabels(screenY, LABEL_GAP);
+  const offsetById = new Map(tiers.map((t, i) => [t.id, spread[i] - screenY[i]]));
+  return { anchors, anchorById, offsetById };
+}
+
+/**
+ * 各段のレイヤー名が占める長方形（画面の px）。区名の札を、レイヤー名に重ねずに置くために使う。
+ * 文字は 14 px。名前の左端は、段の右脇の位置から 10 px 右。
+ */
+export function stackLabelRects(opts: {
+  tiers: { id: LayerId; z: number }[];
+  viewState: Pick<ViewState, 'target' | 'rotationX' | 'rotationOrbit' | 'zoom'>;
+  size: Size;
+  box?: PlaneBox;
+}): Rect[] {
+  const { tiers, viewState, size } = opts;
+  const { anchors, offsetById } = stackLabelPlacement(opts);
+  return tiers.map((t, i) => {
+    const [x, y] = projectPoint(viewState, size, anchors[i]);
+    const left = x + LABEL_BASE_OFFSET_X - 1;
+    const cy = y + (offsetById.get(t.id) ?? 0);
+    return { left, right: left + registry[t.id].label.length * LABEL_FONT_PX + 4, top: cy - LABEL_FONT_PX / 2 - 2, bottom: cy + LABEL_FONT_PX / 2 + 2 };
+  });
+}
 
 /**
  * 各段の右脇に出すレイヤー名。`tiers` は表示中の段（id と高さ）。
@@ -37,12 +78,7 @@ export function stackLabelLayers(opts: {
   prefix?: string;
 }): Layer[] {
   const { tiers, viewState, size, box = DATA_BOX, prefix = 'stack' } = opts;
-  const anchors = labelAnchors(viewState.rotationX, viewState.rotationOrbit, tiers.map((t) => t.z), box);
-  const anchorById = new Map(tiers.map((t, i) => [t.id, anchors[i]]));
-  // 平面が近づいて名前が重なるときは、画面上で縦に押し広げて読めるようにする。
-  const screenY = size ? anchors.map((a) => projectPoint(viewState, size, a)[1]) : anchors.map(() => 0);
-  const spread = spreadLabels(screenY, LABEL_GAP);
-  const offsetById = new Map(tiers.map((t, i) => [t.id, spread[i] - screenY[i]]));
+  const { anchorById, offsetById } = stackLabelPlacement({ tiers, viewState, size, box });
   // 日本語の画数の多い字（「標」など）は、SDF 方式だと14px の大きさでつぶれて読めない。
   // そのため SDF は使わず、通常の文字テクスチャで描く。縁取りの代わりに、黒い同じ文字を8方向に1px ずらして
   // 後ろに重ねる（明るい標高の面や区境界線の上でも読めるようにする）。
@@ -50,7 +86,7 @@ export function stackLabelLayers(opts: {
   const labelProps = {
     coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     getText: (d: LabelDatum) => d.text,
-    getSize: 14,
+    getSize: LABEL_FONT_PX,
     sizeUnits: 'pixels',
     getTextAnchor: 'start',
     getAlignmentBaseline: 'center',
@@ -70,7 +106,7 @@ export function stackLabelLayers(opts: {
     ],
     getPixelOffset: [tiers.map((t) => `${t.id}:${(offsetById.get(t.id) ?? 0).toFixed(1)}`).join()],
   };
-  const labelBaseOffset = (d: LabelDatum): [number, number] => [10, offsetById.get(d.id) ?? 0];
+  const labelBaseOffset = (d: LabelDatum): [number, number] => [LABEL_BASE_OFFSET_X, offsetById.get(d.id) ?? 0];
   const haloData: HaloDatum[] = HALO_OFFSETS.flatMap(([dx, dy]) => labelData.map((l) => ({ ...l, dx, dy })));
   return [
     new TextLayer<HaloDatum>({

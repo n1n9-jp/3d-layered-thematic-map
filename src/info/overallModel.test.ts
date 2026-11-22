@@ -43,7 +43,7 @@ describe('wardSharesText / namesText', () => {
 describe('scenarioNote：想定の切り替えと数字の対応', () => {
   it('「大きいほう」は、洪水と高潮の足し合わせではないと書く', () => {
     const n = scenarioNote('max');
-    expect(n).toContain('足し合わせたものではなく');
+    expect(n).toContain('足し合わせではなく');
     expect(n).toContain('深いほう');
     expect(scenarioNote('river')).toContain('洪水だけ');
     expect(scenarioNote('tide')).toContain('高潮だけ');
