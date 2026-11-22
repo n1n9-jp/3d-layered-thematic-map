@@ -234,7 +234,7 @@
     "actions": [
       {
         "type": "click-closeup",
-        "dx": 80,
+        "dx": 30,
         "dy": 0
       }
     ],
@@ -483,21 +483,21 @@
   {
     "name": "57-probe-edogawa",
     "query": "probe=10706,2969",
-    "size": "1400x1000",
+    "size": "2000x1100",
     "actions": [],
     "criteria": "TODO"
   },
   {
     "name": "58-probe-shinjuku",
     "query": "probe=-4471,1066",
-    "size": "1400x1000",
+    "size": "2000x1100",
     "actions": [],
     "criteria": "TODO"
   },
   {
     "name": "59-probe-kitasenju",
     "query": "probe=4966,7735",
-    "size": "1400x1000",
+    "size": "2000x1100",
     "actions": [],
     "criteria": "TODO"
   },
