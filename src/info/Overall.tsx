@@ -108,6 +108,9 @@ export default function Overall() {
   }
   return (
     <div className="ov" data-testid="overall">
+      <p className="ex-line ov-intro" data-testid="overall-intro">
+        海面より低い土地に、どれだけの人（うち高齢者）が住み、浸水はどれだけ深く、水はいつ引き、避難できる場所はどこにあるか。標高・浸水・人口・公共交通・避難の5枚の層を重ねて読みます。
+      </p>
       <h2 className="ov-title">23区全体：浸水が想定される区域に住む人</h2>
       {exposure ? (
         <>

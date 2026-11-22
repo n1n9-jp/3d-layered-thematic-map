@@ -92,10 +92,10 @@ const shelters: LayerModule<ShelterData> = {
   subset: subsetShelters,
   summarize: summarizeShelters,
   legend: () => [
-    { color: SHELTER_COLORS.usable, label: '避難場所（洪水・高潮で使える）' },
-    { color: SHELTER_COLORS.other, label: '避難場所（地震・火事など。洪水・高潮用ではない）' },
+    { color: SHELTER_COLORS.usable, label: '洪水・高潮で使える避難場所' },
+    { color: SHELTER_COLORS.other, label: 'それ以外の避難場所' },
     { color: SHELTER_COLORS.hospital, label: '病院' },
-    { color: HATCH_COLOR, label: '網掛け：避難場所のデータ未公開の区' },
+    { color: HATCH_COLOR, label: '網掛け：データ未公開の区' },
   ],
   notes: (data) => {
     const notes = [

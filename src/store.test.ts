@@ -6,7 +6,7 @@ describe('initialStateFromQuery', () => {
   it('クエリなしは既定値', () => {
     const s = initialStateFromQuery('');
     expect(s.spacing).toBe(SPACING.default);
-    expect(s.order).toEqual(['elevation', 'population', 'roads', 'transit', 'facilities']);
+    expect(s.order).toEqual(['elevation', 'flood', 'population', 'transit', 'shelters']);
     expect(Object.values(s.visible).every(Boolean)).toBe(true);
     expect(s.solo).toBeNull();
     expect(s.probe).toBeNull();
@@ -17,20 +17,20 @@ describe('initialStateFromQuery', () => {
 
   it('各クエリで上書きできる', () => {
     const s = initialStateFromQuery(
-      '?spacing=0&order=facilities,roads&hidden=population,transit&solo=roads&probe=100,-200&rx=60&ro=-10&zoom=-3',
+      '?spacing=0&order=shelters,flood&hidden=population,transit&solo=flood&probe=100,-200&rx=60&ro=-10&zoom=-3',
     );
     expect(s.spacing).toBe(0);
-    expect(s.order).toEqual(['facilities', 'roads', 'elevation', 'population', 'transit']);
-    expect(s.visible).toMatchObject({ population: false, transit: false, roads: true });
-    expect(s.solo).toBe('roads');
+    expect(s.order).toEqual(['shelters', 'flood', 'elevation', 'population', 'transit']);
+    expect(s.visible).toMatchObject({ population: false, transit: false, flood: true });
+    expect(s.solo).toBe('flood');
     expect(s.probe).toEqual({ x: 100, y: -200 });
     expect(s.viewState).toMatchObject({ rotationX: 60, rotationOrbit: -10, zoom: -3 });
   });
 
   it('不正な値は無視する', () => {
-    const s = initialStateFromQuery('?spacing=abc&order=foo,roads,roads&hidden=bar&solo=zzz&probe=1&rx=');
+    const s = initialStateFromQuery('?spacing=abc&order=foo,flood,flood&hidden=bar&solo=zzz&probe=1&rx=');
     expect(s.spacing).toBe(SPACING.default);
-    expect(s.order[0]).toBe('roads');
+    expect(s.order[0]).toBe('flood');
     expect(new Set(s.order).size).toBe(5);
     expect(s.solo).toBeNull();
     expect(s.probe).toBeNull();
@@ -124,10 +124,10 @@ describe('store actions', () => {
   });
   it('moveLayer は指定位置へ動かす', () => {
     const { moveLayer } = useMapStore.getState();
-    moveLayer('facilities', 0);
-    expect(useMapStore.getState().order).toEqual(['facilities', 'elevation', 'population', 'roads', 'transit']);
-    moveLayer('facilities', 99);
-    expect(useMapStore.getState().order).toEqual(['elevation', 'population', 'roads', 'transit', 'facilities']);
+    moveLayer('shelters', 0);
+    expect(useMapStore.getState().order).toEqual(['shelters', 'elevation', 'flood', 'population', 'transit']);
+    moveLayer('shelters', 99);
+    expect(useMapStore.getState().order).toEqual(['elevation', 'flood', 'population', 'transit', 'shelters']);
   });
 });
 

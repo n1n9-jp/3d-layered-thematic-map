@@ -15,7 +15,7 @@ import {
 } from './alignment';
 import type { Tier } from './alignment';
 
-const IDS: LayerId[] = ['facilities', 'transit', 'roads', 'population', 'elevation'];
+const IDS: LayerId[] = ['shelters', 'transit', 'population', 'flood', 'elevation'];
 /** 上の段から、先頭の高さ y0、間隔 pitch で並ぶ段。 */
 const tiers = (y0: number, pitch: number, ids: LayerId[] = IDS): Tier[] => ids.map((id, i) => ({ id, y: y0 + i * pitch, goalY: y0 + i * pitch }));
 const REGION = { top: 2, bottom: 1000 };
@@ -105,7 +105,7 @@ describe('placeCharts（揃える）', () => {
     }
   });
   it('段の順番が変わっても、チャートは渡した順（上の段から）に並ぶ', () => {
-    const order: LayerId[] = ['elevation', 'facilities', 'transit', 'roads', 'population'];
+    const order: LayerId[] = ['elevation', 'shelters', 'transit', 'flood', 'population'];
     const p = placeCharts({ tiers: tiers(200, 180, order), region: REGION, prev: 'aligned' });
     expect(p.slots.map((s) => s.id)).toEqual(order);
     expect(p.slots.map((s) => s.center)).toEqual([200, 380, 560, 740, 920]);
@@ -195,7 +195,7 @@ describe('placeCharts（縦並びへの切り替え）', () => {
 describe('minPitch', () => {
   it('隣り合う段の、いちばん狭い間隔', () => {
     expect(minPitch(tiers(0, 100))).toBe(100);
-    expect(minPitch([{ id: 'roads', y: 0, goalY: 0 }, { id: 'transit', y: 0, goalY: 40 }, { id: 'facilities', y: 0, goalY: 200 }])).toBe(40);
-    expect(minPitch(tiers(0, 100, ['roads']))).toBe(Infinity);
+    expect(minPitch([{ id: 'flood', y: 0, goalY: 0 }, { id: 'transit', y: 0, goalY: 40 }, { id: 'shelters', y: 0, goalY: 200 }])).toBe(40);
+    expect(minPitch(tiers(0, 100, ['flood']))).toBe(Infinity);
   });
 });

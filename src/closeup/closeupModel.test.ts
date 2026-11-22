@@ -8,7 +8,7 @@ import type { Size } from '../view/camera';
 import { CLOSEUP_LAYOUT } from '../view/layout';
 import { PLANE_WIDTH, closeupBox, closeupHeights, closeupSpacing, closeupView, pickCloseupPoint, radiusLabel } from './closeupModel';
 
-const ORDER: LayerId[] = ['elevation', 'population', 'roads', 'transit', 'facilities'];
+const ORDER: LayerId[] = ['elevation', 'flood', 'population', 'transit', 'shelters'];
 const visible = Object.fromEntries(LAYER_IDS.map((id) => [id, true])) as Record<LayerId, boolean>;
 
 describe('closeupSpacing', () => {
@@ -27,7 +27,7 @@ describe('closeupSpacing', () => {
 
 describe('closeupHeights', () => {
   it('段の順番・表示・非表示・単独表示は、全体の地図と同じで、高さだけが比例して縮む', () => {
-    const state = { order: ORDER, visible: { ...visible, roads: false }, solo: null, spacing: 12000 };
+    const state = { order: ORDER, visible: { ...visible, flood: false }, solo: null, spacing: 12000 };
     const main = LAYER_IDS.map((id) => layerZ(state, id));
     const close = LAYER_IDS.map((id) => closeupHeights(state, 2000)[id]);
     close.forEach((z, i) => {
@@ -38,7 +38,7 @@ describe('closeupHeights', () => {
   });
   it('単独表示は、対象だけが高さ 0', () => {
     const h = closeupHeights({ order: ORDER, visible, solo: 'transit', spacing: 12000 }, 1000);
-    expect(h).toEqual({ elevation: null, population: null, roads: null, transit: 0, facilities: null });
+    expect(h).toEqual({ elevation: null, flood: null, population: null, transit: 0, shelters: null });
   });
 });
 
@@ -129,7 +129,7 @@ describe('pickCloseupPoint', () => {
     const vp = view(45);
     const [px, py] = vp.project([circle.x, circle.y, 3200]);
     const p = pickCloseupPoint(vp, px, py, planes, circle);
-    expect(p?.layerId).toBe('facilities');
+    expect(p?.layerId).toBe('shelters');
     expect(p?.x).toBeCloseTo(circle.x, 3);
     expect(p?.y).toBeCloseTo(circle.y, 3);
   });
@@ -168,7 +168,7 @@ describe('pickCloseupPoint', () => {
     const vp = view(45);
     expect(pickCloseupPoint(vp, 2, 2, planes, circle)).toBeNull();
     const [px, py] = vp.project([circle.x + circle.r * 1.2, circle.y, 3200]);
-    expect(pickCloseupPoint(vp, px, py, [{ id: 'facilities', z: 3200 }], circle)).toBeNull();
+    expect(pickCloseupPoint(vp, px, py, [{ id: 'shelters', z: 3200 }], circle)).toBeNull();
   });
   it('段がなければ何も指さない', () => {
     const vp = view(45);

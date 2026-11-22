@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_OPTIONS } from '../config';
 import elevation from './elevation';
 import type { ElevationLayerData } from './elevation';
 import { subsetGrid } from '../lib/gridSubset';
@@ -132,6 +133,7 @@ describe('elevation.subset', () => {
       opacity: 1,
       solo: false,
       boundary: null,
+      options: DEFAULT_OPTIONS,
     };
     const [layer] = elevation.render(sub, ctx);
     expect(propsOf(layer).bounds).toEqual([50, 100, 200, 250]);
@@ -144,7 +146,7 @@ describe('elevation.subset', () => {
 describe('elevation.summarize', () => {
   it('最小〜最大（小数1桁）と平均', () => {
     const sub = elevation.subset(full, 125, 175, 60); // 有効なセル 12, 21, 22, 23, 32
-    expect(elevation.summarize(sub)).toEqual([
+    expect(elevation.summarize(sub, DEFAULT_OPTIONS)).toEqual([
       { label: '標高', value: '12.0〜32.0', unit: 'm' },
       { label: '平均', value: 22, unit: 'm' },
     ]);
@@ -159,7 +161,7 @@ describe('elevation.summarize', () => {
       minY: 250,
       values: new Float32Array([2.14, -0.03, 31.449]),
     };
-    expect(elevation.summarize(g)).toEqual([
+    expect(elevation.summarize(g, DEFAULT_OPTIONS)).toEqual([
       { label: '標高', value: '0.0〜31.4', unit: 'm' },
       { label: '平均', value: 11.2, unit: 'm' },
     ]);
@@ -167,7 +169,7 @@ describe('elevation.summarize', () => {
 
   it('有効なセルが無ければ値なし', () => {
     const sub = elevation.subset(full, 5000, 5000, 100);
-    expect(elevation.summarize(sub)).toEqual([
+    expect(elevation.summarize(sub, DEFAULT_OPTIONS)).toEqual([
       { label: '標高', value: null },
       { label: '平均', value: null },
     ]);

@@ -28,11 +28,11 @@ describe('sectionHeights', () => {
     const hs = sectionHeights(useMapStore.getState());
     expect(new Set(hs.map((h) => h.id))).toEqual(new Set(LAYER_IDS));
     expect(hs.filter((h) => h.id === 'elevation').every((h) => h.plane === 0)).toBe(true);
-    expect(hs.filter((h) => h.id === 'facilities').every((h) => h.plane === 4 * SPACING)).toBe(true);
+    expect(hs.filter((h) => h.id === 'shelters').every((h) => h.plane === 4 * SPACING)).toBe(true);
   });
   it('非表示の段は含まない', () => {
-    useMapStore.getState().setVisible('roads', false);
-    expect(sectionHeights(useMapStore.getState()).some((h) => h.id === 'roads')).toBe(false);
+    useMapStore.getState().setVisible('flood', false);
+    expect(sectionHeights(useMapStore.getState()).some((h) => h.id === 'flood')).toBe(false);
   });
 });
 
@@ -51,12 +51,12 @@ describe('onSectionHover（全体の地図 → 右のチャート）', () => {
     expect(useMapStore.getState().sectionHover).toBeNull();
   });
   it('右のチャートにカーソルがあるあいだ（from = chart）は、地図のカーソルで消さない', () => {
-    useMapStore.getState().setSectionFocus({ id: 'roads', from: 'chart' });
+    useMapStore.getState().setSectionFocus({ id: 'flood', from: 'chart' });
     onSectionHover(info(500, 99999));
-    expect(useMapStore.getState().sectionFocus).toEqual({ id: 'roads', from: 'chart' });
+    expect(useMapStore.getState().sectionFocus).toEqual({ id: 'flood', from: 'chart' });
   });
   it('線を消すと、目立たせるのもやめる', () => {
-    useMapStore.getState().setSectionFocus({ id: 'roads', from: 'chart' });
+    useMapStore.getState().setSectionFocus({ id: 'flood', from: 'chart' });
     releaseSection();
     expect(useMapStore.getState().sectionFocus).toBeNull();
   });
@@ -65,15 +65,15 @@ describe('onSectionHover（全体の地図 → 右のチャート）', () => {
 describe('sectionFocus', () => {
   it('同じ値を入れても、値は同じオブジェクトのまま（無駄に描き直さない）', () => {
     const { setSectionFocus } = useMapStore.getState();
-    setSectionFocus({ id: 'roads', from: 'chart' });
+    setSectionFocus({ id: 'flood', from: 'chart' });
     const before = useMapStore.getState().sectionFocus;
-    setSectionFocus({ id: 'roads', from: 'chart' });
+    setSectionFocus({ id: 'flood', from: 'chart' });
     expect(useMapStore.getState().sectionFocus).toBe(before);
-    setSectionFocus({ id: 'roads', from: 'map' });
+    setSectionFocus({ id: 'flood', from: 'map' });
     expect(useMapStore.getState().sectionFocus?.from).toBe('map');
   });
   it('「地点」へ切り替えると消える', () => {
-    useMapStore.getState().setSectionFocus({ id: 'roads', from: 'chart' });
+    useMapStore.getState().setSectionFocus({ id: 'flood', from: 'chart' });
     useMapStore.getState().setMode('point');
     expect(useMapStore.getState().sectionFocus).toBeNull();
   });

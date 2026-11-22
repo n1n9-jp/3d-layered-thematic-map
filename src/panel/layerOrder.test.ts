@@ -3,11 +3,11 @@ import type { LayerId } from '../config';
 import { useMapStore } from '../store';
 import { displayOrder, dropIndex, stepTarget, storeIndexFromDisplay } from './layerOrder';
 
-const ORDER: LayerId[] = ['elevation', 'population', 'roads', 'transit', 'facilities'];
+const ORDER: LayerId[] = ['elevation', 'flood', 'population', 'transit', 'shelters'];
 
 describe('displayOrder', () => {
   it('最上段が先頭になり、元の配列は変えない', () => {
-    expect(displayOrder(ORDER)).toEqual(['facilities', 'transit', 'roads', 'population', 'elevation']);
+    expect(displayOrder(ORDER)).toEqual(['shelters', 'transit', 'population', 'flood', 'elevation']);
     expect(ORDER[0]).toBe('elevation');
   });
 });
@@ -22,11 +22,11 @@ describe('storeIndexFromDisplay', () => {
 
 describe('stepTarget', () => {
   it('上へは store の添字が1増える', () => {
-    expect(stepTarget(ORDER, 'roads', -1)).toBe(3);
-    expect(stepTarget(ORDER, 'roads', 1)).toBe(1);
+    expect(stepTarget(ORDER, 'flood', -1)).toBe(2);
+    expect(stepTarget(ORDER, 'flood', 1)).toBe(0);
   });
   it('端では動けない', () => {
-    expect(stepTarget(ORDER, 'facilities', -1)).toBeNull();
+    expect(stepTarget(ORDER, 'shelters', -1)).toBeNull();
     expect(stepTarget(ORDER, 'elevation', 1)).toBeNull();
   });
 });
@@ -47,18 +47,18 @@ describe('store との組み合わせ', () => {
     const to = stepTarget(useMapStore.getState().order, 'transit', -1);
     expect(to).not.toBeNull();
     useMapStore.getState().moveLayer('transit', to!);
-    expect(useMapStore.getState().order).toEqual(['elevation', 'population', 'roads', 'facilities', 'transit']);
+    expect(useMapStore.getState().order).toEqual(['elevation', 'flood', 'population', 'shelters', 'transit']);
   });
 
-  it('ドラッグ：最上段の施設を、表示上の3番目（道路の位置）へ', () => {
+  it('ドラッグ：最上段の避難を、表示上の3番目（人口の位置）へ', () => {
     useMapStore.setState({ order: [...ORDER] });
-    const shown = displayOrder(useMapStore.getState().order); // facilities, transit, roads, population, elevation
-    const rest = shown.filter((x) => x !== 'facilities');
-    const t = dropIndex([30, 60, 90, 120], 75); // 道路の中心より下、人口より上
+    const shown = displayOrder(useMapStore.getState().order); // shelters, transit, population, flood, elevation
+    const rest = shown.filter((x) => x !== 'shelters');
+    const t = dropIndex([30, 60, 90, 120], 75); // 人口の中心より下、浸水より上
     expect(t).toBe(2);
     expect(rest.length).toBe(4);
-    useMapStore.getState().moveLayer('facilities', storeIndexFromDisplay(5, t));
-    expect(displayOrder(useMapStore.getState().order)).toEqual(['transit', 'roads', 'facilities', 'population', 'elevation']);
+    useMapStore.getState().moveLayer('shelters', storeIndexFromDisplay(5, t));
+    expect(displayOrder(useMapStore.getState().order)).toEqual(['transit', 'population', 'shelters', 'flood', 'elevation']);
   });
 
   it('ドラッグ：最下段の標高を最上段へ', () => {

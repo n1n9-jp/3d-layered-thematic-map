@@ -5,7 +5,7 @@ import type { LayerStatus } from '../store';
 import type { ProbeValue } from '../types';
 import { areaCell, areaHeading, buildRows, columnMode, coordsText, pointCell, valueText, valueTitle } from './infoModel';
 
-const LABELS = { elevation: '標高', population: '人口', roads: '道路', transit: '公共交通', facilities: '施設' } as Record<LayerId, string>;
+const LABELS = { elevation: '標高', flood: '浸水', population: '人口', transit: '公共交通', shelters: '避難' } as Record<LayerId, string>;
 const ready = Object.fromEntries(LAYER_IDS.map((id) => [id, 'ready'])) as Record<LayerId, LayerStatus>;
 
 describe('columnMode', () => {
@@ -57,14 +57,14 @@ describe('areaCell', () => {
 });
 
 describe('buildRows', () => {
-  const ids: LayerId[] = ['facilities', 'transit', 'roads', 'population', 'elevation'];
+  const ids: LayerId[] = ['shelters', 'transit', 'population', 'flood', 'elevation'];
   const sample = (id: LayerId): ProbeValue[] => [{ label: id, value: 1 }];
   const summaries = Object.fromEntries(ids.map((id) => [id, [{ label: `${id}-sum`, value: 2 }]])) as Record<LayerId, ProbeValue[]>;
 
   it('ids の順（上の段から）に、レイヤー名・この地点・半径内の集計を並べる', () => {
     const rows = buildRows({ ids, labels: LABELS, status: ready, sample, summaries });
     expect(rows.map((r) => r.id)).toEqual(ids);
-    expect(rows.map((r) => r.label)).toEqual(['施設', '公共交通', '道路', '人口', '標高']);
+    expect(rows.map((r) => r.label)).toEqual(['避難', '公共交通', '人口', '浸水', '標高']);
     for (const r of rows) {
       expect(r.point.values[0].label).toBe(r.id);
       expect(r.area?.values[0].label).toBe(`${r.id}-sum`);
@@ -76,11 +76,11 @@ describe('buildRows', () => {
     expect(rows.every((r) => r.point.state === 'values')).toBe(true);
   });
   it('レイヤーごとに状態が違ってよい（片方が読み込み中でも、ほかは読める）', () => {
-    const status = { ...ready, roads: 'loading', transit: 'error' } as Record<LayerId, LayerStatus>;
-    const rows = buildRows({ ids, labels: LABELS, status, sample, summaries: { ...summaries, roads: undefined, transit: undefined } });
+    const status = { ...ready, flood: 'loading', transit: 'error' } as Record<LayerId, LayerStatus>;
+    const rows = buildRows({ ids, labels: LABELS, status, sample, summaries: { ...summaries, flood: undefined, transit: undefined } });
     const by = Object.fromEntries(rows.map((r) => [r.id, r]));
-    expect(by.roads.point.state).toBe('loading');
-    expect(by.roads.area?.state).toBe('loading');
+    expect(by.flood.point.state).toBe('loading');
+    expect(by.flood.area?.state).toBe('loading');
     expect(by.transit.point.state).toBe('error');
     expect(by.transit.area?.state).toBe('error');
     expect(by.elevation.point.state).toBe('values');
@@ -96,14 +96,14 @@ describe('buildRows', () => {
       labels: LABELS,
       status: ready,
       sample: (id) => {
-        if (id === 'roads') throw new Error('boom');
+        if (id === 'flood') throw new Error('boom');
         return sample(id);
       },
       summaries: null,
       onError: (id) => errs.push(id),
     });
-    expect(errs).toEqual(['roads']);
-    expect(rows.find((r) => r.id === 'roads')?.point.state).toBe('none');
+    expect(errs).toEqual(['flood']);
+    expect(rows.find((r) => r.id === 'flood')?.point.state).toBe('none');
     expect(rows.find((r) => r.id === 'elevation')?.point.state).toBe('values');
   });
 });

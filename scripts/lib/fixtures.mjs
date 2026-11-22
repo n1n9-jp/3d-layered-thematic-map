@@ -2,6 +2,7 @@
 // 乱数は種を固定した mulberry32 のみを使うので、何度実行しても同じ出力になる。
 import { EXTENT } from './projection.mjs';
 import { ELEVATION_SPEC } from './validate.mjs';
+import { generateFloodFixture } from './flood-fixture.mjs';
 import { createWards } from './wards.mjs';
 
 export const CITY_RADIUS = 13000;
@@ -350,13 +351,16 @@ function makeFacilities(rand) {
 
 /**
  * 全仮データをメモリ上に生成する。
- * @returns {{ geojson: Record<string, object>, shelterSummary: object, elevation: { meta: object, bin: Buffer } }}
+ * @returns {{ geojson: Record<string, object>, shelterSummary: object, elevation: { meta: object, bin: Buffer }, flood: { meta: object, bins: Record<string, Buffer> } }}
  */
 export function generateFixtures() {
   const rand = mulberry32(SEED);
   const boundary = makeBoundary(rand);
   const population = addElderly(makePopulation(rand), mulberry32(SEED + 1));
-  const elevation = makeElevation(rand, createWards(boundary.features));
+  const wards = createWards(boundary.features);
+  const elevation = makeElevation(rand, wards);
+  // 浸水想定は、仮データの標高と区から、決定的に作る（乱数は使わない。上の乱数の並びを変えない）
+  const flood = generateFloodFixture(elevation.bin, wards);
   const roads = makeRoads(rand);
   const { rail, stations } = makeRail(rand);
   const facilities = makeFacilities(rand);
@@ -373,5 +377,6 @@ export function generateFixtures() {
     },
     shelterSummary: shelters.summary,
     elevation,
+    flood,
   };
 }

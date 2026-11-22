@@ -122,3 +122,12 @@
   padding: 0;
   list-style: none;
 }
+
+/* データごとの利用上の注意（データの前提、読み方）。 */
+.cr-notes {
+  margin: 3px 0 0;
+  padding-left: 1.2em;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #c9c19a;
+}

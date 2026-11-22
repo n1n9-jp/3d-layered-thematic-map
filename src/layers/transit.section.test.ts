@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_OPTIONS } from '../config';
 import type { RailCollection, SectionLine, SectionMarks, StationCollection } from '../types';
 import { lineLength, reverseLine } from '../lib/section';
 import transit from './transit';
@@ -47,7 +48,7 @@ describe('sectionTransit', () => {
   it('2つのトラックを返す（路線との交差、近くの駅）', () => {
     expect(rails).toMatchObject({ kind: 'marks', label: '鉄道との交差' });
     expect(stations).toMatchObject({ kind: 'marks', label: '近くの駅' });
-    expect(transit.section(data, line)).toHaveLength(2);
+    expect(transit.section(data, line, DEFAULT_OPTIONS)).toHaveLength(2);
   });
   it('路線との交点：d、地点、category は rail、name は路線名。距離の順', () => {
     expect(rails.marks.map((k) => [k.d, k.x, k.y, k.category, k.name, k.offset])).toEqual([
@@ -114,8 +115,8 @@ describe('sectionTransit', () => {
     }
   });
   it('トラックを返すレイヤー：色は凡例（地図の配色）と同じ', () => {
-    const tracks = transit.section(data, line) as SectionMarks[];
-    expect(tracks[0].marks[0].color).toEqual(transit.legend[0].color);
-    expect(tracks[1].marks[0].color).toEqual(transit.legend[1].color);
+    const tracks = transit.section(data, line, DEFAULT_OPTIONS) as SectionMarks[];
+    expect(tracks[0].marks[0].color).toEqual(transit.legend(DEFAULT_OPTIONS)[0].color);
+    expect(tracks[1].marks[0].color).toEqual(transit.legend(DEFAULT_OPTIONS)[1].color);
   });
 });

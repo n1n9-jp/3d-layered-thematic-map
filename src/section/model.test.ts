@@ -260,28 +260,37 @@ describe('要約', () => {
     expect(summaryLine('elevation', [series([{ d: 0, value: null }])])).toBe('標高のデータなし');
     expect(summaryLine('elevation', [series([])])).toBe('標高のデータなし');
   });
-  it('人口密度：最大（人/km²）', () => {
-    const s = series([{ d: 0, value: 50362.4 }, { d: 9, value: 800 }]);
+  it('人口密度：最大（人/km²）。65歳以上の表示では、その系列の名前で出る', () => {
+    const pop = (label: string, points: { d: number; value: number | null }[]): SectionSeries => ({ ...series(points), label, unit: '人/km²' });
+    const s = pop('人口密度', [{ d: 0, value: 50362.4 }, { d: 9, value: 800 }]);
     expect(summaryLine('population', [s])).toBe('人口密度の最大 50,362 人/km²');
-    expect(summaryLine('population', [series([])])).toBe('人口密度のデータなし');
+    expect(summaryLine('population', [pop('人口密度', [])])).toBe('人口密度のデータなし');
+    expect(summaryLine('population', [pop('65歳以上の人口密度', [{ d: 0, value: 6100 }, { d: 9, value: null }])])).toBe('65歳以上の人口密度の最大 6,100 人/km²');
+    expect(summaryLine('population', [pop('65歳以上の人口密度', [{ d: 0, value: null }])])).toBe('65歳以上の人口密度のデータなし');
   });
-  it('道路：交差の数と種別の内訳（高速・国道・都道府県道・一般道の順）', () => {
-    const m = [
-      mark({ category: 'other', categoryLabel: '一般道' }),
-      mark({ category: 'motorway', categoryLabel: '高速道路' }),
-      mark({ category: 'prefectural', categoryLabel: '都道府県道' }),
-      mark({ category: 'motorway', categoryLabel: '高速道路' }),
-      mark({ category: 'national', categoryLabel: '国道' }),
+  it('浸水：断面での最大の段（段の名前で読む）。浸水がなければ「なし」、値がなければデータなし', () => {
+    const ranks = [
+      { value: 1, short: '<0.5', label: '0.5m 未満' },
+      { value: 2, short: '0.5-3', label: '0.5〜3m' },
+      { value: 3, short: '3-5', label: '3〜5m' },
     ];
-    expect(summaryLine('roads', [mt(m)])).toBe('道路との交差 5（高速道路 2・国道 1・都道府県道 1・一般道 1）');
-    expect(summaryLine('roads', [mt([])])).toBe('道路との交差 0');
+    const fl = (points: { d: number; value: number | null }[]): SectionSeries => ({ ...series(points, [0, 3]), label: '浸水の深さ', unit: '', ranks });
+    expect(summaryLine('flood', [fl([{ d: 0, value: 0 }, { d: 10, value: 2 }, { d: 20, value: 3 }, { d: 30, value: null }])])).toBe('浸水の深さ 最大 3〜5m');
+    expect(summaryLine('flood', [fl([{ d: 0, value: 0 }, { d: 10, value: 0 }])])).toBe('浸水の深さ 最大 なし');
+    expect(summaryLine('flood', [fl([{ d: 0, value: null }])])).toBe('浸水想定のデータなし');
+    expect(summaryLine('flood', [fl([])])).toBe('浸水想定のデータなし');
   });
-  it('公共交通：路線との交差の数と駅の数。学校と病院の数', () => {
+  it('公共交通：路線との交差の数と駅の数。避難：洪水・高潮用、それ以外の避難場所、病院の数', () => {
     const rail = mt([mark({ category: 'rail' }), mark({ category: 'rail' })]);
     const st = mt([mark({ category: 'station' })]);
     expect(summaryLine('transit', [rail, st])).toBe('路線との交差 2・近くの駅 1');
-    const fac = mt([mark({ category: 'school' }), mark({ category: 'school' }), mark({ category: 'hospital' })]);
-    expect(summaryLine('facilities', [fac])).toBe('学校 2・病院 1');
-    expect(summaryLine('facilities', [mt([])])).toBe('学校 0・病院 0');
+    const sh = mt([
+      mark({ category: 'shelter-usable' }),
+      mark({ category: 'shelter-other' }),
+      mark({ category: 'shelter-usable' }),
+      mark({ category: 'hospital' }),
+    ]);
+    expect(summaryLine('shelters', [sh])).toBe('避難場所 洪水・高潮用 2・それ以外 1・病院 1');
+    expect(summaryLine('shelters', [mt([])])).toBe('避難場所 洪水・高潮用 0・それ以外 0・病院 0');
   });
 });

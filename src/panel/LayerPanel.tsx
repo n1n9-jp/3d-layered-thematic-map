@@ -201,6 +201,16 @@ export default function LayerPanel() {
                 </label>
                 <button
                   type="button"
+                  className="lp-solo-btn"
+                  aria-pressed={isSolo}
+                  aria-label={isSolo ? '単独表示中' : '単独表示'}
+                  title="このレイヤーだけを、真上から見た2D表示にする"
+                  onClick={() => setSolo(isSolo ? null : id)}
+                >
+                  {isSolo ? '単独中' : '単独'}
+                </button>
+                <button
+                  type="button"
                   className="lp-icon"
                   data-focus-key={`${id}:up`}
                   aria-label={`${mod.label}を1段上へ`}
@@ -221,21 +231,13 @@ export default function LayerPanel() {
                 </button>
               </div>
 
-              <div className="lp-line lp-sub">
-                <button
-                  type="button"
-                  className="lp-solo-btn"
-                  aria-pressed={isSolo}
-                  onClick={() => setSolo(isSolo ? null : id)}
-                >
-                  {isSolo ? '単独表示中' : '単独表示'}
-                </button>
-                {STATUS_TEXT[st] && (
+              {STATUS_TEXT[st] && (
+                <div className="lp-line lp-sub">
                   <span className={`lp-status lp-status-${st}`} role={st === 'error' ? 'alert' : 'status'}>
                     {STATUS_TEXT[st]}
                   </span>
-                )}
-              </div>
+                </div>
+              )}
 
               {mod.controls?.map((c) => (
                 <div key={c.key} className="lp-line lp-sub lp-opt" role="group" aria-label={`${mod.label}の${c.label}`} data-testid={`opt-${c.key}`}>

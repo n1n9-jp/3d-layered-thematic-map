@@ -88,7 +88,7 @@ describe('pickProbePoint', () => {
       expect(h.x >= EXTENT.minX && h.x <= EXTENT.maxX && h.y >= EXTENT.minY && h.y <= EXTENT.maxY).toBe(true);
     }
     const hit = pickProbePoint(vp, px, py, ps)!;
-    expect(hit.layerId).toBe('facilities');
+    expect(hit.layerId).toBe('shelters');
     expect(hit.x).toBeCloseTo(0, 3);
     expect(hit.y).toBeCloseTo(0, 3);
     // 最上段を外すと、次の段（transit）の交点が選ばれる
@@ -96,7 +96,7 @@ describe('pickProbePoint', () => {
     expect(second.layerId).toBe('transit');
     expect(Math.hypot(second.x, second.y)).toBeGreaterThan(500);
     // 間隔0（全段が同じ高さ）では先頭の段が採用される
-    expect(pickProbePoint(vp, px, py, planes(0))!.layerId).toBe('facilities');
+    expect(pickProbePoint(vp, px, py, planes(0))!.layerId).toBe('shelters');
   });
 
   it('上の段が範囲外なら下の段へ落ちる', () => {
@@ -110,7 +110,7 @@ describe('pickProbePoint', () => {
     expect(upper.x < EXTENT.minX || upper.y < EXTENT.minY || upper.x > EXTENT.maxX || upper.y > EXTENT.maxY).toBe(true);
     const hit = pickProbePoint(vp, px, py, ps)!;
     expect(hit).not.toBeNull();
-    expect(hit.layerId).not.toBe('facilities');
+    expect(hit.layerId).not.toBe('shelters');
   });
 
   it('どの平面の範囲にも入らなければ null', () => {
@@ -122,13 +122,13 @@ describe('pickProbePoint', () => {
 });
 
 describe('pickProbePoint（区の内側を優先する）', () => {
-  // 視線の交点は段ごとに水平にずれる。上の段 (facilities) と最下段 (elevation) の交点を x の大小で区別する。
+  // 視線の交点は段ごとに水平にずれる。上の段 (shelters) と最下段 (elevation) の交点を x の大小で区別する。
   const vp = makeViewport();
   const ps = planes(5000);
   const [px, py] = vp.project([0, 0, ps[ps.length - 1].z]); // 最下段の (0, 0) を通る画素
   const ray = rayFromPixel(vp, px, py);
   const hitOf = (id: string) => intersectHorizontalPlane(ray, ps.find((p) => p.id === id)!.z)!;
-  const top = hitOf('facilities');
+  const top = hitOf('shelters');
   const bottom = hitOf('elevation');
 
   const near = (a: { x: number; y: number }) => (x: number, y: number) => Math.hypot(x - a.x, y - a.y) < 1;
@@ -149,21 +149,21 @@ describe('pickProbePoint（区の内側を優先する）', () => {
   });
 
   it('途中の段だけが区の中なら、その段を採用する', () => {
-    const mid = hitOf('roads');
+    const mid = hitOf('population');
     const hit = pickProbePoint(vp, px, py, ps, near(mid))!;
-    expect(hit.layerId).toBe('roads');
+    expect(hit.layerId).toBe('population');
     expect(hit.x).toBeCloseTo(mid.x, 6);
   });
 
   it('両方が区の中なら、上の段を採用する', () => {
     const hit = pickProbePoint(vp, px, py, ps, () => true)!;
-    expect(hit.layerId).toBe('facilities');
+    expect(hit.layerId).toBe('shelters');
     expect(hit.x).toBeCloseTo(top.x, 6);
   });
 
   it('どの段も区の外なら、描画範囲に入った最初（上）の段を採用する', () => {
     const hit = pickProbePoint(vp, px, py, ps, () => false)!;
-    expect(hit.layerId).toBe('facilities');
+    expect(hit.layerId).toBe('shelters');
     // 上の段が範囲外の画素では、範囲に入った上から最初の段になる
     const [qx, qy] = vp.project([EXTENT.minX + 500, EXTENT.minY + 500, 0]);
     const expected = pickProbePoint(vp, qx, qy, ps)!;
@@ -171,8 +171,8 @@ describe('pickProbePoint（区の内側を優先する）', () => {
   });
 
   it('判定関数がない（区境界が未読み込み）ときは従来どおり', () => {
-    expect(pickProbePoint(vp, px, py, ps, null)!.layerId).toBe('facilities');
-    expect(pickProbePoint(vp, px, py, ps, undefined)!.layerId).toBe('facilities');
+    expect(pickProbePoint(vp, px, py, ps, null)!.layerId).toBe('shelters');
+    expect(pickProbePoint(vp, px, py, ps, undefined)!.layerId).toBe('shelters');
   });
 
   it('区の中の段がなく、どれも範囲外なら null', () => {

@@ -1,25 +1,27 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_OPTIONS } from '../config';
+import type { LayerOptions } from '../config';
 import population, { buildPopulationData } from './population';
 import type { PopulationData } from './population';
-import { densityColor } from './population/classes';
+import { densityColor, elderlyColor } from './population/classes';
 import { lineLength, pointAt, reverseLine } from '../lib/section';
 import type { PopulationCollection, Position, SectionLine, SectionSeries } from '../types';
 
-/** 多角形（4隅）のメッシュ。人口 pop、密度 pop × 100。 */
-const quad = (ring: Position[], pop: number, code = `${ring[0]}`) => ({
+/** 多角形（4隅）のメッシュ。人口 pop、密度 pop × 100。65歳以上は elderly（既定は人口の 3 割）。 */
+const quad = (ring: Position[], pop: number, code = `${ring[0]}`, elderly: number | null = Math.round(pop * 0.3)) => ({
   type: 'Feature' as const,
   geometry: { type: 'Polygon' as const, coordinates: [[...ring, ring[0]]] },
-  properties: { meshCode: code, population: pop, density: pop * 100 },
+  properties: { meshCode: code, population: pop, density: pop * 100, elderly, elderlyMerged: false },
 });
 /** 100 m 四方のメッシュ。(x0, y0) が南西の角。 */
-const mesh = (x0: number, y0: number, pop: number) =>
-  quad([[x0, y0], [x0 + 100, y0], [x0 + 100, y0 + 100], [x0, y0 + 100]], pop);
+const mesh = (x0: number, y0: number, pop: number, elderly?: number | null) =>
+  quad([[x0, y0], [x0 + 100, y0], [x0 + 100, y0 + 100], [x0, y0 + 100]], pop, undefined, elderly);
 
 const build = (...features: ReturnType<typeof mesh>[]): PopulationData =>
   buildPopulationData({ type: 'FeatureCollection', features } as PopulationCollection);
 const L = (ax: number, ay: number, bx: number, by: number): SectionLine => ({ ax, ay, bx, by });
-const series = (data: PopulationData, line: SectionLine): SectionSeries => {
-  const tracks = population.section(data, line);
+const series = (data: PopulationData, line: SectionLine, options: LayerOptions = DEFAULT_OPTIONS): SectionSeries => {
+  const tracks = population.section(data, line, options);
   expect(tracks).toHaveLength(1);
   expect(tracks[0].kind).toBe('series');
   return tracks[0] as SectionSeries;
@@ -138,6 +140,23 @@ describe('population.section', () => {
     expect(s).toMatchObject({ label: '人口密度', unit: '人/km²', domain: [0, 40000] });
     expect(s.color(12000)).toEqual(densityColor(12000));
     expect(s.color(0)).toEqual(densityColor(0));
+  });
+  it('65歳以上の表示：65歳以上人口 ÷ 面積の階段。秘匿されたメッシュは null。配色と縦軸の範囲が総人口と別', () => {
+    // 100 m 四方 = 0.01 km²。65歳以上 30・60 人 → 3000・6000 人/km²。3つ目は秘匿（null）
+    const d = build(mesh(0, 0, 100), mesh(100, 0, 200), mesh(200, 0, 300, null));
+    const s = series(d, L(0, 50, 300, 50), { ...DEFAULT_OPTIONS, populationView: 'elderly' });
+    expect(s.points).toEqual([
+      { d: 0, value: 3000 },
+      { d: 100, value: 3000 },
+      { d: 100, value: 6000 },
+      { d: 200, value: 6000 },
+      { d: 200, value: null },
+      { d: 300, value: null },
+    ]);
+    expect(s).toMatchObject({ label: '65歳以上の人口密度', unit: '人/km²', domain: [0, 12000] });
+    expect(s.color(3000)).toEqual(elderlyColor(3000));
+    // 総人口の表示では、同じメッシュ（秘匿でも総人口はある）は値を持つ
+    expect(series(d, L(200, 50, 300, 50)).points[0].value).toBe(30000);
   });
   it('subset の結果では、円の外を null にする（sample と同じ）', () => {
     const sub = population.subset(row, 150, 50, 60);

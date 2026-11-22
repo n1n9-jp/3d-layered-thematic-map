@@ -7,7 +7,7 @@ import type { StackState } from './stack';
 function make(over: Partial<StackState> = {}): StackState {
   return {
     order: [...LAYER_IDS],
-    visible: { elevation: true, population: true, roads: true, transit: true, facilities: true },
+    visible: { elevation: true, flood: true, population: true, transit: true, shelters: true },
     solo: null,
     spacing: 5000,
     ...over,
@@ -21,8 +21,8 @@ describe('layerZ', () => {
   });
 
   it('order に従う', () => {
-    const s = make({ order: ['facilities', 'elevation', 'population', 'roads', 'transit'] });
-    expect(layerZ(s, 'facilities')).toBe(0);
+    const s = make({ order: ['shelters', 'elevation', 'flood', 'population', 'transit'] });
+    expect(layerZ(s, 'shelters')).toBe(0);
     expect(layerZ(s, 'elevation')).toBe(5000);
     expect(layerZ(s, 'transit')).toBe(20000);
   });
@@ -30,8 +30,8 @@ describe('layerZ', () => {
   it('非表示のレイヤーは null で、段を詰める', () => {
     const s = make({ visible: { ...make().visible, population: false } });
     expect(layerZ(s, 'population')).toBeNull();
-    expect(layerZ(s, 'roads')).toBe(5000);
-    expect(layerZ(s, 'facilities')).toBe(15000);
+    expect(layerZ(s, 'transit')).toBe(10000);
+    expect(layerZ(s, 'shelters')).toBe(15000);
   });
 
   it('spacing 0 ですべて 0', () => {
@@ -40,14 +40,14 @@ describe('layerZ', () => {
   });
 
   it('単独表示は対象が 0、ほかは null', () => {
-    const s = make({ solo: 'roads' });
+    const s = make({ solo: 'flood' });
     const got = Object.fromEntries(LAYER_IDS.map((id) => [id, layerZ(s, id)])) as Record<LayerId, number | null>;
-    expect(got).toEqual({ elevation: null, population: null, roads: 0, transit: null, facilities: null });
+    expect(got).toEqual({ elevation: null, flood: 0, population: null, transit: null, shelters: null });
   });
 
   it('単独表示は visible に関係なく対象を表示する', () => {
-    const s = make({ solo: 'roads', visible: { ...make().visible, roads: false } });
-    expect(layerZ(s, 'roads')).toBe(0);
+    const s = make({ solo: 'flood', visible: { ...make().visible, flood: false } });
+    expect(layerZ(s, 'flood')).toBe(0);
   });
 });
 

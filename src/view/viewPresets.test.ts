@@ -91,7 +91,7 @@ describe('selectedPreset', () => {
     expect(selectedPreset({ viewState: vs, autoFit: false, solo: null })).toBeNull();
   });
   it('単独表示のあいだは選択中にならない', () => {
-    expect(selectedPreset({ viewState: vs, autoFit: true, solo: 'roads' })).toBeNull();
+    expect(selectedPreset({ viewState: vs, autoFit: true, solo: 'flood' })).toBeNull();
   });
 });
 

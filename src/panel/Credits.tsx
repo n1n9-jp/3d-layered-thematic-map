@@ -15,6 +15,8 @@ interface Entry {
   sources: Source[];
   /** データの基準時点。 */
   asOf: string;
+  /** 利用上の注意（データの前提、読み方）。出典の詳細に、データごとに添える。 */
+  notes?: string[];
 }
 
 const ENTRIES: Entry[] = [
@@ -41,7 +43,39 @@ const ENTRIES: Entry[] = [
     asOf: '航空レーザ測量による5mメッシュ（DEM5A）',
   },
   {
-    name: '人口',
+    name: '浸水想定（洪水）',
+    sources: [
+      {
+        before: '「国土数値情報（洪水浸水想定区域データ）」（国土交通省）（',
+        url: 'https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A31b-2025.html',
+        after: '）を加工して作成',
+      },
+    ],
+    asOf: '2025年度版（想定最大規模）',
+    notes: [
+      '想定最大規模の洪水の想定です。洪水予報河川・水位周知河川と、その他の河川を重ねた、セルごとの最大です。',
+      '支川の氾濫・高潮・内水（下水・排水が追いつかない浸水）は含みません。区域の外が安全とは限りません。',
+      '浸水継続時間は、浸水深 0.5m 以上が続く時間です。',
+    ],
+  },
+  {
+    name: '浸水想定（高潮）',
+    sources: [
+      {
+        before: '「東京都港湾局『高潮浸水想定区域図』（令和6年12月改定）（',
+        url: 'https://www.kouwan.metro.tokyo.lg.jp/jishin_kouwankyoku_oshirase/takashio/shinsuisoutei',
+        after: '）を加工して作成」',
+      },
+    ],
+    asOf: '令和6年12月改定（想定最大規模。堤防等の決壊を見込む）',
+    notes: [
+      '10m セルの浸水深の、50m セルの中の最大です。河川の氾濫・内水は含みません。',
+      '浸水継続時間は、計算期間が約1週間なので、1週間以上は区別できません（「1週間以上」に上限はありません）。',
+      '洪水と高潮は別々の災害の想定で、足し合わせていません。',
+    ],
+  },
+  {
+    name: '人口（65歳以上人口を含む）',
     sources: [
       {
         before: '総務省統計局「令和2年国勢調査 地域メッシュ統計（250mメッシュ、世界測地系）」政府統計の総合窓口(e-Stat)（',
@@ -50,22 +84,6 @@ const ENTRIES: Entry[] = [
       },
     ],
     asOf: '2020年10月1日（国勢調査）',
-  },
-  {
-    name: '道路',
-    sources: [
-      {
-        before: '「国土数値情報（道路データ）」（国土交通省）（',
-        url: 'https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N13-2024.html',
-        after: '）を加工して作成。',
-      },
-      {
-        before: '高速道路の路線名は「国土数値情報（高速道路時系列データ）」（国土交通省）（',
-        url: 'https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N06-2025.html',
-        after: '）を加工して作成',
-      },
-    ],
-    asOf: '2024年9月',
   },
   {
     name: '鉄道と駅',
@@ -79,15 +97,20 @@ const ENTRIES: Entry[] = [
     asOf: '2025年12月31日',
   },
   {
-    name: '学校',
+    name: '避難場所',
     sources: [
       {
-        before: '「国土数値情報（学校データ）」（国土交通省）（',
-        url: 'https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P29-2023.html',
-        after: '）を加工して作成',
+        before: '「『指定緊急避難場所データ』（国土地理院）（',
+        url: 'https://www.gsi.go.jp/bousaichiri/hinanbasho.html',
+        after: '）を加工して作成」',
       },
     ],
-    asOf: '2023年度',
+    asOf: '区ごとに異なる（最終更新日は 2025年1月23日〜2026年10月19日）。データの取得は 2026年11月',
+    notes: [
+      '指定緊急避難場所は、災害の種別ごとに指定されています（洪水で使える場所が、高潮や地震でも使えるとは限りません）。',
+      'データが最新でない場合や、未掲載の場合があります。収容人数は含みません。',
+      '墨田区・江東区・渋谷区・葛飾区は、このデータに指定緊急避難場所を公開していません（0 件は「ない」ではなく「データがない」）。江戸川区・足立区は、洪水・高潮で使える場所の指定が 0 件です。',
+    ],
   },
   {
     name: '病院',
@@ -106,9 +129,10 @@ const TERMS = [
   { label: '国土数値情報の利用規約', url: 'https://nlftp.mlit.go.jp/ksj/other/agreement.html' },
   { label: '政府統計の総合窓口(e-Stat)の利用規約', url: 'https://www.e-stat.go.jp/terms-of-use' },
   { label: '国土地理院コンテンツ利用規約', url: 'https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html' },
+  { label: '東京都港湾局の高潮浸水想定区域図：クリエイティブ・コモンズ表示 4.0 国際（CC BY 4.0）', url: 'https://creativecommons.org/licenses/by/4.0/deed.ja' },
 ];
 
-const SUMMARY = '出典：国土数値情報（国土交通省）、国土地理院、e-Stat（総務省統計局）のデータを加工して作成';
+const SUMMARY = '出典：国土数値情報（国土交通省）、国土地理院、e-Stat（総務省統計局）、東京都港湾局のデータを加工して作成';
 
 const External = ({ href, children }: { href: string; children: string }) => (
   <a href={href} target="_blank" rel="noopener noreferrer">
@@ -172,6 +196,13 @@ export default function Credits({ style, className, opens = 'up' }: CreditsProps
               ))}
             </p>
             <div className="cr-asof">基準時点：{e.asOf}</div>
+            {e.notes && (
+              <ul className="cr-notes" data-testid="credits-notes">
+                {e.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

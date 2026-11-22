@@ -11,25 +11,25 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { LAYER_IDS } from '../config';
-import type { LayerId } from '../config';
+import { DEFAULT_OPTIONS, LAYER_IDS } from '../config';
+import type { FloodScenario, FloodView, LayerId } from '../config';
 import { lineLength, pointAt, projectOnLine, reverseLine } from '../lib/section';
 import type {
   ElevationData,
   FacilityCollection,
   RailCollection,
-  RoadCollection,
   SectionLine,
   SectionMarks,
   SectionSeries,
   SectionTrack,
+  ShelterCollection,
   StationCollection,
 } from '../types';
 import { roundTo1 } from './elevation';
 import { registry } from './index';
 
 const DIR = 'public/data/';
-const HAS_DATA = existsSync(`${DIR}elevation.bin`) && existsSync(`${DIR}roads.geojson`);
+const HAS_DATA = ['elevation.bin', 'flood.json', 'flood-river.bin', 'flood-tide.bin', 'flood-river-duration.bin', 'flood-tide-duration.bin', 'shelters.geojson', 'shelters.json', 'facilities.geojson'].every((f) => existsSync(`${DIR}${f}`));
 
 /** 東西の線：世田谷区の西から、江戸川区の東へ（約 29 km）。 */
 const EAST_WEST: SectionLine = { ax: -15000, ay: -2000, bx: 14000, by: -2000 };
@@ -110,17 +110,17 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
       first[name] = {} as Record<LayerId, number>;
       warm[name] = {} as Record<LayerId, number>;
       for (const id of LAYER_IDS) {
-        const [out, t] = time(() => registry[id].section(data[id], line));
+        const [out, t] = time(() => registry[id].section(data[id], line, DEFAULT_OPTIONS));
         results[name][id] = out;
         first[name][id] = t;
       }
       // 全レイヤーを続けて呼んだ合計を15回測る（端点のドラッグ中の呼び出しに近い）
-      const per: Record<LayerId, number[]> = { elevation: [], population: [], roads: [], transit: [], facilities: [] };
+      const per: Record<LayerId, number[]> = { elevation: [], flood: [], population: [], transit: [], shelters: [] };
       const totals: number[] = [];
       for (let i = 0; i < 15; i++) {
         let total = 0;
         for (const id of LAYER_IDS) {
-          const [, t] = time(() => registry[id].section(data[id], line));
+          const [, t] = time(() => registry[id].section(data[id], line, DEFAULT_OPTIONS));
           per[id].push(t);
           total += t;
         }
@@ -155,13 +155,14 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
       const pop = series(r.population);
       const dens = pop.points.map((p) => p.value).filter((v): v is number => v !== null);
       out.push(`  人口密度：点 ${pop.points.length}、最大 ${Math.max(...dens).toLocaleString('en-US')} 人/km²、値なしの区間 ${pop.points.filter((p, i) => p.value === null && i % 2 === 0).length} 個`);
-      const byClass: Record<string, number> = {};
-      for (const k of marksOf(r.roads)) byClass[k.category] = (byClass[k.category] ?? 0) + 1;
-      out.push(`  道路との交差：計 ${marksOf(r.roads).length}（${Object.entries(byClass).map(([c, n]) => `${c} ${n}`).join('、')}）`);
+      const fl = series(r.flood);
+      const flooded = fl.points.filter((p, i) => i % 2 === 0 && (p.value ?? 0) > 0).length;
+      out.push(`  浸水の深さ：点 ${fl.points.length}、浸水する段 ${flooded} 個、最大の段 ${Math.max(0, ...fl.points.map((p) => p.value ?? 0))}`);
       out.push(`  路線との交差：${marksOf(r.transit, 0).length}`);
       out.push(`  近くの駅：${marksOf(r.transit, 1).length}`);
-      const sch = marksOf(r.facilities).filter((k) => k.category === 'school').length;
-      out.push(`  近くの施設：${marksOf(r.facilities).length}（学校 ${sch}、病院 ${marksOf(r.facilities).length - sch}）`);
+      const sh = r.shelters[0] as SectionMarks;
+      const count = (c: string) => sh.marks.filter((k) => k.category === c).length;
+      out.push(`  近くの避難場所・病院：${sh.marks.length}（洪水・高潮用 ${count('shelter-usable')}、それ以外 ${count('shelter-other')}、病院 ${count('hospital')}）、区間の注記 ${sh.gaps?.length ?? 0} 個`);
     }
     console.log(out.join('\n'));
 
@@ -229,28 +230,86 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
     }
   });
 
-  it('道路：交点の数が、索引を使わない総当たりと一致し、交点は線の上にも道路の上にもある', () => {
-    const roads = data.roads as { lines: { path: [number, number][] }[]; segIndex: { nearest(x: number, y: number, m?: number): { distance: number } | null } };
+  it('浸水：想定・見るものごとに、線上の点（段の区切りを除く）が、生の格子（bin）を直接引いた値と一致し、段の名前が flood.json と合う', () => {
+    interface RankRow { rank: number; label: string }
+    const meta = json<{ width: number; height: number; cellSize: number; minX: number; maxY: number; depthRanks: RankRow[]; durationRanks: RankRow[]; tideDurationRanks: RankRow[]; files: Record<'riverDepth' | 'tideDepth' | 'riverDuration' | 'tideDuration', string> }>('flood.json');
+    const bin = (name: string) => new Uint8Array(readFileSync(`${DIR}${name}`));
+    const grid = {
+      riverDepth: bin(meta.files.riverDepth),
+      tideDepth: bin(meta.files.tideDepth),
+      riverDuration: bin(meta.files.riverDuration),
+      tideDuration: bin(meta.files.tideDuration),
+    };
+    const OUTSIDE = 255;
+    // 深さの「大きいほう」は、洪水と高潮のランクの大きいほう。継続時間は、洪水・高潮それぞれのランクをそのまま読む（「大きいほう」は段の定義が別なので、ここでは見ない）
+    const combos: { scenario: FloodScenario; view: FloodView; pick: (i: number) => number | null; ranks: RankRow[] }[] = [
+      { scenario: 'river', view: 'depth', pick: (i) => (grid.riverDepth[i] === OUTSIDE ? null : grid.riverDepth[i]), ranks: meta.depthRanks },
+      { scenario: 'tide', view: 'depth', pick: (i) => (grid.tideDepth[i] === OUTSIDE ? null : grid.tideDepth[i]), ranks: meta.depthRanks },
+      {
+        scenario: 'max',
+        view: 'depth',
+        pick: (i) => (grid.riverDepth[i] === OUTSIDE || grid.tideDepth[i] === OUTSIDE ? null : Math.max(grid.riverDepth[i], grid.tideDepth[i])),
+        ranks: meta.depthRanks,
+      },
+      { scenario: 'river', view: 'duration', pick: (i) => (grid.riverDuration[i] === OUTSIDE ? null : grid.riverDuration[i]), ranks: meta.durationRanks },
+      { scenario: 'tide', view: 'duration', pick: (i) => (grid.tideDuration[i] === OUTSIDE ? null : grid.tideDuration[i]), ranks: meta.tideDurationRanks },
+    ];
+    let floodedSomewhere = 0;
     for (const [name, line] of LINES) {
-      const marks = marksOf(results[name].roads);
-      expect(marks.length).toBe(bruteCrossings(roads.lines.map((l) => l.path), line));
-      expect(marks.length).toBeGreaterThan(30);
-      for (const k of marks) {
-        const pr = projectOnLine(line, k.x, k.y)!;
-        expect(Math.abs(pr.offset)).toBeLessThan(1e-6); // 線の上
-        expect(k.d).toBeCloseTo(pr.d, 6);
-        expect(roads.segIndex.nearest(k.x, k.y, 1)!.distance).toBeLessThan(1e-6); // 道路の上
-        expect(k.offset).toBe(0);
+      const len = lineLength(line);
+      for (const c of combos) {
+        const tracks = registry.flood.section(data.flood, line, { ...DEFAULT_OPTIONS, floodScenario: c.scenario, floodView: c.view });
+        expect(tracks).toHaveLength(1);
+        const s = series(tracks);
+        expect(s.kind).toBe('series');
+        // 縦軸は段の名前で読む：段の番号は 1〜、名前は flood.json のランクの表と合う（高潮の「1週間以上」は、上限なしの但し書きが付く）
+        expect(s.ranks).toHaveLength(c.ranks.length);
+        s.ranks!.forEach((r, i) => {
+          expect(r.value).toBe(i + 1);
+          expect(r.label.startsWith(c.ranks[i].label)).toBe(true);
+        });
+        expect(s.points[0].d).toBe(0);
+        expect(s.points[s.points.length - 1].d).toBeCloseTo(len, 6);
+        for (let i = 1; i < s.points.length; i++) expect(s.points[i].d).toBeGreaterThanOrEqual(s.points[i - 1].d);
+        let checked = 0;
+        for (let k = 1; k < 600; k++) {
+          const d = (len * k) / 600;
+          const v = valueAt(s, d);
+          if (v === undefined) continue; // 段の区切りの近く
+          const { x, y } = pointAt(line, d);
+          const col = Math.floor((x - meta.minX) / meta.cellSize);
+          const row = Math.floor((meta.maxY - y) / meta.cellSize);
+          const raw = col < 0 || col >= meta.width || row < 0 || row >= meta.height ? null : c.pick(row * meta.width + col);
+          expect(v, `${name} ${c.scenario}/${c.view} d=${d}`).toBe(raw);
+          checked++;
+          if (v !== null && v > 0) floodedSomewhere++;
+        }
+        expect(checked).toBeGreaterThan(550);
       }
-      for (let i = 1; i < marks.length; i++) expect(marks[i].d).toBeGreaterThanOrEqual(marks[i - 1].d);
     }
-    // 生の GeoJSON からも数える（道路の種別ごと）
-    const fc = json<RoadCollection>('roads.geojson');
-    for (const [name, line] of LINES)
-      for (const cls of ['motorway', 'national', 'prefectural', 'other'] as const) {
-        const raw = bruteCrossings(fc.features.filter((f) => f.properties.class === cls).map((f) => f.geometry.coordinates), line);
-        expect(marksOf(results[name].roads).filter((k) => k.category === cls)).toHaveLength(raw);
+    expect(floodedSomewhere).toBeGreaterThan(500);
+  });
+
+  it('浸水：既定（洪水と高潮の大きいほう・深さ）の断面が、探針（sample）の洪水・高潮の深さの大きいほうと一致する', () => {
+    const meta = json<{ depthRanks: { rank: number; label: string }[] }>('flood.json');
+    const rankOf = (label: unknown) => (label === '浸水なし' ? 0 : label === null ? null : meta.depthRanks.find((r) => r.label === label)!.rank);
+    for (const [name, line] of LINES) {
+      const s = series(results[name].flood);
+      const len = lineLength(line);
+      let checked = 0;
+      for (let k = 1; k < 600; k++) {
+        const d = (len * k) / 600;
+        const v = valueAt(s, d);
+        if (v === undefined) continue;
+        const { x, y } = pointAt(line, d);
+        const rows = registry.flood.sample(data.flood, x, y);
+        const river = rankOf(rows.find((r: { label: string }) => r.label === '洪水の深さ')!.value);
+        const tide = rankOf(rows.find((r: { label: string }) => r.label === '高潮の深さ')!.value);
+        expect(v).toBe(river === null || tide === null ? null : Math.max(river, tide));
+        checked++;
       }
+      expect(checked).toBeGreaterThan(550);
+    }
   });
 
   it('公共交通：路線との交点の数が総当たりと一致し、交点は線の上にある。駅は総当たりと一致する', () => {
@@ -290,33 +349,95 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
     }
   });
 
-  it('施設：数と offset が、全施設の総当たりと一致する', () => {
-    const fc = json<FacilityCollection>('facilities.geojson');
+  it('避難：避難場所・病院の数と offset が、全点の総当たりと一致する（線から 1 km 以内、垂線の足が線分の内側）', () => {
+    const RADIUS = 1000;
+    const sh = json<ShelterCollection>('shelters.geojson');
+    const fac = json<FacilityCollection>('facilities.geojson');
+    const points: { category: string; name: string; xy: [number, number] }[] = [
+      ...sh.features.map((f) => ({ category: f.properties.flood || f.properties.tide ? 'shelter-usable' : 'shelter-other', name: f.properties.name, xy: f.geometry.coordinates })),
+      ...fac.features.filter((f) => f.properties.kind === 'hospital').map((f) => ({ category: 'hospital', name: f.properties.name, xy: f.geometry.coordinates })),
+    ];
     for (const [name, line] of LINES) {
       const len = lineLength(line);
-      const expected: { kind: string; name: string; off: number }[] = [];
-      for (const f of fc.features) {
-        const [px, py] = f.geometry.coordinates;
-        const dx = line.bx - line.ax;
-        const dy = line.by - line.ay;
-        const along = ((px - line.ax) * dx + (py - line.ay) * dy) / len;
-        const off = (dx * (py - line.ay) - dy * (px - line.ax)) / len;
-        if (along >= 0 && along <= len && Math.abs(off) <= 300) expected.push({ kind: f.properties.kind, name: f.properties.name, off });
+      const dx = line.bx - line.ax;
+      const dy = line.by - line.ay;
+      const expected: { category: string; name: string; off: number }[] = [];
+      for (const p of points) {
+        const along = ((p.xy[0] - line.ax) * dx + (p.xy[1] - line.ay) * dy) / len;
+        const off = (dx * (p.xy[1] - line.ay) - dy * (p.xy[0] - line.ax)) / len;
+        if (along >= 0 && along <= len && Math.abs(off) <= RADIUS) expected.push({ category: p.category, name: p.name, off });
       }
-      const got = marksOf(results[name].facilities);
+      const track = results[name].shelters[0] as SectionMarks;
+      expect(track.radius).toBe(RADIUS);
+      const got = track.marks;
       expect(got).toHaveLength(expected.length);
-      expect(got.length).toBeGreaterThan(10);
-      const key = (kind: string, off: number) => `${kind}:${off.toFixed(4)}`;
-      expect(got.map((k) => key(k.category, k.offset)).sort()).toEqual(expected.map((e) => key(e.kind, e.off)).sort());
+      expect(got.length).toBeGreaterThan(30);
+      for (const cat of ['shelter-usable', 'shelter-other', 'hospital']) expect(got.some((k) => k.category === cat)).toBe(true);
+      const key = (category: string, off: number) => `${category}:${off.toFixed(4)}`;
+      expect(got.map((k) => key(k.category, k.offset)).sort()).toEqual(expected.map((e) => key(e.category, e.off)).sort());
+      // 名前（病院は名前がなければ「病院」）と、距離の順
+      expect(got.map((k) => `${k.category}:${k.name}`).sort()).toEqual(expected.map((e) => `${e.category}:${e.name || '病院'}`).sort());
+      for (let i = 1; i < got.length; i++) expect(got[i].d).toBeGreaterThanOrEqual(got[i - 1].d);
     }
   });
 
-  it('線の向きを逆にすると、全レイヤーで d が「長さ − d」、offset の符号が逆になり、数は同じ', () => {
+  it('避難：線が通る、データ未公開の区・洪水・高潮用が 0 件の区の区間（gaps）が、区の輪郭を直接引いた判定と一致する', () => {
+    type Ring = [number, number][];
+    const boundary = json<{ features: { properties: { name: string }; geometry: { type: string; coordinates: unknown } }[] }>('boundary.geojson');
+    const summary = json<{ wards: { name: string; published: boolean }[] }>('shelters.json');
+    const sh = json<ShelterCollection>('shelters.geojson');
+    const published = new Map(summary.wards.map((w) => [w.name, w.published]));
+    const usable = new Map<string, number>();
+    for (const f of sh.features) if (f.properties.flood || f.properties.tide) usable.set(f.properties.ward, (usable.get(f.properties.ward) ?? 0) + 1);
+    const inPolygon = (x: number, y: number, rings: Ring[]) => {
+      let inside = false;
+      for (const ring of rings)
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [xi, yi] = ring[i];
+          const [xj, yj] = ring[j];
+          if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        }
+      return inside;
+    };
+    const wardAt = (x: number, y: number) =>
+      boundary.features.find((f) => (f.geometry.type === 'Polygon' ? [f.geometry.coordinates as Ring[]] : (f.geometry.coordinates as Ring[][])).some((rings) => inPolygon(x, y, rings)))?.properties.name ?? null;
+    const expectedKind = (w: string | null) => (w === null ? null : published.get(w) === false ? 'unpublished' : (usable.get(w) ?? 0) === 0 ? 'none' : null);
+    const seen = new Set<string>();
+    for (const [name, line] of LINES) {
+      const len = lineLength(line);
+      const gaps = (results[name].shelters[0] as SectionMarks).gaps ?? [];
+      let checked = 0;
+      for (let d = 10; d < len; d += 20) {
+        // 区間の端（輪郭の近く）は、輪郭の判定の丸めが効くので見ない
+        if (gaps.some((g) => Math.abs(d - g.d0) < 3 || Math.abs(d - g.d1) < 3)) continue;
+        const { x, y } = pointAt(line, d);
+        const w = wardAt(x, y);
+        const inGap = gaps.filter((g) => g.d0 < d && d < g.d1);
+        expect(inGap.length, `${name} d=${d} (${w})`).toBeLessThanOrEqual(1);
+        expect(inGap[0]?.kind ?? null, `${name} d=${d} (${w})`).toBe(expectedKind(w));
+        if (inGap[0]) {
+          expect(inGap[0].label.startsWith(w!)).toBe(true);
+          seen.add(inGap[0].kind);
+        }
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(1000);
+      for (const g of gaps) {
+        expect(g.d0).toBeGreaterThanOrEqual(0);
+        expect(g.d1).toBeLessThanOrEqual(len + 1e-6);
+        expect(g.d1).toBeGreaterThan(g.d0);
+      }
+    }
+    // 東西の線は江戸川区（洪水・高潮用が 0 件）と渋谷区（未公開）を、南北の線は渋谷区と新宿区などを通る
+    expect([...seen].sort()).toEqual(['none', 'unpublished']);
+  });
+
+  it('線の向きを逆にすると、鉄道・駅・避難場所で d が「長さ − d」、offset の符号が逆になり、数は同じ。浸水は同じ地点で同じ値', () => {
     for (const [name, line] of LINES) {
       const len = lineLength(line);
       const rev = reverseLine(line);
-      for (const id of ['roads', 'transit', 'facilities'] as const) {
-        const r = registry[id].section(data[id], rev);
+      for (const id of ['transit', 'shelters'] as const) {
+        const r = registry[id].section(data[id], rev, DEFAULT_OPTIONS);
         r.forEach((track, ti) => {
           const f = (results[name][id][ti] as SectionMarks).marks;
           const g = (track as SectionMarks).marks;
@@ -327,6 +448,29 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
           expect(ds(g, false)).toEqual(ds(f, true));
         });
       }
+      // 避難の区間（gaps）も、「長さ − d」で入れ替わる
+      const fg = ((results[name].shelters[0] as SectionMarks).gaps ?? []).map((g) => [len - g.d1, len - g.d0, g.label] as const);
+      const rg = ((registry.shelters.section(data.shelters, rev, DEFAULT_OPTIONS)[0] as SectionMarks).gaps ?? []).map((g) => [g.d0, g.d1, g.label] as const);
+      expect(rg.length).toBe(fg.length);
+      const byLabel = (a: readonly (readonly [number, number, string])[]) => [...a].sort((p, q) => p[0] - q[0] || p[2].localeCompare(q[2]));
+      byLabel(rg).forEach((g, i) => {
+        expect(g[2]).toBe(byLabel(fg)[i][2]);
+        expect(g[0]).toBeCloseTo(byLabel(fg)[i][0], 3);
+        expect(g[1]).toBeCloseTo(byLabel(fg)[i][1], 3);
+      });
+      // 浸水（系列）：向きを逆にしても、同じ地点の値は同じ（段の区切りの近くは見ない）
+      const ff = series(results[name].flood);
+      const fr = series(registry.flood.section(data.flood, rev, DEFAULT_OPTIONS));
+      let compared = 0;
+      for (let k = 1; k < 600; k++) {
+        const d = (len * k) / 600;
+        const a = valueAt(ff, d);
+        const b = valueAt(fr, len - d);
+        if (a === undefined || b === undefined) continue;
+        expect(b).toBe(a);
+        compared++;
+      }
+      expect(compared).toBeGreaterThan(500);
     }
   });
 });

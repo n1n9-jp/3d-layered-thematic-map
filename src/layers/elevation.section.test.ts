@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_OPTIONS } from '../config';
 import elevation from './elevation';
 import type { ElevationLayerData } from './elevation';
 import { elevationColor } from './elevation/color';
@@ -39,7 +40,7 @@ function makeGrid(): ElevationLayerData {
 const grid = makeGrid();
 const L = (ax: number, ay: number, bx: number, by: number): SectionLine => ({ ax, ay, bx, by });
 const series = (line: SectionLine, data = grid): SectionSeries => {
-  const tracks = elevation.section(data, line);
+  const tracks = elevation.section(data, line, DEFAULT_OPTIONS);
   expect(tracks).toHaveLength(1);
   expect(tracks[0].kind).toBe('series');
   return tracks[0] as SectionSeries;

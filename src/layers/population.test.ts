@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_OPTIONS } from '../config';
 import population, { buildPopulationData } from './population';
 import type { PopulationCollection } from '../types';
 
 /** 100 m 四方のメッシュ。(x0, y0) が南西の角。 */
-const mesh = (x0: number, y0: number, pop: number) => ({
+/** elderly は65歳以上人口（既定は人口の 3 割。秘匿なら null）。 */
+const mesh = (x0: number, y0: number, pop: number, elderly: number | null = Math.round(pop * 0.3)) => ({
   type: 'Feature' as const,
   geometry: {
     type: 'Polygon' as const,
@@ -17,7 +19,7 @@ const mesh = (x0: number, y0: number, pop: number) => ({
       ] as [number, number][],
     ],
   },
-  properties: { meshCode: `${x0}_${y0}`, population: pop, density: (pop / 10000) * 1e6 },
+  properties: { meshCode: `${x0}_${y0}`, population: pop, density: (pop / 10000) * 1e6, elderly, elderlyMerged: false },
 });
 
 const fc: PopulationCollection = {
@@ -63,11 +65,16 @@ describe('population.subset', () => {
       expect(population.sample(sub, x, y)).toEqual(population.sample(data, x, y));
     expect(population.sample(sub, 50, 50)).toEqual([
       { label: '人口', value: 100, unit: '人' },
+      { label: '65歳以上', value: 30, unit: '人' },
       { label: '人口密度', value: 10000, unit: '人/km²' },
     ]);
-    expect(population.sample(sub, 250, 50)).toEqual([{ label: '人口', value: null }]); // 切り出されていない
+    const none = [
+      { label: '人口', value: null },
+      { label: '65歳以上', value: null },
+    ];
+    expect(population.sample(sub, 250, 50)).toEqual(none); // 切り出されていない
     // メッシュ (0,0) の中でも円の外の地点は値なし
-    expect(population.sample(sub, 5, 5)).toEqual([{ label: '人口', value: null }]);
+    expect(population.sample(sub, 5, 5)).toEqual(none);
   });
 
   it('切り出しを重ねられる', () => {
@@ -79,16 +86,31 @@ describe('population.subset', () => {
 describe('population.summarize', () => {
   it('人口の合計と、合計 ÷ メッシュの面積の合計', () => {
     const sub = population.subset(data, 100, 50, 160); // 100, 200, 300, 0 の4メッシュ = 0.04 km²
-    expect(population.summarize(sub)).toEqual([
+    expect(population.summarize(sub, DEFAULT_OPTIONS)).toEqual([
       { label: '人口', value: 600, unit: '人' },
+      { label: '65歳以上', value: 180, unit: '人' }, // 30 + 60 + 90 + 0
       { label: '人口密度', value: 15000, unit: '人/km²' },
+    ]);
+  });
+
+  it('65歳以上が秘匿されたメッシュは、65歳以上の合計に入れず、「65歳以上が不明」に数と総人口を出す', () => {
+    const d = buildPopulationData({
+      type: 'FeatureCollection',
+      features: [mesh(0, 0, 100), mesh(100, 0, 200, null), mesh(200, 0, 50, null)],
+    });
+    expect(population.summarize(d, DEFAULT_OPTIONS)).toEqual([
+      { label: '人口', value: 350, unit: '人' },
+      { label: '65歳以上', value: 30, unit: '人' },
+      { label: '65歳以上が不明', value: '2 メッシュ（総人口 250 人）' },
+      { label: '人口密度', value: 11667, unit: '人/km²' }, // 350 ÷ 0.03 km²
     ]);
   });
 
   it('メッシュが無ければ、人口は 0、密度は値なし', () => {
     const sub = population.subset(data, -5000, -5000, 10);
-    expect(population.summarize(sub)).toEqual([
+    expect(population.summarize(sub, DEFAULT_OPTIONS)).toEqual([
       { label: '人口', value: 0, unit: '人' },
+      { label: '65歳以上', value: 0, unit: '人' },
       { label: '人口密度', value: null },
     ]);
   });
@@ -99,7 +121,7 @@ describe('population.summarize', () => {
       features: [
         {
           type: 'Feature',
-          properties: { meshCode: 'a', population: 500, density: 0 },
+          properties: { meshCode: 'a', population: 500, density: 0, elderly: 100, elderlyMerged: false },
           geometry: {
             type: 'Polygon',
             coordinates: [
@@ -116,6 +138,6 @@ describe('population.summarize', () => {
       ],
     };
     const d = buildPopulationData(skew); // 0.5 km²
-    expect(population.summarize(d)[1]).toEqual({ label: '人口密度', value: 1000, unit: '人/km²' });
+    expect(population.summarize(d, DEFAULT_OPTIONS).at(-1)).toEqual({ label: '人口密度', value: 1000, unit: '人/km²' });
   });
 });

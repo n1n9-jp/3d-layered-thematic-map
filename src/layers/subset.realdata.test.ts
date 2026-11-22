@@ -13,15 +13,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { LAYER_IDS } from '../config';
-import type { LayerId } from '../config';
+import { DEFAULT_OPTIONS, LAYER_IDS } from '../config';
+import type { FloodScenario, LayerId } from '../config';
 import { subsetGrid } from '../lib/gridSubset';
-import type { ElevationData, FacilityCollection, PopulationCollection, ProbeValue, RoadCollection, StationCollection } from '../types';
+import type { ElevationData, FacilityCollection, PopulationCollection, ProbeValue, ShelterCollection, StationCollection } from '../types';
 import { elevationPixels } from './elevation/color';
 import { registry } from './index';
 
 const DIR = 'public/data/';
-const HAS_DATA = existsSync(`${DIR}elevation.bin`) && existsSync(`${DIR}roads.geojson`);
+const HAS_DATA = ['elevation.bin', 'flood.json', 'flood-river.bin', 'flood-tide.bin', 'shelters.geojson', 'shelters.json', 'facilities.geojson'].every((f) => existsSync(`${DIR}${f}`));
 
 /** 東京駅（README の座標）。 */
 const CX = 1550;
@@ -77,12 +77,12 @@ describe.skipIf(!HAS_DATA)('実データでの subset / summarize（東京駅 x=
       for (const id of LAYER_IDS) {
         const m = registry[id];
         const [sub, tSub] = time(() => m.subset(data[id], CX, CY, r));
-        const [sum, tSum] = time(() => m.summarize(sub));
+        const [sum, tSum] = time(() => m.summarize(sub, DEFAULT_OPTIONS));
         first[key][id] = tSub + tSum;
         subsets[key][id] = sub;
         summaries[key][id] = sum;
         const runs: number[] = [];
-        for (let i = 0; i < 9; i++) runs.push(time(() => m.summarize(m.subset(data[id], CX, CY, r)))[1]);
+        for (let i = 0; i < 9; i++) runs.push(time(() => m.summarize(m.subset(data[id], CX, CY, r), DEFAULT_OPTIONS))[1]);
         warm[key][id] = median(runs);
       }
       const gridRuns: number[] = [];
@@ -119,13 +119,18 @@ describe.skipIf(!HAS_DATA)('実データでの subset / summarize（東京駅 x=
     expect(total2).toBeLessThan(250);
   });
 
-  it('施設：円の中の点を数えた値と一致する', () => {
+  it('避難：避難場所（洪水・高潮で使えるもの・それ以外）と病院の数が、円の中の点を数えた値と一致する', () => {
+    const sh = json<ShelterCollection>('shelters.geojson');
     const fac = json<FacilityCollection>('facilities.geojson');
     for (const r of RADII) {
-      const n = (kind: string) => fac.features.filter((f) => f.properties.kind === kind && inCircle(f.geometry.coordinates[0], f.geometry.coordinates[1], r)).length;
-      const s = summaries[String(r)].facilities;
-      expect(val(s, '学校')).toBe(n('school'));
-      expect(val(s, '病院')).toBe(n('hospital'));
+      const inside = sh.features.filter((f) => inCircle(f.geometry.coordinates[0], f.geometry.coordinates[1], r));
+      const usable = inside.filter((f) => f.properties.flood || f.properties.tide).length;
+      const hospitals = fac.features.filter((f) => f.properties.kind === 'hospital' && inCircle(f.geometry.coordinates[0], f.geometry.coordinates[1], r)).length;
+      const s = summaries[String(r)].shelters;
+      expect(val(s, '洪水・高潮で使える避難場所')).toBe(usable);
+      expect(val(s, 'それ以外の避難場所')).toBe(inside.length - usable);
+      expect(val(s, '病院')).toBe(hospitals);
+      expect(inside.length + hospitals).toBeGreaterThan(0);
     }
   });
 
@@ -142,14 +147,29 @@ describe.skipIf(!HAS_DATA)('実データでの subset / summarize（東京駅 x=
     const pop = json<PopulationCollection>('population.geojson');
     for (const r of RADII) {
       let sum = 0;
+      let elderly = 0;
+      let unknownCells = 0;
+      let unknownPeople = 0;
       for (const f of pop.features) {
         const ring = f.geometry.coordinates[0].slice(0, 4);
         const x = ring.reduce((a, p) => a + p[0], 0) / 4;
         const y = ring.reduce((a, p) => a + p[1], 0) / 4;
-        if (inCircle(x, y, r)) sum += f.properties.population;
+        if (!inCircle(x, y, r)) continue;
+        sum += f.properties.population;
+        if (typeof f.properties.elderly === 'number') elderly += f.properties.elderly;
+        else {
+          unknownCells++;
+          unknownPeople += f.properties.population;
+        }
       }
       const s = summaries[String(r)].population;
       expect(val(s, '人口')).toBe(sum);
+      // 65歳以上：秘匿されたメッシュ（elderly が null）は合計に入れず、数と総人口を別に出す
+      expect(val(s, '65歳以上')).toBe(elderly);
+      expect(elderly).toBeLessThan(sum);
+      const unknown = val(s, '65歳以上が不明');
+      if (unknownCells > 0) expect(unknown).toBe(`${unknownCells} メッシュ（総人口 ${unknownPeople.toLocaleString('ja-JP')} 人）`);
+      else expect(unknown).toBeUndefined();
       const density = val(s, '人口密度') as number;
       const circleKm2 = (Math.PI * r * r) / 1e6;
       const ratio = (density * circleKm2) / sum;
@@ -159,39 +179,50 @@ describe.skipIf(!HAS_DATA)('実データでの subset / summarize（東京駅 x=
     }
   });
 
-  it('道路：半径を大きくすると延長が面積に近い割合で増える。内訳の合計が合計と合う', () => {
-    const km = (r: number) => val(summaries[String(r)].roads, '道路の延長') as number;
-    const [a, b, c] = [km(1000), km(2000), km(5000)];
-    // 面積は半径の2乗（2倍で4倍、2→5 km で 6.25 倍）。東京駅の周りは、皇居（大きな道路が無い）と東京湾（海）が
-    // 円に入るので、道路の延長は面積ほどは増えない（2 倍で 3.3 倍ほど、2→5 km で 3.5 倍ほど）。
-    console.log(`道路の延長：1km=${a}、2km=${b}（${(b / a).toFixed(2)} 倍）、5km=${c}（${(c / b).toFixed(2)} 倍、面積比 6.25）`);
-    expect(b / a).toBeGreaterThan(2.5);
-    expect(b / a).toBeLessThan(5);
-    expect(c).toBeGreaterThan(b);
-    for (const r of RADII) {
-      const total = val(summaries[String(r)].roads, '道路の延長') as number;
-      const parts = [...String(val(summaries[String(r)].roads, '内訳')).matchAll(/ (\d+\.\d)/g)].map((m) => Number(m[1]));
-      expect(parts).toHaveLength(4);
-      expect(Math.abs(parts.reduce((x, y) => x + y, 0) - total)).toBeLessThan(0.25);
-    }
+  it('浸水：段ごとの面積の割合が、生の格子（セルの中心が円の中）から数えた値と一致する。深い段が先、浸水なしが最後', () => {
+    const meta = json<{ width: number; height: number; cellSize: number; minX: number; maxY: number; depthRanks: { rank: number; label: string }[] }>('flood.json');
+    const bin = (name: string) => new Uint8Array(readFileSync(`${DIR}${name}`));
+    const river = bin('flood-river.bin');
+    const tide = bin('flood-tide.bin');
+    const OUTSIDE = 255;
+    // 想定ごとの、セルの段（0 = 浸水なし、1〜6 = 深さのランク、null = 23区の外）
+    const position: Record<FloodScenario, (r: number, t: number) => number | null> = {
+      river: (r) => (r === OUTSIDE ? null : r),
+      tide: (_r, t) => (t === OUTSIDE ? null : t),
+      max: (r, t) => (r === OUTSIDE || t === OUTSIDE ? null : Math.max(r, t)),
+    };
+    const percent = (p: number) => (p > 0 && p < 0.05 ? '0.1% 未満' : `${(Math.round(p * 10) / 10).toFixed(1)}%`);
+    for (const scenario of ['max', 'river', 'tide'] as const)
+      for (const r of RADII) {
+        const counts = new Array<number>(7).fill(0);
+        let total = 0;
+        for (let row = 0; row < meta.height; row++) {
+          const y = meta.maxY - (row + 0.5) * meta.cellSize;
+          if (Math.abs(y - CY) > r) continue;
+          for (let col = 0; col < meta.width; col++) {
+            if (!inCircle(meta.minX + (col + 0.5) * meta.cellSize, y, r)) continue;
+            const pos = position[scenario](river[row * meta.width + col], tide[row * meta.width + col]);
+            if (pos === null) continue;
+            counts[pos]++;
+            total++;
+          }
+        }
+        const rows = registry.flood.summarize(registry.flood.subset(data.flood, CX, CY, r), { ...DEFAULT_OPTIONS, floodScenario: scenario }) as ProbeValue[];
+        const label = (pos: number) => (pos === 0 ? '浸水なし' : meta.depthRanks[pos - 1].label);
+        // 深い段から、浸水なしは最後。割合が 0 の段は出さない
+        const order = [6, 5, 4, 3, 2, 1, 0].filter((pos) => counts[pos] > 0);
+        expect(rows.map((v) => v.label)).toEqual(order.map(label));
+        expect(rows.map((v) => v.value)).toEqual(order.map((pos) => percent((100 * counts[pos]) / total)));
+        expect(total).toBeGreaterThan(0);
+      }
+    // 東京駅の周りは、海（東京湾）と皇居などを含み、「浸水なし」の所と浸水する所の両方がある（既定の想定）
+    expect(summaries['5000'].flood.length).toBeGreaterThan(1);
   });
 
-  it('道路：円で切った延長が、生データの線分のうち中点が円の中にあるものの合計（円で切らない別の近似）と合う', () => {
-    const fc = json<RoadCollection>('roads.geojson');
-    for (const r of RADII) {
-      let m = 0;
-      for (const f of fc.features) {
-        const c = f.geometry.coordinates;
-        for (let i = 0; i + 1 < c.length; i++) {
-          const mx = (c[i][0] + c[i + 1][0]) / 2;
-          const my = (c[i][1] + c[i + 1][1]) / 2;
-          if (inCircle(mx, my, r)) m += Math.hypot(c[i + 1][0] - c[i][0], c[i + 1][1] - c[i][1]);
-        }
-      }
-      const km = val(summaries[String(r)].roads, '道路の延長') as number;
-      console.log(`道路の延長（半径 ${r / 1000}km）：円で切った値 ${km} km、線分の中点が円の中のものの合計 ${(m / 1000).toFixed(1)} km`);
-      expect(Math.abs(km - m / 1000) / km).toBeLessThan(0.03);
-    }
+  it('浸水：切り出した円の外のセルは、23区の外と同じ扱い（探針は値なし、面積に数えない）', () => {
+    const sub = registry.flood.subset(data.flood, CX, CY, 1000);
+    expect(registry.flood.sample(sub, CX, CY).some((v) => v.value !== null)).toBe(true);
+    expect(registry.flood.sample(sub, CX + 1500, CY).every((v) => v.value === null)).toBe(true);
   });
 
   it('標高：最小〜最大と平均が、生の格子から求めた値と一致する', () => {

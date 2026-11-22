@@ -83,8 +83,8 @@ describe('distanceAlongLine（地図のカーソル → 線に沿った距離）
     expect(r?.dist).toBeCloseTo(1);
   });
   it('近い高さ（height）も返す。段の ID が付いていれば、それも分かる（右のチャートを目立たせるため）', () => {
-    const tagged = [{ plane: 0, at: 0, id: 'roads' }, { plane: 0, at: 4000, id: 'transit' }];
-    expect(distanceAlongLine({ project, line, heights: tagged, px: 500, py: 501, maxPx: 5 })?.height.id).toBe('roads');
+    const tagged = [{ plane: 0, at: 0, id: 'flood' }, { plane: 0, at: 4000, id: 'transit' }];
+    expect(distanceAlongLine({ project, line, heights: tagged, px: 500, py: 501, maxPx: 5 })?.height.id).toBe('flood');
     expect(distanceAlongLine({ project, line, heights: tagged, px: 500, py: 481, maxPx: 5 })?.height.id).toBe('transit');
   });
   it('長さ 0 の線は null', () => {
