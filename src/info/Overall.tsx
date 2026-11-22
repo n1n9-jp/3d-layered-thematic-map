@@ -1,5 +1,3 @@
-import { useEffect, useRef } from 'react';
-import { create } from 'zustand';
 import { wholeExposure } from '../aggregate/exposure';
 import type { Exposure } from '../aggregate/exposure';
 import type { FloodData } from '../layers/flood/model';
@@ -11,14 +9,9 @@ import type { ElevationData } from '../types';
 import { exposureTable } from './exposureModel';
 import type { ExposureTable as Model } from './exposureModel';
 import { overallHeadline } from './overallModel';
+import Disclosure from './Disclosure';
 
 const rgb = (c: readonly number[]) => `rgb(${c[0]},${c[1]},${c[2]})`;
-
-/** 数え方と、データの注意の折りたたみの開閉。カーソルを地図に置いて列が切り替わっても、開いたままにする。 */
-export const useOverallUi = create<{ notesOpen: boolean; setNotesOpen: (v: boolean) => void }>((set) => ({
-  notesOpen: false,
-  setNotesOpen: (v) => set({ notesOpen: v }),
-}));
 
 /**
  * 「浸水が想定される区域に住む人」の表（深さの区分ごとの人口と65歳以上人口）。23区全体と、クローズアップの円の中で同じ表を使う。
@@ -43,7 +36,8 @@ export function ExposureTable({
   return (
     <section className={`ex${bars ? ' ex-bars' : ''}`} data-testid={testId} data-scenario={exposure.scenario}>
       <div className="ex-head">
-        <h3 className="ex-title">{caption}</h3>
+        {/* 23区全体の表は、見出しが開閉の見出し（アコーディオン）になっているので、表の中には置かない */}
+        {!bars && <h3 className="ex-title">{caption}</h3>}
         <div className="ex-scenario" data-testid={`${testId}-scenario`}>
           想定：{t.scenario}
         </div>
@@ -117,58 +111,54 @@ export function ExposureTable({
 
 /** 数え方・データの注意。既定では折りたたむ。 */
 function Notes({ exposure, shelters }: { exposure: Exposure | null; shelters: ShelterData | null }) {
-  const open = useOverallUi((s) => s.notesOpen);
-  const setOpen = useOverallUi((s) => s.setNotesOpen);
+  const open = useMapStore((s) => s.open.notes);
+  const toggleOpen = useMapStore((s) => s.toggleOpen);
   const o = shelters ? shelterOverview(shelters) : null;
   const t = exposure ? exposureTable(exposure) : null;
-  const root = useRef<HTMLElement>(null);
-  const first = useRef(true);
-  // 開いたときに、注記の頭が見える位置までスクロールする（開いたのに、画面の外に出たままにならないように）
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    if (open) root.current?.scrollIntoView({ block: 'start' });
-  }, [open]);
   return (
-    <section className="ov-notes" data-testid="overall-notes" data-open={open} ref={root}>
-      <button type="button" className="ov-toggle" aria-expanded={open} aria-controls="overall-notes-body" onClick={() => setOpen(!open)} data-testid="overall-notes-toggle">
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span> 数え方とデータの注意
-      </button>
-      {open && (
-        <div id="overall-notes-body" className="ov-notes-body" data-testid="overall-notes-body">
-          {t && (
-            <>
-              <h4>数え方</h4>
-              {t.notes.map((n) => (
-                <p key={n}>{n}</p>
-              ))}
-              <p>「大きいほう」は、洪水と高潮を足し合わせません。地点ごとに、深いほうの想定を採ります。</p>
-              <p>標高 0m 未満の土地は、メッシュの中心を含む標高のセルが 0m 未満のメッシュの人口です（想定の切り替えによりません）。</p>
-            </>
-          )}
-          {o && (
-            <>
-              <h4>避難場所の読み方</h4>
-              <p>
-                洪水・高潮で使える避難場所 {o.usable.toLocaleString('ja-JP')} か所のほか、地震・火事などの避難場所が {o.other.toLocaleString('ja-JP')} か所、病院が{' '}
-                {o.hospitals.toLocaleString('ja-JP')} 院あります。
-              </p>
-              <p>指定緊急避難場所は、災害の種別ごとに指定されています。データは最新でない場合や、未掲載の場合があります（国土地理院、{o.updated} 更新分）。収容人数は含みません。</p>
-              <p>
-                <b>指定なし</b>は、データに載っていて、洪水・高潮用の指定が 0 件の区です：{o.none.map((w) => w.name).join('・') || '該当なし'}。
-                地震・火事などの避難場所は載っています（{o.none.map((w) => `${w.name} ${w.total} か所`).join('・') || '該当なし'}）。
-                <b>未公開</b>は、このデータに指定緊急避難場所が載っていない区です：{o.unpublished.join('・') || '該当なし'}。0 件は「ない」ではなく「データがない」で、あるかどうかは分かりません。
-              </p>
-              <p>
-                「指定なし」は「避難できない」ことではありません。このデータから分かるのは、洪水・高潮で使える指定緊急避難場所が載っているかどうかまでで、各区の避難の計画は分かりません。
-              </p>
-            </>
-          )}
-        </div>
-      )}
-    </section>
+    <Disclosure id="overall-notes" testId="overall-notes" open={open} onToggle={() => toggleOpen('notes')} title="数え方とデータの注意" scrollIntoView>
+      <div className="ov-notes-body">
+        {t && (
+          <>
+            <h4>数え方</h4>
+            {t.notes.map((n) => (
+              <p key={n}>{n}</p>
+            ))}
+            <p>「大きいほう」は、洪水と高潮を足し合わせません。地点ごとに、深いほうの想定を採ります。</p>
+            <p>標高 0m 未満の土地は、メッシュの中心を含む標高のセルが 0m 未満のメッシュの人口です（想定の切り替えによりません）。</p>
+          </>
+        )}
+        {o && (
+          <>
+            <h4>避難場所の読み方</h4>
+            <p>
+              洪水・高潮で使える避難場所 {o.usable.toLocaleString('ja-JP')} か所のほか、地震・火事などの避難場所が {o.other.toLocaleString('ja-JP')} か所、病院が{' '}
+              {o.hospitals.toLocaleString('ja-JP')} 院あります。
+            </p>
+            <p>指定緊急避難場所は、災害の種別ごとに指定されています。データは最新でない場合や、未掲載の場合があります（国土地理院、{o.updated} 更新分）。収容人数は含みません。</p>
+            <p>
+              <b>指定なし</b>は、データに載っていて、洪水・高潮用の指定が 0 件の区です：{o.none.map((w) => w.name).join('・') || '該当なし'}。
+              地震・火事などの避難場所は載っています（{o.none.map((w) => `${w.name} ${w.total} か所`).join('・') || '該当なし'}）。
+              <b>未公開</b>は、このデータに指定緊急避難場所が載っていない区です：{o.unpublished.join('・') || '該当なし'}。0 件は「ない」ではなく「データがない」で、あるかどうかは分かりません。
+            </p>
+            <p>
+              「指定なし」は「避難できない」ことではありません。このデータから分かるのは、洪水・高潮で使える指定緊急避難場所が載っているかどうかまでで、各区の避難の計画は分かりません。
+            </p>
+          </>
+        )}
+      </div>
+    </Disclosure>
+  );
+}
+
+/** 「浸水の深さの区分ごとの人口」の表。見出しを押すと開く（既定は閉じる）。 */
+function PopulationTable({ exposure }: { exposure: Exposure }) {
+  const open = useMapStore((s) => s.open.table);
+  const toggleOpen = useMapStore((s) => s.toggleOpen);
+  return (
+    <Disclosure id="overall-table" testId="overall-table" open={open} onToggle={() => toggleOpen('table')} title="浸水の深さの区分ごとの人口" scrollIntoView>
+      <ExposureTable exposure={exposure} testId="overall-exposure" caption="浸水の深さの区分ごとの人口" variant="bars" />
+    </Disclosure>
   );
 }
 
@@ -218,7 +208,7 @@ export default function Overall() {
       ) : (
         <p className="ic-dim">{failed ? '集計に使うデータの読み込みに失敗しました' : '集計中…（人口と浸水想定の読み込みを待っています）'}</p>
       )}
-      {exposure && <ExposureTable exposure={exposure} testId="overall-exposure" caption="浸水の深さの区分ごとの人口" variant="bars" />}
+      {exposure && <PopulationTable exposure={exposure} />}
       <Notes exposure={exposure} shelters={shelters} />
     </div>
   );

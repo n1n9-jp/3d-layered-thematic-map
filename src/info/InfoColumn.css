@@ -147,58 +147,74 @@
   border-top: none;
 }
 
-.ic-table {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
+/* レイヤーごとの行（アコーディオン）。閉じているときは、レイヤー名と、この地点の主な値1つだけ。 */
+.ic-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
-
-.ic-col-name {
-  width: 6em;
-}
-
-.ic-table th,
-.ic-table td {
-  padding: 3px 6px;
-  text-align: left;
-  vertical-align: top;
-  font-weight: 400;
-}
-
-.ic-table th:first-child,
-.ic-table td:first-child {
-  padding-left: 12px;
-}
-
-.ic-table th:last-child,
-.ic-table td:last-child {
-  padding-right: 12px;
-}
-
-.ic-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #0b0f16;
-  color: #9aa;
-  font-size: 11px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.ic-table tbody th {
-  color: #9bd;
-}
-
-.ic-table tbody tr + tr > * {
+.ic-row + .ic-row {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-
-/* 長い路線名や施設名は、語の途中ではなく、文節などの区切りで折り返す。区切りがなければ、はみ出さないよう折る。 */
-.ic-table td,
-.ic-table th {
+.ic-row-toggle {
+  display: grid;
+  grid-template-columns: 12px 5.5em minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 6px;
+  width: 100%;
+  margin: 0;
+  padding: 5px 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
   word-break: auto-phrase;
   overflow-wrap: break-word;
   line-break: strict;
+}
+.ic-row-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.ic-row-toggle:disabled {
+  cursor: default;
+}
+.ic-row-toggle:disabled:hover {
+  background: transparent;
+}
+.ic-row-toggle:focus-visible {
+  outline: 2px solid #5ab4ff;
+  outline-offset: -2px;
+}
+.ic-caret {
+  color: #7f8b99;
+  font-size: 11px;
+}
+.ic-row-name {
+  color: #9bd;
+}
+.ic-row-main {
+  color: #e8e8e8;
+}
+.ic-row-body {
+  padding: 0 12px 8px calc(12px + 12px + 6px);
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  line-break: strict;
+}
+.ic-area {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.14);
+}
+.ic-area-title {
+  margin-bottom: 1px;
+  font-size: 11px;
+  color: #9aa;
+}
+.ic-row-body .ex {
+  padding: 8px 0 2px;
 }
 
 .ic-v + .ic-v {
@@ -276,7 +292,7 @@
   font-size: 1.25em;
   color: #fff;
 }
-.ov-toggle {
+.acc-toggle {
   display: block;
   width: 100%;
   margin: 0;
@@ -290,10 +306,10 @@
   border-top: 1px solid rgba(255, 255, 255, 0.14);
   cursor: pointer;
 }
-.ov-toggle:hover {
+.acc-toggle:hover {
   color: #cfe3f5;
 }
-.ov-toggle:focus-visible {
+.acc-toggle:focus-visible {
   outline: 2px solid #5ab4ff;
   outline-offset: 1px;
 }

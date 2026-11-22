@@ -365,8 +365,10 @@ export default function StackView({ columnWidth }: Props) {
   const tiersKey = visibleIds.map((t) => `${t.id}:${t.z.toFixed(2)}`).join();
   const shelterZ = visibleIds.find((t) => t.id === 'shelters')?.z ?? null;
   const shelterData = status.shelters === 'ready' ? (data.shelters as ShelterData) : null;
+  // 札は、レイヤー一覧で「避難」の行を開いているあいだだけ出す（区の枠と網掛けは、避難の段の描画として常に出る）。
+  const wardLabelsOpen = useMapStore((s) => s.open.layer === 'shelters');
   const wardLayout = useMemo(() => {
-    if (!shelterData || shelterZ === null || !size) return null;
+    if (!wardLabelsOpen || !shelterData || shelterZ === null || !size) return null;
     const tiers = tiersKey.split(',').map((s) => {
       const [id, z] = s.split(':');
       return { id: id as LayerId, z: Number(z) };
@@ -380,7 +382,7 @@ export default function StackView({ columnWidth }: Props) {
       columnWidth,
       layerNameRects: stackLabelRects({ tiers, viewState, size }),
     });
-  }, [shelterData, shelterZ, size, tiersKey, viewState, columnWidth]);
+  }, [wardLabelsOpen, shelterData, shelterZ, size, tiersKey, viewState, columnWidth]);
   const wardLabelLayerList = useMemo(() => (wardLayout ? wardLabelLayers(wardLayout) : []), [wardLayout]);
   useEffect(() => {
     window.__wardLabels = wardLayout;

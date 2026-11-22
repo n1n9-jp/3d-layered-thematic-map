@@ -12,12 +12,13 @@ import SectionBody from '../section/SectionPanel';
 import { cachedDistrictLookup } from '../probe/district';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
-import type { BoundaryData } from '../types';
+import type { BoundaryData, ProbeValue } from '../types';
 import { RIGHT_PANEL_W } from '../view/layout';
 import { useElementSize } from '../view/useElementSize';
 import Overall, { ExposureTable } from './Overall';
-import { areaHeading, buildRows, columnMode, coordsText, valueText, valueTitle } from './infoModel';
+import { areaHeading, buildRows, columnMode, coordsText, splitCell, valueText, valueTitle } from './infoModel';
 import type { Cell, InfoRow } from './infoModel';
+import type { ReactNode } from 'react';
 import './InfoColumn.css';
 
 /** 列の下端に空ける高さ（px）。右下の出典の1行（画面の下端から約 24 px）を避ける。 */
@@ -69,13 +70,11 @@ function Head({ p, pinned }: { p: Point; pinned: boolean }) {
   );
 }
 
-function CellView({ cell, layerLabel }: { cell: Cell; layerLabel: string }) {
-  if (cell.state === 'loading') return <span className="ic-dim">読み込み中…</span>;
-  if (cell.state === 'error') return <span className="ic-dim">読み込み失敗</span>;
-  if (cell.state === 'none') return <span className="ic-dim">—</span>;
+/** 値の並び（見出し付き）。 */
+function Values({ values, layerLabel }: { values: ProbeValue[]; layerLabel: string }) {
   return (
     <>
-      {cell.values.map((v, i) => {
+      {values.map((v, i) => {
         const title = valueTitle(v, layerLabel);
         return (
           <div key={i} className="ic-v">
@@ -88,42 +87,78 @@ function CellView({ cell, layerLabel }: { cell: Cell; layerLabel: string }) {
   );
 }
 
-/** レイヤーごとの値の表。areaTitle があれば、「この地点」と「半径 ○km 内」の2列、なければ「この地点」だけ。 */
-function InfoTable({ rows, areaTitle }: { rows: InfoRow[]; areaTitle: string | null }) {
+/** 値でないマス（読み込み中・失敗・値なし）の文字。値のあるマスは null。 */
+function stateText(cell: Cell): string | null {
+  if (cell.state === 'loading') return '読み込み中…';
+  if (cell.state === 'error') return '読み込み失敗';
+  if (cell.state === 'none') return '—';
+  return null;
+}
+
+/**
+ * 1つのレイヤーの行。閉じているときは「レイヤー名と、この地点の主な値1つ」だけ。押すと、残りの値と、半径内の集計（あれば）が開く。
+ * extra は、開いたときの末尾に足すもの（浸水の行の、円の中の「浸水が想定される区域に住む人」の表）。
+ */
+function InfoRowView({ row, areaTitle, open, extra }: { row: InfoRow; areaTitle: string | null; open: boolean; extra?: ReactNode }) {
+  const toggleOpen = useMapStore((s) => s.toggleOpen);
+  const scenario = useMapStore((s) => s.options.floodScenario);
+  const split = splitCell(row.id, row.point.values, row.label, scenario);
+  const state = stateText(row.point);
+  const bodyId = `info-row-${row.id}`;
+  const hasBody = split.rest.length > 0 || row.area !== null || !!extra;
   return (
-    <table className="ic-table" data-testid="info-table" data-columns={areaTitle ? 2 : 1}>
-      <colgroup>
-        <col className="ic-col-name" />
-        <col />
-        {areaTitle && <col />}
-      </colgroup>
-      <thead>
-        <tr>
-          <th scope="col">レイヤー</th>
-          <th scope="col">この地点</th>
-          {areaTitle && (
-            <th scope="col" data-testid="info-area-title">
-              {areaTitle}
-            </th>
+    <li className="ic-row" data-layer={row.id} data-open={open} data-testid="info-row">
+      <button
+        type="button"
+        className="ic-row-toggle"
+        aria-expanded={hasBody ? open : undefined}
+        aria-controls={hasBody ? bodyId : undefined}
+        disabled={!hasBody}
+        data-testid={`info-row-toggle-${row.id}`}
+        onClick={() => toggleOpen('row', row.id)}
+      >
+        <span className="ic-caret" aria-hidden="true">
+          {hasBody ? (open ? '▾' : '▸') : ''}
+        </span>
+        <span className="ic-row-name">{row.label}</span>
+        <span className="ic-row-main" data-testid="info-row-main">
+          {state ? (
+            <span className="ic-dim">{state}</span>
+          ) : (
+            <>
+              {split.primary?.title && <span className="ic-dim">{split.primary.title} </span>}
+              {split.primary?.text}
+            </>
           )}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.id} data-layer={r.id}>
-            <th scope="row">{r.label}</th>
-            <td>
-              <CellView cell={r.point} layerLabel={r.label} />
-            </td>
-            {r.area && (
-              <td>
-                <CellView cell={r.area} layerLabel={r.label} />
-              </td>
-            )}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+        </span>
+      </button>
+      {open && hasBody && (
+        <div className="ic-row-body" id={bodyId} data-testid="info-row-body">
+          {split.rest.length > 0 && <Values values={split.rest} layerLabel={row.label} />}
+          {row.area && (
+            <div className="ic-area" data-testid="info-area">
+              <div className="ic-area-title" data-testid="info-area-title">
+                {areaTitle}
+              </div>
+              {stateText(row.area) ? <span className="ic-dim">{stateText(row.area)}</span> : <Values values={row.area.values} layerLabel={row.label} />}
+            </div>
+          )}
+          {extra}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** レイヤーごとの行の一覧。areaTitle があれば、行を開いたときに「半径 ○km 内」の集計も出る。開けるのは同時に1行だけ。 */
+function InfoList({ rows, areaTitle, extras }: { rows: InfoRow[]; areaTitle: string | null; extras?: Partial<Record<LayerId, ReactNode>> }) {
+  const openRow = useMapStore((s) => s.open.row);
+  return (
+    <ul className="ic-rows" data-testid="info-table" data-columns={areaTitle ? 2 : 1}>
+      {rows.map((r) => (
+        <InfoRowView key={r.id} row={r} areaTitle={areaTitle} open={openRow === r.id} extra={extras?.[r.id]} />
+      ))}
+    </ul>
   );
 }
 
@@ -134,7 +169,7 @@ function HoverBody({ p }: { p: Point }) {
     <>
       <Head p={p} pinned={false} />
       <div className="ic-scroll ic-scroll-solo">
-        <InfoTable rows={rows} areaTitle={null} />
+        <InfoList rows={rows} areaTitle={null} />
       </div>
     </>
   );
@@ -160,10 +195,15 @@ function PinnedBody({ p }: { p: Point }) {
         {size && <CloseupStack cut={cut} size={size} />}
       </div>
       <div className="ic-scroll" data-testid="info-scroll">
-        <InfoTable rows={rows} areaTitle={areaHeading(radius)} />
-        {cut.exposure && (
-          <ExposureTable exposure={cut.exposure} testId="closeup-exposure" caption={`${areaHeading(radius)}：浸水が想定される区域に住む人`} />
-        )}
+        <InfoList
+          rows={rows}
+          areaTitle={areaHeading(radius)}
+          extras={{
+            flood: cut.exposure && (
+              <ExposureTable exposure={cut.exposure} testId="closeup-exposure" caption={`${areaHeading(radius)}：浸水が想定される区域に住む人`} />
+            ),
+          }}
+        />
       </div>
     </>
   );

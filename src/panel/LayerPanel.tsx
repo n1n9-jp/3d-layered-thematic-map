@@ -4,6 +4,7 @@ import type { LayerId } from '../config';
 import { registry } from '../layers';
 import { useMapStore } from '../store';
 import type { LayerStatus } from '../store';
+import { selectionSummary } from './selectionSummary';
 import { displayOrder, dropIndex, stepTarget, storeIndexFromDisplay } from './layerOrder';
 import './LayerPanel.css';
 
@@ -41,6 +42,8 @@ export default function LayerPanel() {
   const moveLayer = useMapStore((s) => s.moveLayer);
   const setVisible = useMapStore((s) => s.setVisible);
   const setSolo = useMapStore((s) => s.setSolo);
+  const openLayer = useMapStore((s) => s.open.layer);
+  const toggleOpen = useMapStore((s) => s.toggleOpen);
 
   const shown = useMemo(() => displayOrder(order), [order]);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -153,12 +156,15 @@ export default function LayerPanel() {
           const st = status[id];
           const isSolo = solo === id;
           const isDragged = drag?.id === id;
-          const legend = mod.legend(options);
-          const notes = mod.notes?.(st === 'ready' ? data[id] : undefined) ?? [];
+          const isOpen = openLayer === id;
+          const summary = selectionSummary(id, options);
+          const legend = isOpen ? mod.legend(options) : [];
+          const notes = isOpen ? (mod.notes?.(st === 'ready' ? data[id] : undefined) ?? []) : [];
           const cls = [
             'lp-row',
             !visible[id] && 'lp-hidden',
             isSolo && 'lp-solo',
+            isOpen && 'lp-open',
             isDragged && 'lp-dragging',
             dropBefore === id && 'lp-drop-before',
             dropAfter === id && 'lp-drop-after',
@@ -190,15 +196,34 @@ export default function LayerPanel() {
                 >
                   <span aria-hidden="true">⠿</span>
                 </button>
-                <label className="lp-name">
-                  <input
-                    type="checkbox"
-                    checked={visible[id]}
-                    onChange={(e) => setVisible(id, e.target.checked)}
-                    data-focus-key={`${id}:visible`}
-                  />
-                  <span>{mod.label}</span>
-                </label>
+                <input
+                  type="checkbox"
+                  className="lp-check"
+                  checked={visible[id]}
+                  aria-label={`${mod.label}を表示`}
+                  onChange={(e) => setVisible(id, e.target.checked)}
+                  data-focus-key={`${id}:visible`}
+                />
+                <button
+                  type="button"
+                  className="lp-name"
+                  aria-expanded={isOpen}
+                  aria-controls={`lp-body-${id}`}
+                  data-testid={`layer-toggle-${id}`}
+                  data-focus-key={`${id}:toggle`}
+                  title="凡例と切り替え、読み方を開く"
+                  onClick={() => toggleOpen('layer', id)}
+                >
+                  <span className="lp-caret" aria-hidden="true">
+                    {isOpen ? '▾' : '▸'}
+                  </span>
+                  <span className="lp-label">{mod.label}</span>
+                  {summary && (
+                    <span className="lp-summary" data-testid={`layer-summary-${id}`}>
+                      {summary}
+                    </span>
+                  )}
+                </button>
                 <button
                   type="button"
                   className="lp-solo-btn"
@@ -239,46 +264,50 @@ export default function LayerPanel() {
                 </div>
               )}
 
-              {mod.controls?.map((c) => (
-                <div key={c.key} className="lp-line lp-sub lp-opt" role="group" aria-label={`${mod.label}の${c.label}`} data-testid={`opt-${c.key}`}>
-                  <span className="lp-opt-label">{c.label}</span>
-                  <div className="lp-seg">
-                    {c.choices.map((ch) => (
-                      <button
-                        key={ch.value}
-                        type="button"
-                        aria-pressed={options[c.key] === ch.value}
-                        title={ch.title}
-                        data-testid={`opt-${c.key}-${ch.value}`}
-                        onClick={() => setOption(c.key, ch.value as never)}
-                      >
-                        {ch.label}
-                      </button>
-                    ))}
+              {isOpen && (
+                <div className="lp-body" id={`lp-body-${id}`} data-testid={`layer-body-${id}`}>
+                {mod.controls?.map((c) => (
+                  <div key={c.key} className="lp-line lp-sub lp-opt" role="group" aria-label={`${mod.label}の${c.label}`} data-testid={`opt-${c.key}`}>
+                    <span className="lp-opt-label">{c.label}</span>
+                    <div className="lp-seg">
+                      {c.choices.map((ch) => (
+                        <button
+                          key={ch.value}
+                          type="button"
+                          aria-pressed={options[c.key] === ch.value}
+                          title={ch.title}
+                          data-testid={`opt-${c.key}-${ch.value}`}
+                          onClick={() => setOption(c.key, ch.value as never)}
+                        >
+                          {ch.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
 
-              {legend.length > 0 && (
-                <ul className="lp-legend" data-testid={`legend-${id}`}>
-                  {legend.map((l) => (
-                    <li key={l.label}>
-                      <span
-                        className={`lp-swatch${l.swatch ? ` lp-swatch-${l.swatch}` : ''}`}
-                        style={l.swatch ? ({ '--sw': l.color.join(',') } as CSSProperties) : { background: `rgb(${l.color.join(',')})` }}
-                      />
-                      {l.label}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {notes.length > 0 && (
-                <details className="lp-notes" data-testid={`notes-${id}`}>
-                  <summary>読み方と注意</summary>
-                  {notes.map((n) => (
-                    <p key={n}>{n}</p>
-                  ))}
-                </details>
+                {legend.length > 0 && (
+                  <ul className="lp-legend" data-testid={`legend-${id}`}>
+                    {legend.map((l) => (
+                      <li key={l.label}>
+                        <span
+                          className={`lp-swatch${l.swatch ? ` lp-swatch-${l.swatch}` : ''}`}
+                          style={l.swatch ? ({ '--sw': l.color.join(',') } as CSSProperties) : { background: `rgb(${l.color.join(',')})` }}
+                        />
+                        {l.label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {notes.length > 0 && (
+                  <details className="lp-notes" data-testid={`notes-${id}`}>
+                    <summary>読み方と注意</summary>
+                    {notes.map((n) => (
+                      <p key={n}>{n}</p>
+                    ))}
+                  </details>
+                )}
+                </div>
               )}
             </li>
           );

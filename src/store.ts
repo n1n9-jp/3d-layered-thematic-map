@@ -29,6 +29,22 @@ export interface ViewState {
 /** 全体の地図と右の列の操作：「地点」（探針とクローズアップ）か、「断面」（2点の線に沿った変化）。 */
 export type UiMode = 'point' | 'section';
 
+/** 畳める見出し（アコーディオン）の開閉。初期状態はすべて閉じる。 */
+export interface OpenState {
+  /** レイヤー一覧で開いている行（同時に開けるのは1つ）。開いているあいだ、避難の行なら区の札を出す。 */
+  layer: LayerId | null;
+  /** 23区全体の「浸水の深さの区分ごとの人口」の表 */
+  table: boolean;
+  /** 23区全体の「数え方とデータの注意」 */
+  notes: boolean;
+  /** 地点の表（探針の値）で開いている行（同時に開けるのは1つ） */
+  row: LayerId | null;
+  /** 断面の「線に沿った集計」 */
+  section: boolean;
+}
+
+export const CLOSED: OpenState = { layer: null, table: false, notes: false, row: null, section: false };
+
 export interface SectionFocus {
   id: LayerId;
   from: 'chart' | 'map';
@@ -66,6 +82,7 @@ export interface MapState {
    * 'map' なら全体の地図の切り口の近くにカーソルがあり、右の対応するチャートを目立たせる。
    */
   sectionFocus: SectionFocus | null;
+  open: OpenState;
   data: Partial<Record<DataKey, unknown>>;
   status: Record<DataKey, LayerStatus>;
   setSpacing(v: number): void;
@@ -84,6 +101,9 @@ export interface MapState {
   setSectionCursor(p: MapState['sectionCursor']): void;
   setSectionHover(d: number | null): void;
   setSectionFocus(f: SectionFocus | null): void;
+  /** 見出しを開閉する。layer と row は同時に1つだけ開く（開いている見出しをもう一度押すと閉じる）。 */
+  toggleOpen(key: 'layer' | 'row', id: LayerId): void;
+  toggleOpen(key: 'table' | 'notes' | 'section'): void;
 }
 
 declare global {
@@ -104,7 +124,7 @@ const DEFAULT_VIEW: ViewState = {
 
 type InitialState = Pick<
   MapState,
-  'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius' | 'mode' | 'section' | 'options'
+  'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius' | 'mode' | 'section' | 'options' | 'open'
 >;
 
 function isLayerId(s: string): s is LayerId {
@@ -155,6 +175,22 @@ export function optionsQuery(search: string): LayerOptions {
   };
 }
 
+/**
+ * URL クエリの `open`（検査や撮影のために、開いた状態で始める）。カンマ区切りで、次のどれか。
+ * レイヤーID = レイヤー一覧のその行、`table` / `notes` = 23区全体の表・注記、`row:<レイヤーID>` = 地点の表のその行、`section` = 断面の集計。
+ * 合わないものは無視する。レイヤー一覧の行、地点の表の行は、複数書いても最初の1つだけ。
+ */
+export function openQuery(search: string): OpenState {
+  const out: OpenState = { ...CLOSED };
+  for (const raw of (new URLSearchParams(search).get('open') ?? '').split(',')) {
+    const t = raw.trim();
+    if (t === 'table' || t === 'notes' || t === 'section') out[t] = true;
+    else if (isLayerId(t)) out.layer ??= t;
+    else if (t.startsWith('row:') && isLayerId(t.slice(4))) out.row ??= t.slice(4) as LayerId;
+  }
+  return out;
+}
+
 function ids(v: string | null): LayerId[] {
   return (v ?? '')
     .split(',')
@@ -167,7 +203,8 @@ function ids(v: string | null): LayerId[] {
  * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
  * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）,
  * `section=<ax>,<ay>,<bx>,<by>`（断面の線。あれば「断面」に切り替わった状態で開く）,
- * `flood=max|river|tide`（浸水の想定）, `floodview=depth|duration`（浸水で見るもの）, `pop=total|elderly`（人口で見るもの）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
+ * `flood=max|river|tide`（浸水の想定）, `floodview=depth|duration`（浸水で見るもの）, `pop=total|elderly`（人口で見るもの）,
+ * `open=<layerId|table|notes|row:<layerId>|section>,...`（開いた状態で始める）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
@@ -215,6 +252,7 @@ export function initialStateFromQuery(search: string): InitialState {
     mode: section ? 'section' : 'point',
     section,
     options: optionsQuery(search),
+    open: openQuery(search),
   };
 }
 
@@ -260,6 +298,11 @@ export const useMapStore = create<MapState>()((set) => ({
   setSectionHover: (d) => set((s) => (s.sectionHover === d ? {} : { sectionHover: d })),
   setSectionFocus: (f) =>
     set((s) => (s.sectionFocus?.id === f?.id && s.sectionFocus?.from === f?.from ? {} : { sectionFocus: f })),
+  toggleOpen: (key: keyof OpenState, id?: LayerId) =>
+    set((s) => {
+      const next = key === 'layer' || key === 'row' ? { [key]: s.open[key] === (id ?? null) ? null : (id ?? null) } : { [key]: !s.open[key] };
+      return { open: { ...s.open, ...next } };
+    }),
 }));
 
 if (typeof window !== 'undefined') {

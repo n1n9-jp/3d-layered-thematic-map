@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialStateFromQuery, radiusQuery, useMapStore, viewQuery } from './store';
+import { CLOSED, initialStateFromQuery, openQuery, radiusQuery, useMapStore, viewQuery } from './store';
 import { DEFAULT_ANGLES, SPACING, VIEW_LIMITS } from './config';
 
 describe('initialStateFromQuery', () => {
@@ -151,5 +151,42 @@ describe('radiusQuery', () => {
     useMapStore.getState().setCloseupRadius(5000);
     expect(useMapStore.getState().closeupRadius).toBe(5000);
     useMapStore.getState().setCloseupRadius(2000);
+  });
+});
+
+describe('開閉（アコーディオン）', () => {
+  it('既定はすべて閉じている', () => {
+    expect(initialStateFromQuery('').open).toEqual(CLOSED);
+    expect(CLOSED).toEqual({ layer: null, table: false, notes: false, row: null, section: false });
+  });
+  it('open クエリ：レイヤーID、table、notes、row:<ID>、section。合わないものは無視する', () => {
+    expect(openQuery('?open=shelters')).toEqual({ ...CLOSED, layer: 'shelters' });
+    expect(openQuery('?open=table,notes,section')).toEqual({ ...CLOSED, table: true, notes: true, section: true });
+    expect(openQuery('?open=row:transit')).toEqual({ ...CLOSED, row: 'transit' });
+    expect(openQuery('?open=flood,shelters')).toEqual({ ...CLOSED, layer: 'flood' });
+    expect(openQuery('?open=row:nope,nope,')).toEqual(CLOSED);
+  });
+  it('レイヤーの行と地点の表の行は、同時に1つだけ開く。同じ見出しをもう一度押すと閉じる', () => {
+    const { toggleOpen } = useMapStore.getState();
+    toggleOpen('layer', 'flood');
+    expect(useMapStore.getState().open.layer).toBe('flood');
+    toggleOpen('layer', 'shelters');
+    expect(useMapStore.getState().open.layer).toBe('shelters');
+    toggleOpen('layer', 'shelters');
+    expect(useMapStore.getState().open.layer).toBeNull();
+    toggleOpen('row', 'transit');
+    toggleOpen('row', 'population');
+    expect(useMapStore.getState().open.row).toBe('population');
+    toggleOpen('row', 'population');
+    expect(useMapStore.getState().open.row).toBeNull();
+  });
+  it('表・注記・断面の集計は、それぞれ独立に開閉する', () => {
+    const { toggleOpen } = useMapStore.getState();
+    toggleOpen('table');
+    toggleOpen('notes');
+    expect(useMapStore.getState().open).toMatchObject({ table: true, notes: true, section: false });
+    toggleOpen('table');
+    expect(useMapStore.getState().open).toMatchObject({ table: false, notes: true });
+    toggleOpen('notes');
   });
 });

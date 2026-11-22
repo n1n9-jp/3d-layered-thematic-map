@@ -38,6 +38,7 @@ import type { XScale } from './model';
 import { planeCenterY, useTierScreen } from './tierScreen';
 import type { TierScreen } from './tierScreen';
 import { useSectionTracks } from './tracks';
+import Disclosure from '../info/Disclosure';
 import './SectionPanel.css';
 
 /**
@@ -413,16 +414,20 @@ function SectionHeadline({ line }: { line: SectionLine }) {
     () => (ready ? sectionFloodSummary(data.flood as FloodData, data.shelters as ShelterData, line, scenario) : null),
     [ready, data.flood, data.shelters, line, scenario],
   );
+  const open = useMapStore((s) => s.open.section);
+  const toggleOpen = useMapStore((s) => s.toggleOpen);
   if (!sum) return null;
   const km = (m: number) => `${(m / 1000).toFixed(1)} km`;
   const pct = sum.length > 0 ? Math.round((100 * sum.severeLength) / sum.length) : 0;
   return (
-    <div className="sc-headline" data-testid="section-headline" data-severe-m={Math.round(sum.severeLength)} data-shelters={sum.shelters}>
-      <div title={`想定：${SCENARIO_LABEL[scenario]}`}>
-        浸水 3m 以上：<b data-testid="section-severe">{km(sum.severeLength)}</b>（線の {pct}%）。その区間から {sum.radius / 1000} km 以内の、洪水・高潮用の避難場所：{' '}
-        <b data-testid="section-severe-shelters">{sum.shelters}</b> か所
+    <Disclosure id="section-headline" testId="section-summary-acc" open={open} onToggle={() => toggleOpen('section')} title="線に沿った集計" scrollIntoView>
+      <div className="sc-headline" data-testid="section-headline" data-severe-m={Math.round(sum.severeLength)} data-shelters={sum.shelters}>
+        <div title={`想定：${SCENARIO_LABEL[scenario]}`}>
+          浸水 3m 以上：<b data-testid="section-severe">{km(sum.severeLength)}</b>（線の {pct}%）。その区間から {sum.radius / 1000} km 以内の、洪水・高潮用の避難場所：{' '}
+          <b data-testid="section-severe-shelters">{sum.shelters}</b> か所
+        </div>
       </div>
-    </div>
+    </Disclosure>
   );
 }
 

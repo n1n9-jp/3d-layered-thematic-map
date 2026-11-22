@@ -5,7 +5,8 @@
  *   hover  ：カーソルを置いただけ。区名と「この地点」の値だけ
  *   pinned ：固定している。クローズアップと、「この地点」と「半径 ○km 内」を並べた表
  */
-import type { LayerId } from '../config';
+import type { LayerId, LayerOptions } from '../config';
+import { depthLabel } from '../layers/flood/classes';
 import type { LayerStatus } from '../store';
 import type { ProbeValue } from '../types';
 import { formatValue } from '../probe/formatValue';
@@ -100,4 +101,65 @@ export function areaHeading(radiusM: number): string {
 export function coordsText(p: { x: number; y: number }): string {
   const f = (v: number) => Math.round(v).toLocaleString('ja-JP');
   return `x ${f(p.x)} m, y ${f(p.y)} m`;
+}
+
+/* ---------- 閉じた行に出す「主な値」 ---------- */
+
+export interface PrimaryValue {
+  /** 値の見出し（レイヤー名と同じなら null） */
+  title: string | null;
+  text: string;
+}
+
+export interface SplitCell {
+  /** 閉じた行に出す、主な値1つ。マスが値を持たないときは null（状態の文字を出す） */
+  primary: PrimaryValue | null;
+  /** 行を開いたときに出す、残りの値（主な値と同じ内容の値は含めない） */
+  rest: ProbeValue[];
+}
+
+/** 最後の「（…）」の中の、最後の「・」より後ろ。避難場所の「名前（区・洪水・距離）」から、「名前（距離）」を作る。 */
+export function shorten(text: string): string | null {
+  const m = /^(.*)（([^（）]*)）$/s.exec(text);
+  if (!m) return null;
+  const last = m[2].split('・').at(-1);
+  return last ? `${m[1]}（${last}）` : null;
+}
+
+/** 浸水の深さの読み（「3〜5m」など）から、深さのランク。読めなければ -1（値なし・浸水なしより下）。 */
+function depthRankOf(v: ProbeValue | undefined): number {
+  if (!v || typeof v.value !== 'string') return -1;
+  for (let r = 0; r <= 6; r++) if (depthLabel(r) === v.value) return r;
+  return -1;
+}
+
+/**
+ * 「この地点」のマスから、閉じた行に出す主な値1つを選ぶ。
+ * 標高＝標高、浸水＝深さ（想定が「大きいほう」なら、深いほう）、人口＝人口、公共交通＝最寄り駅、避難＝最寄りの避難場所の名前と距離。
+ */
+export function splitCell(id: LayerId, values: readonly ProbeValue[], layerLabel: string, floodScenario: LayerOptions['floodScenario']): SplitCell {
+  if (values.length === 0) return { primary: null, rest: [] };
+  let index = 0;
+  if (id === 'flood') {
+    const river = values.findIndex((v) => v.label === '洪水の深さ');
+    const tide = values.findIndex((v) => v.label === '高潮の深さ');
+    if (floodScenario === 'river') index = river;
+    else if (floodScenario === 'tide') index = tide;
+    else index = depthRankOf(values[tide]) > depthRankOf(values[river]) ? tide : river;
+    if (index < 0) index = 0;
+  }
+  const v = values[index];
+  let text = valueText(v);
+  let complete = true;
+  if (id === 'shelters' && typeof v.value === 'string') {
+    const short = shorten(v.value);
+    if (short) {
+      text = short;
+      complete = false;
+    }
+  }
+  return {
+    primary: { title: id === 'flood' ? v.label : valueTitle(v, layerLabel), text },
+    rest: values.filter((_, i) => i !== index || !complete),
+  };
 }
