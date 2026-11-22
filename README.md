@@ -307,11 +307,31 @@ node -e "import('./scripts/lib/projection.mjs').then(({ toLocal }) => console.lo
 | ファイル | geometry | properties |
 | --- | --- | --- |
 | `boundary.geojson` | Polygon / MultiPolygon（区ごとに1 Feature） | `code`（市区町村コード5桁）, `name`（区名） |
-| `population.geojson` | Polygon（メッシュ1個ごと。4隅をたどって始点に戻る5点の閉じたリング） | `meshCode`, `population`（人）, `density`（人/km²） |
+| `population.geojson` | Polygon（メッシュ1個ごと。4隅をたどって始点に戻る5点の閉じたリング） | `meshCode`, `population`（人）, `density`（人/km²）, `elderly`（65歳以上人口。人）, `elderlyMerged`（真偽値） |
 | `roads.geojson` | LineString | `class`（`motorway` / `national` / `prefectural` / `other`）, `name`（なければ null） |
 | `rail.geojson` | LineString | `operator`（事業者名）, `line`（路線名） |
 | `stations.geojson` | Point | `name`（駅名）, `operator`, `line` |
 | `facilities.geojson` | Point | `kind`（`school` / `hospital`）, `name`, `subtype`（学校は学校種別、病院は「病院」） |
+| `shelters.geojson` | Point | `name`（施設・場所名）, `address`, `ward`（区名）, `flood`・`tide`・`inland`・`quake`・`fire`・`tsunami`・`landslide`（真偽値。順に 洪水・高潮・内水氾濫・地震・大規模な火事・津波・崖崩れ）, `note`（備考。なければ null） |
+
+人口の `elderly` と `elderlyMerged`、避難場所（`shelters.geojson` と `shelters.json`）の決まりは次のとおりです。
+
+- `elderly`（65歳以上人口）は 0 以上の整数です。
+  - 秘匿されたメッシュは `null` です（国勢調査の秘匿処理。総人口 `population` は秘匿されないので、値があります）。
+  - 元データに行がないメッシュ（人口 0）は 0 です。
+  - `elderlyMerged` が `true` のメッシュは、秘匿処理の**合算先**です。周辺の秘匿されたメッシュの分を値に含みます。そのため、元データでは 65歳以上が総人口を上回ることがあり、その場合は総人口を上限にして丸めています（250 m メッシュで 2 件、丸めた差は合わせて 5 人）。
+  - 既存の `meshCode`・`population`・`density` とメッシュの並びは変わりません。
+- `shelters.geojson` は、座標が23区内にある指定緊急避難場所の全件です。`ward` は、座標から求めた区名です（元データの共通ID の区コードではありません）。並びは、洪水か高潮で使える場所が先、それ以外が後で、それぞれの中は元データの並びのままです。
+- `shelters.json` は区ごとの集計です。
+
+```
+{ "updated": "2026-10-19", "total": 977,
+  "wards": [ { "code": "13101", "name": "千代田区", "total": 28, "flood": 23, "tide": 21, "published": true, "updated": "2025-03-10" }, ... ] }
+```
+
+  - `wards` は23区すべてを、コードの昇順で入れます。`total` はその区の避難場所の件数、`flood`・`tide` は、洪水・高潮で使える件数です。
+  - `published` は、その区がこのデータに指定緊急避難場所を公開しているか（0 件の区は `false`）です。墨田区・江東区・渋谷区・葛飾区は `false` で、指定避難所のデータだけを公開しています。「0 件」は、避難場所がないことではなく、データがないことを表します。
+  - `updated` は、23区の更新日のうち最も新しいものです。区ごとの `updated` は、国土地理院の「区ごとの更新日の一覧」の最終更新日です（区により 2025-01-23 から 2026-10-19 まで）。
 
 ファイルサイズの上限は、1ファイル 10MB、`public/data/` 全体で 30MB です（1MB = 1024 × 1024 byte）。
 
@@ -357,9 +377,10 @@ node -e "import('./scripts/lib/projection.mjs').then(({ toLocal }) => console.lo
 | レイヤー | 内容 |
 | --- | --- |
 | 標高 | 50 m 格子。各セルの値は、セルの中心での標高（m）。水面と、23区の外は、データなし |
-| 人口 | 250 m メッシュ（国勢調査の地域メッシュ統計）のうち、メッシュの中心が23区内にあるもの。人口と人口密度。500 m メッシュにも切り替えられる（`--size 500`、[データの再生成](#データの再生成)） |
+| 人口 | 250 m メッシュ（国勢調査の地域メッシュ統計）のうち、メッシュの中心が23区内にあるもの。人口と人口密度に加えて、65歳以上人口（`elderly`）。500 m メッシュにも切り替えられる（`--size 500`、[データの再生成](#データの再生成)）。65歳以上人口は、秘匿されたメッシュ（250 m で 123 個。メッシュの 1.3%、総人口の合計は 1,187 人）が `null` で、合算先のメッシュ（102 個）は周辺の秘匿メッシュの分を含む（`elderlyMerged: true`）。秘匿のメッシュの 65歳以上は、集計から漏れる |
 | 道路 | 高速道路・国道・都道府県道と、幅13 m 以上のその他の道路（通常部のみ。建設中は除く）。路線名（`name`）を持つのは高速道路だけ（国土数値情報の高速道路時系列データから付ける） |
 | 公共交通 | 鉄道の路線と駅。路線名は、法定上の線名 |
+| 避難場所 | 国土地理院の指定緊急避難場所のうち、座標が23区内にあるもの（977 件）。データだけを用意していて、画面のレイヤーにはまだ登録していません。**読み方の注意**：災害の種別ごとに指定されています（洪水で使える場所が、高潮や地震でも使えるとは限りません）。国土地理院のデータは、最新でない場合や、未掲載の場合があります。**区による偏りが大きく**、墨田区・江東区・渋谷区・葛飾区は、このデータに指定緊急避難場所を公開していません（0 件は「避難場所がない」ではなく「データがない」）。江戸川区（111 件）は全件が地震だけ、足立区（31 件）は地震と大規模な火事だけで、洪水・高潮として指定された場所は 0 件です。収容人数は含まれません。備考に「荒川が氾濫するおそれがある場合は、開設しない」のような開設の条件が入っているものがあります（`note`） |
 | 施設 | 学校と病院の位置。学校は小・中・義務教育・中等教育・高等学校・特別支援・高専・短大・大学（幼稚園・専修学校・各種学校と、休校中のものは除く）。医療機関は病院のみ（診療所・歯科診療所は除く） |
 
 ### 浸水想定の前提
@@ -390,13 +411,16 @@ node -e "import('./scripts/lib/projection.mjs').then(({ toLocal }) => console.lo
 ```sh
 node scripts/build-boundary.mjs       # 1. 区境界（最初）
 node scripts/build-elevation.mjs      # 2. 以降は順不同
-node scripts/build-population.mjs     #    250 m メッシュ（既定）
+node scripts/build-population.mjs     #    250 m メッシュ（既定）。65歳以上人口も入る
 node scripts/build-roads.mjs
 node scripts/build-transit.mjs
 node scripts/build-facilities.mjs
 node scripts/build-flood.mjs           #    浸水想定。標高との突き合わせ（確認）を出すので、標高の後に実行する
+node scripts/build-shelters.mjs       #    避難場所（区境界のあとに実行する）
 node scripts/validate-data.mjs --require-all   # 3. 検証（全ファイルがそろっていることも求める）
 ```
+
+避難場所は、国土地理院が区ごとに更新するため、取得し直すと件数が変わることがあります（この README の件数は 2026年10月19日の更新分）。人口の 65歳以上人口は、250 m メッシュの元データ（`tblT001142Q5339.txt`）の `T001142019`（500 m メッシュは `T001141019`）です。
 
 人口だけ 500 m メッシュにするときは、`node scripts/build-population.mjs --size 500` を実行します。出力先は同じ `public/data/population.geojson` で、**上書き**されます（元データは別の統計表。メッシュ数は 250 m が 9,509、500 m が 2,382）。250 m に戻すには、オプションなしでもう一度実行します。
 
@@ -411,6 +435,7 @@ node scripts/validate-data.mjs --require-all   # 3. 検証（全ファイルが�
 | `build-transit.mjs` | `rail.geojson`, `stations.geojson` | 国土数値情報の鉄道データ（全国、約 15 MB）。区内に頂点がある路線と、区内にある駅を残す | 3 秒（取得済みなら 1 秒） |
 | `build-facilities.mjs` | `facilities.geojson` | 国土数値情報の学校データ（東京都、約 0.7 MB）と医療機関データ（東京都、約 5 MB） | 2 秒（取得済みなら 1 秒） |
 | `build-flood.mjs` | `flood.json`, `flood-river.bin`, `flood-tide.bin`, `flood-river-duration.bin`, `flood-tide-duration.bin` | 国土数値情報の洪水浸水想定区域データ（A31b、1次メッシュ 5339。洪水予報河川・水位周知河川の ZIP が約 115 MB（展開すると約 1.0 GB）、その他の河川の ZIP が約 35 MB（同 約 280 MB））と、東京都港湾局の高潮浸水想定区域図（浸水深の `shape(depth).zip` 約 45 MB と、浸水継続時間の `shape(term).zip` 約 40 MB。図郭ごとの `.dbf` だけを読む）。ZIP は `.cache/` に保存し、洪水は展開しながら1行ずつ読むので、1 GB をディスクに書き出すことはない。洪水は走査線法でセルに塗り（セルの中心が多角形の内側か。重なるセルは最大のランク）、高潮は 10 m セル（浸水深は約 186 万件、継続時間は約 163 万件）の、50 m セルの中の最大から決める（継続時間は 1週間以上をランク 5 にまとめる）。`--check` で生成済みの出力だけを確認（地点、ランクごとのセル数、標高との突き合わせ）、`--preview dir` で確認用の画像（北が上）を書く | 27 秒（取得済みなら。初回は取得の 15 秒ほどが加わる） |
+| `build-shelters.mjs` | `shelters.geojson`, `shelters.json` | 国土地理院の指定緊急避難場所データ（東京都分の CSV、約 0.3 MB。UTF-8、BOM 付き）と、区ごとの更新日の一覧（約 0.1 MB）。座標が23区内のものを残し、座標から区を求めて、区ごとに集計する。共通ID の区コードと座標から求めた区が食い違う件数（実データで 1 件）を表示する | 2 秒（取得済みなら 1 秒未満） |
 
 所要時間は、この README の手順をクラウド上の Linux 環境（回線は高速）で実行したときの実測です。浸水想定を除いて、全部で、初回は 1 分弱、`.cache/` に取得済みなら 20 秒ほどです。`.cache/` 全体は 120 MB 前後（標高タイルが約 22 MB）になります。浸水想定は、`.cache/` を約 235 MB 増やし、処理は 20 秒あまりかかります（洪水の約 82 万の地物を JSON として読む時間が大半です）。回線や環境によって変わります。
 
@@ -423,6 +448,8 @@ node scripts/validate-data.mjs public/data-fixture --require-all   # 仮デー�
 node scripts/build-elevation.mjs --check         # 標高を既知の地点と照合する
 node scripts/build-flood.mjs --check             # 浸水想定を、既知の地点・標高と突き合わせる
 ```
+
+避難場所と高齢者については、`shelters.geojson` の項目（真偽値、並び、座標が区の内側で、`ward` が座標から求めた区名と一致するか）、`shelters.json`（区のコードの昇順、`published` と件数の関係、`shelters.geojson` を数え直した件数との一致、区境界の区と一致するか）、`population.geojson` の `elderly`（`null` か 0 以上の整数で、総人口以下）と `elderlyMerged`（真偽値）も検査します。
 
 違反があると終了コード 1 で終わります（引数やディレクトリの誤りは 2）。ファイルが未作成のものは「未作成」と表示します。
 
@@ -538,9 +565,10 @@ import Credits from './panel/Credits';
 | --- | --- | --- |
 | 区の境界 | 「国土数値情報（行政区域データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-2026.html）を加工して作成 | 2026年1月1日 |
 | 標高 | 「標高タイル（基盤地図情報数値標高モデル）」（国土地理院）（https://maps.gsi.go.jp/development/ichiran.html）をもとに作成 | 航空レーザ測量による5mメッシュ（DEM5A） |
-| 人口 | 総務省統計局「令和2年国勢調査 地域メッシュ統計（250mメッシュ、世界測地系）」政府統計の総合窓口(e-Stat)（https://www.e-stat.go.jp/）を加工して作成 | 2020年10月1日（国勢調査） |
+| 人口（65歳以上人口を含む） | 総務省統計局「令和2年国勢調査 地域メッシュ統計（250mメッシュ、世界測地系）」政府統計の総合窓口(e-Stat)（https://www.e-stat.go.jp/）を加工して作成 | 2020年10月1日（国勢調査） |
 | 道路 | 「国土数値情報（道路データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N13-2024.html）を加工して作成。高速道路の路線名は「国土数値情報（高速道路時系列データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N06-2025.html）を加工して作成 | 2024年9月 |
 | 鉄道と駅 | 「国土数値情報（鉄道データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2025.html）を加工して作成 | 2025年12月31日 |
+| 避難場所 | 「『指定緊急避難場所データ』（国土地理院）（https://www.gsi.go.jp/bousaichiri/hinanbasho.html）を加工して作成」 | 区ごとに異なる（最終更新日は 2025年1月23日〜2026年10月19日）。データの取得は 2026年11月 |
 | 学校 | 「国土数値情報（学校データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P29-2023.html）を加工して作成 | 2023年度 |
 | 病院 | 「国土数値情報（医療機関データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P04-2020.html）を加工して作成 | 2020年度 |
 | 浸水想定（洪水） | 「国土数値情報（洪水浸水想定区域データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A31b-2025.html）を加工して作成 | 2025年度版（想定最大規模） |
@@ -552,3 +580,4 @@ import Credits from './panel/Credits';
 - 政府統計の総合窓口(e-Stat)：https://www.e-stat.go.jp/terms-of-use
 - 国土地理院コンテンツ利用規約：https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html
 - 東京都港湾局の高潮浸水想定区域図：クリエイティブ・コモンズ表示 4.0 国際（CC BY 4.0）https://creativecommons.org/licenses/by/4.0/deed.ja
+  - 避難場所は、利用上の注意として、データが最新でない場合や未掲載の場合があること、災害の種別ごとに指定されていることを、利用者に正確に伝えることが求められています（上の[各レイヤーの内容](#各レイヤーの内容)）。

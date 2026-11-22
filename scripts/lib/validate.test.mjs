@@ -19,6 +19,8 @@ import {
   validateFileSizes,
   validateFlood,
   validateGeoJson,
+  validateShelterSummary,
+  validateSheltersInWards,
 } from './validate.mjs';
 
 const run = promisify(execFile);
@@ -71,6 +73,7 @@ describe('生成した仮データ', () => {
     const kinds = g['facilities.geojson'].features.map((f) => f.properties.kind);
     expect(kinds.filter((k) => k === 'school')).toHaveLength(150);
     expect(kinds.filter((k) => k === 'hospital')).toHaveLength(40);
+    expect(g['shelters.geojson'].features.length).toBe(fixtures.shelterSummary.total);
     const classes = new Set(g['roads.geojson'].features.map((f) => f.properties.class));
     expect([...classes].sort()).toEqual(['motorway', 'national', 'other', 'prefectural']);
   });
@@ -192,6 +195,214 @@ describe('validateGeoJson の違反検出', () => {
     const ring = json.features[0].geometry.coordinates[0];
     ring[ring.length - 1] = [1, 1];
     expect(messages(validateGeoJson('boundary.geojson', json))).toContain('閉じていない');
+  });
+});
+
+describe('仮データの避難場所・高齢者', () => {
+  const wardsOut = fixtures.shelterSummary.wards;
+
+  it('6区のうち1区が未公開（0件）、1区が洪水・高潮 0 件', () => {
+    expect(wardsOut).toHaveLength(6);
+    expect(wardsOut.filter((w) => !w.published)).toHaveLength(1);
+    expect(wardsOut.filter((w) => w.published && w.flood === 0 && w.tide === 0)).toHaveLength(1);
+  });
+
+  it('洪水か高潮で使える場所が先に並ぶ', () => {
+    const flags = fixtures.geojson['shelters.geojson'].features.map((f) => f.properties.flood || f.properties.tide);
+    const firstOther = flags.indexOf(false);
+    expect(firstOther).toBeGreaterThan(0);
+    expect(flags.slice(firstOther).every((x) => x === false)).toBe(true);
+  });
+
+  it('人口メッシュに、秘匿（null）・合算先・通常の高齢者人口がある', () => {
+    const props = fixtures.geojson['population.geojson'].features.map((f) => f.properties);
+    expect(props.some((p) => p.elderly === null)).toBe(true);
+    expect(props.some((p) => p.elderlyMerged === true)).toBe(true);
+    expect(props.some((p) => typeof p.elderly === 'number' && !p.elderlyMerged)).toBe(true);
+    expect(props.every((p) => p.elderly === null || p.elderly <= p.population)).toBe(true);
+  });
+});
+
+describe('shelters.geojson の検査', () => {
+  const base = () => clone(fixtures.geojson['shelters.geojson']);
+  const check = (json) => validateGeoJson('shelters.geojson', json);
+
+  it('災害種別が真偽値でないもの（"1" や 1）と、欠落を検出する', () => {
+    const json = base();
+    json.features[0].properties.inland = '1';
+    json.features[1].properties.quake = 1;
+    delete json.features[2].properties.tsunami;
+    const r = check(json);
+    expect(r.violationCount, messages(r)).toBe(3);
+    expect(messages(r)).toContain('features[0].properties.inland');
+    expect(messages(r)).toContain('features[1].properties.quake');
+    expect(messages(r)).toContain('項目 tsunami がない');
+  });
+
+  it('ward は空でない文字列、note は文字列か null', () => {
+    const json = base();
+    json.features[0].properties.ward = '';
+    json.features[1].properties.note = 5;
+    json.features[2].properties.note = null;
+    expect(check(json).violationCount).toBe(2);
+  });
+
+  it('洪水か高潮で使える場所が、それ以外より後ろにあれば違反（並びの検査）', () => {
+    const json = base();
+    json.features.reverse();
+    const r = check(json);
+    expect(r.violationCount).toBe(1);
+    expect(messages(r)).toContain('先に並べる');
+  });
+
+  it('Point 以外を検出し、要約に洪水・高潮の件数を出す', () => {
+    const json = base();
+    json.features[0].geometry = { type: 'LineString', coordinates: [[0, 0], [1, 1]] };
+    expect(check(json).violationCount).toBe(1);
+    expect(check(base()).summary.join('\n')).toMatch(/洪水 \d+、高潮 \d+、洪水または高潮 \d+/);
+  });
+});
+
+describe('population.geojson の elderly / elderlyMerged の検査', () => {
+  const base = () => clone(fixtures.geojson['population.geojson']);
+  const check = (json) => validateGeoJson('population.geojson', json);
+
+  it('elderly が null（秘匿）でも、0以上の整数でもよい', () => {
+    const json = base();
+    json.features[0].properties.elderly = null;
+    json.features[1].properties.elderly = 0;
+    expect(check(json).violationCount).toBe(0);
+  });
+
+  it('elderly が負・小数・文字列・欠落なら違反', () => {
+    const json = base();
+    json.features[0].properties.elderly = -1;
+    json.features[1].properties.elderly = 1.5;
+    json.features[2].properties.elderly = '3';
+    delete json.features[3].properties.elderly;
+    expect(check(json).violationCount).toBe(4);
+  });
+
+  it('elderlyMerged が真偽値でなければ違反', () => {
+    const json = base();
+    json.features[0].properties.elderlyMerged = 1;
+    delete json.features[1].properties.elderlyMerged;
+    expect(check(json).violationCount).toBe(2);
+  });
+
+  it('elderly が population を上回れば違反（総人口を上限にして丸める）', () => {
+    const json = base();
+    const p = json.features[0].properties;
+    p.elderly = p.population + 1;
+    const r = check(json);
+    expect(r.violationCount).toBe(1);
+    expect(messages(r)).toContain('上回っている');
+    p.elderly = p.population;
+    expect(check(json).violationCount).toBe(0);
+  });
+
+  it('要約に、65歳以上人口の合計と、秘匿・合算先のメッシュ数を出す', () => {
+    expect(check(base()).summary.join('\n')).toMatch(/65歳以上人口の合計: [\d,]+（秘匿 \d+ メッシュ、合算先 \d+ メッシュ）/);
+  });
+});
+
+describe('validateShelterSummary', () => {
+  const base = () => clone(fixtures.shelterSummary);
+  const sheltersGeoJson = fixtures.geojson['shelters.geojson'];
+  const boundaryWards = fixtures.geojson['boundary.geojson'].features.map((f) => ({ code: f.properties.code, name: f.properties.name }));
+  const check = (json, opts = { geojson: sheltersGeoJson, boundaryWards }) => validateShelterSummary(json, opts);
+
+  it('仮データは、shelters.geojson と区境界との突き合わせも含めて通る', () => {
+    const r = check(base());
+    expect(r.violationCount, messages(r)).toBe(0);
+    expect(r.summary.join('\n')).toContain('未公開の区: 仮D区');
+  });
+
+  it('updated が日付でなければ違反。区の updated は省略してもよい', () => {
+    const json = base();
+    json.updated = '2025/03/10';
+    delete json.wards[0].updated;
+    const r = check(json);
+    expect(r.violationCount, messages(r)).toBe(1);
+    expect(messages(r)).toContain('updated');
+  });
+
+  it('コードの昇順でない・重複・不正なコードを検出する', () => {
+    const json = base();
+    [json.wards[0], json.wards[1]] = [json.wards[1], json.wards[0]];
+    expect(messages(check(json, {}))).toContain('昇順');
+    const dup = base();
+    dup.wards[1].code = dup.wards[0].code;
+    expect(messages(check(dup, {}))).toContain('重複');
+    const bad = base();
+    bad.wards[0].code = '131';
+    expect(messages(check(bad, {}))).toContain('5桁');
+  });
+
+  it('flood / tide が total を上回る、整数でないものを検出する', () => {
+    const json = base();
+    json.wards[0].flood = json.wards[0].total + 1;
+    json.wards[1].tide = 0.5;
+    const r = check(json, {});
+    expect(messages(r)).toContain('上回っている');
+    expect(messages(r)).toContain('wards[1].tide');
+  });
+
+  it('published が total > 0 と食い違えば違反', () => {
+    const json = base();
+    const i = json.wards.findIndex((w) => !w.published);
+    json.wards[i].published = true;
+    expect(messages(check(json, {}))).toContain('published');
+  });
+
+  it('total が区ごとの合計と食い違えば違反', () => {
+    const json = base();
+    json.total += 1;
+    expect(messages(check(json, {}))).toContain('合計');
+  });
+
+  it('boundary.geojson と区の集合・名称が違えば違反', () => {
+    const json = base();
+    json.wards.pop();
+    expect(messages(check(json))).toContain('がない');
+    const renamed = base();
+    renamed.wards[0].name = '別の区';
+    expect(messages(check(renamed))).toContain('boundary.geojson');
+  });
+
+  it('shelters.geojson の数え直しと、区ごとの件数・全体の件数が食い違えば違反', () => {
+    const json = base();
+    json.wards[0].flood -= 1;
+    const r = check(json);
+    expect(messages(r)).toContain('数え直し');
+    const geo = clone(sheltersGeoJson);
+    geo.features.pop();
+    expect(messages(check(base(), { geojson: geo }))).toContain('一致しない');
+  });
+
+  it('オブジェクトでない JSON、wards が配列でない JSON は違反', () => {
+    expect(check([]).violationCount).toBe(1);
+    expect(check({ updated: '2025-01-01', total: 0, wards: null }).violationCount).toBe(1);
+  });
+});
+
+describe('validateSheltersInWards', () => {
+  const wards = fixtureWards;
+  const base = () => clone(fixtures.geojson['shelters.geojson']);
+
+  it('仮データは全件が区の内側で、ward が座標から求めた区名と一致する', () => {
+    const r = validateSheltersInWards(base(), wards);
+    expect(r.violationCount, messages(r)).toBe(0);
+  });
+
+  it('区の外の点と、ward が座標と違う点を検出する', () => {
+    const json = base();
+    json.features[0].geometry.coordinates = [16000, 16000];
+    json.features[1].properties.ward = '別の区';
+    const r = validateSheltersInWards(json, wards);
+    expect(r.violationCount).toBe(2);
+    expect(messages(r)).toContain('どの区にも含まれない');
+    expect(messages(r)).toContain('座標から求めた区名');
   });
 });
 
@@ -434,6 +645,7 @@ describe('validateDirectory', () => {
     for (const [name, fc] of Object.entries(fixtures.geojson)) {
       if (!skip.includes(name)) await writeFile(path.join(dir, name), JSON.stringify(fc));
     }
+    if (!skip.includes('shelters.json')) await writeFile(path.join(dir, 'shelters.json'), JSON.stringify(fixtures.shelterSummary));
     if (!skip.includes('elevation.json')) await writeFile(path.join(dir, 'elevation.json'), JSON.stringify(fixtures.elevation.meta));
     if (!skip.includes('elevation.bin')) await writeFile(path.join(dir, 'elevation.bin'), fixtures.elevation.bin);
     const flood = { [FLOOD_FILES.meta]: JSON.stringify(floodFixture.meta) + '\n', [FLOOD_FILES.riverDepth]: floodFixture.bins.riverDepth, [FLOOD_FILES.tideDepth]: floodFixture.bins.tideDepth, [FLOOD_FILES.riverDuration]: floodFixture.bins.riverDuration, [FLOOD_FILES.tideDuration]: floodFixture.bins.tideDuration };
@@ -549,6 +761,37 @@ describe('validateDirectory', () => {
       const entry = report.entries.find((e) => e.name === 'flood.json + flood-*.bin');
       expect(entry.status).toBe('ok');
       expect(entry.summary.join('\n')).toContain('boundary.geojson がないので検査していない');
+    }));
+
+  it('shelters.json が未作成なら、ほかのファイルが揃っていても --require-all では違反（なければ「未作成」）', () =>
+    withDir(async (dir) => {
+      await writeAll(dir, { skip: ['shelters.json'] });
+      expect((await validateDirectory(dir)).entries.find((e) => e.name === 'shelters.json').status).toBe('missing');
+      const strict = await validateDirectory(dir, { requireAll: true });
+      expect(strict.entries.find((e) => e.name === 'shelters.json').status).toBe('ng');
+    }));
+
+  it('shelters.geojson が区の外にある点を含めば、ディレクトリ検証で違反（boundary.geojson があるとき）', () =>
+    withDir(async (dir) => {
+      await writeAll(dir);
+      const geo = clone(fixtures.geojson['shelters.geojson']);
+      geo.features[0].geometry.coordinates = [16000, 16000];
+      await writeFile(path.join(dir, 'shelters.geojson'), JSON.stringify(geo));
+      const report = await validateDirectory(dir, { requireAll: true });
+      const entry = report.entries.find((e) => e.name === 'shelters.geojson');
+      expect(entry.status).toBe('ng');
+      expect(entry.violations.map((x) => x.message).join('\n')).toContain('どの区にも含まれない');
+    }));
+
+  it('shelters.json の件数が shelters.geojson と食い違えば、ディレクトリ検証で違反', () =>
+    withDir(async (dir) => {
+      await writeAll(dir);
+      const summary = clone(fixtures.shelterSummary);
+      summary.wards[0].total += 1;
+      summary.total += 1;
+      await writeFile(path.join(dir, 'shelters.json'), JSON.stringify(summary));
+      const report = await validateDirectory(dir, { requireAll: true });
+      expect(report.entries.find((e) => e.name === 'shelters.json').status).toBe('ng');
     }));
 
   it('壊れた JSON は違反として報告する', () =>
