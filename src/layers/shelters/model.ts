@@ -371,6 +371,8 @@ export function shelterOverview(data: ShelterData): {
   hospitals: number;
   unpublished: string[];
   zeroUsable: string[];
+  /** 洪水・高潮用が 0 件の区の、それ以外の避難場所の数（区名と件数） */
+  zeroUsableOther: { name: string; total: number }[];
   updated: string;
 } {
   return {
@@ -379,6 +381,7 @@ export function shelterOverview(data: ShelterData): {
     hospitals: data.points.hospital.length,
     unpublished: data.wards.filter((w) => !w.published).map((w) => w.name),
     zeroUsable: data.wards.filter((w) => w.published && w.usable === 0).map((w) => w.name),
+    zeroUsableOther: data.wards.filter((w) => w.published && w.usable === 0).map((w) => ({ name: w.name, total: w.total })),
     updated: data.summary.updated,
   };
 }

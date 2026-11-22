@@ -12,7 +12,12 @@ import type { LayerStatus } from '../store';
 import type { BoundaryData, SectionLine, SectionMarks, SectionSeries, SectionTrack } from '../types';
 import { SUMMARY_H, placeCharts, stackedPlacement } from './alignment';
 import type { AlignMode, Placement, Tier } from './alignment';
-import { releaseSection } from './controller';
+import { placeSection, releaseSection } from './controller';
+import { EXAMPLE_LINES } from './examples';
+import { sectionFloodSummary } from '../aggregate/sectionExposure';
+import type { FloodData } from '../layers/flood/model';
+import type { ShelterData } from '../layers/shelters/model';
+import { SCENARIO_LABEL } from '../layers/flood/classes';
 import {
   bandQuads,
   cappedMax,
@@ -243,7 +248,7 @@ const Chart = memo(function Chart({ id, tracks, length, width, frameH, hoverD, h
     let lastY = Infinity;
     for (const r of [...series.ranks].reverse()) {
       const y = yOfValue(r.value);
-      if (lastY - y < RANK_LABEL_GAP && out.length > 0) continue;
+      if (out.length > 0 && y - lastY < RANK_LABEL_GAP) continue;
       out.push({ v: r.value, text: r.short });
       lastY = y;
     }
@@ -390,6 +395,30 @@ function Ends({ line }: { line: SectionLine }) {
   );
 }
 
+/** 線に沿った集計：浸水 3m 以上の区間の長さと、その区間から 1 km 以内の、洪水・高潮で使える避難場所の数。 */
+function SectionHeadline({ line }: { line: SectionLine }) {
+  const data = useMapStore((s) => s.data);
+  const status = useMapStore((s) => s.status);
+  const scenario = useMapStore((s) => s.options.floodScenario);
+  const ready = status.flood === 'ready' && status.shelters === 'ready';
+  const sum = useMemo(
+    () => (ready ? sectionFloodSummary(data.flood as FloodData, data.shelters as ShelterData, line, scenario) : null),
+    [ready, data.flood, data.shelters, line, scenario],
+  );
+  if (!sum) return null;
+  const km = (m: number) => `${(m / 1000).toFixed(1)} km`;
+  const pct = sum.length > 0 ? Math.round((100 * sum.severeLength) / sum.length) : 0;
+  return (
+    <div className="sc-headline" data-testid="section-headline" data-severe-m={Math.round(sum.severeLength)} data-shelters={sum.shelters}>
+      <div>
+        浸水 3m 以上の区間 <b data-testid="section-severe">{km(sum.severeLength)}</b>（線の {pct}%）。その区間から {sum.radius / 1000} km 以内の、洪水・高潮で使える避難場所は{' '}
+        <b data-testid="section-severe-shelters">{sum.shelters}</b> か所。
+      </div>
+      <div className="ic-dim">想定：{SCENARIO_LABEL[scenario]}</div>
+    </div>
+  );
+}
+
 function Placeholder({ status, label, frameH, width }: { status: LayerStatus; label: string; frameH: number; width: number }) {
   return (
     <>
@@ -478,6 +507,15 @@ export default function SectionBody() {
             <p>全体の地図の平面を1回クリックすると始点（A）、もう1回クリックすると終点（B）が決まります。</p>
             <p>2点を結ぶ線で全レイヤーを縦に切り、線に沿った変化を、地図の中に立てたグラフと、ここの平らなグラフで見比べられます。</p>
             <p>線を引いたあとは、両端の印か線をドラッグして動かせます。端点の外をクリックすると引き直し、Esc で消します。</p>
+            <div className="sc-examples" data-testid="section-examples">
+              <p className="sc-examples-title">まず、例の線をクリックして見る</p>
+              {EXAMPLE_LINES.map((e) => (
+                <button key={e.id} type="button" className="sc-example" data-testid="section-example" data-example={e.id} onClick={() => placeSection(e.line)}>
+                  <b>{e.title}</b>
+                  <span>{e.note}</span>
+                </button>
+              ))}
+            </div>
           </>
         )}
       </div>
@@ -496,6 +534,7 @@ export default function SectionBody() {
           </span>
         </div>
         <Ends line={line} />
+        <SectionHeadline line={line} />
       </header>
       {/* チャートを置く領域。各チャートは、全体の地図の対応する段と同じ高さに置く。置けないときは、上から順に並べる。 */}
       <div

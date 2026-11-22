@@ -204,3 +204,120 @@
 .ic-v + .ic-v {
   margin-top: 1px;
 }
+
+/* 23区全体の集計（何も選んでいないとき）。 */
+.ic-overall {
+  flex: 1 1 0;
+  max-height: none;
+  min-height: 0;
+  border-top: none;
+}
+.ov {
+  padding: 10px 12px 0;
+}
+.ov-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+.ov-lead {
+  font-size: 12.5px;
+}
+.ic-hint-short {
+  padding: 6px 12px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ic-hint-short p {
+  margin: 0;
+}
+
+/* 「浸水が想定される区域に住む人」の表（23区全体とクローズアップで共通）。 */
+.ex {
+  padding: 8px 12px 6px;
+}
+.ex-title {
+  margin: 0 0 2px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #cfe3f5;
+}
+.ex-scenario {
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #ffb000;
+}
+.ex-line {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #d8dee8;
+}
+.ex-line b {
+  color: #fff;
+}
+.ex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.ex-table th,
+.ex-table td {
+  padding: 2px 4px;
+  text-align: left;
+  font-weight: 400;
+  vertical-align: top;
+}
+.ex-table thead th {
+  color: #9aa;
+  font-size: 10.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.ex-table tbody th {
+  color: #cfd8e6;
+  white-space: nowrap;
+}
+.ex-table td {
+  font-variant-numeric: tabular-nums;
+}
+.ex-table tbody tr + tr > * {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ex-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  vertical-align: -1px;
+}
+.ex-total th,
+.ex-total td {
+  border-top: 1px solid rgba(255, 255, 255, 0.28) !important;
+  color: #fff;
+}
+.ex-below th,
+.ex-below td {
+  color: #8fd3ff;
+}
+.ex-notes {
+  margin-top: 4px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #8e97a4;
+}
+.ex-notes p {
+  margin: 0 0 2px;
+}
+
+/* 試作であることと、避難の判断に使えないことを、どの状態でも見える位置に。 */
+.ic-foot {
+  flex: none;
+  padding: 5px 12px 0;
+  border-top: 1px solid rgba(255, 176, 0, 0.35);
+  font-size: 11px;
+  line-height: 1.4;
+  color: #e6c36a;
+}

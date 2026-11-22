@@ -38,6 +38,14 @@ export default function App() {
   return (
     <>
       <StackView columnWidth={cw} />
+      {/* 何の地図かが、開いてすぐ分かる題。ドラッグなどの操作は、題の下の地図にそのまま届く。 */}
+      <header data-testid="page-title" style={{ position: 'absolute', top: 14, left: 18, maxWidth: 350, pointerEvents: 'none', color: '#fff', font: '14px sans-serif' }}>
+        <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700, lineHeight: 1.3 }}>東京23区の水害を読む地図</h1>
+        <p style={{ margin: '5px 0 0', fontSize: 12.5, lineHeight: 1.55, color: '#b9c3d1' }}>
+          海面より低い土地に、どれだけの人（うち高齢者）が住み、浸水はどれだけ深く、水はいつ引き、避難できる場所はどこにあるか。5枚の層を重ねて読みます。
+        </p>
+        <p style={{ margin: '5px 0 0', fontSize: 11.5, lineHeight: 1.5, color: '#e6c36a' }}>試作です。避難の判断には使えません。</p>
+      </header>
       <InfoColumn width={cw} />
       <div
         style={{

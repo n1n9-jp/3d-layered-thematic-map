@@ -15,6 +15,7 @@ import { useMapStore } from '../store';
 import type { BoundaryData } from '../types';
 import { RIGHT_PANEL_W } from '../view/layout';
 import { useElementSize } from '../view/useElementSize';
+import Overall, { ExposureTable } from './Overall';
 import { areaHeading, buildRows, columnMode, coordsText, valueText, valueTitle } from './infoModel';
 import type { Cell, InfoRow } from './infoModel';
 import './InfoColumn.css';
@@ -160,6 +161,9 @@ function PinnedBody({ p }: { p: Point }) {
       </div>
       <div className="ic-scroll" data-testid="info-scroll">
         <InfoTable rows={rows} areaTitle={areaHeading(radius)} />
+        {cut.exposure && (
+          <ExposureTable exposure={cut.exposure} testId="closeup-exposure" caption={`${areaHeading(radius)}：浸水が想定される区域に住む人`} />
+        )}
       </div>
     </>
   );
@@ -220,15 +224,22 @@ export default function InfoColumn({ width }: { width: number }) {
       {mode === 'section' ? (
         <SectionBody />
       ) : mode === 'empty' || probe === null ? (
-        <div className="ic-hint" data-testid="info-hint">
-          <p>平面にカーソルを置くと、その地点の各層の値を読めます。</p>
-          <p>クリックで固定すると、周辺のクローズアップと、半径内の集計が出ます。</p>
-        </div>
+        <>
+          <div className="ic-scroll ic-scroll-solo ic-overall" data-testid="overall-scroll">
+            <Overall />
+            <div className="ic-hint ic-hint-short" data-testid="info-hint">
+              <p>平面にカーソルを置くと各層の値、クリックで固定すると周辺のクローズアップ（半径内の集計つき）が出ます。「断面」では、線で切って見られます。</p>
+            </div>
+          </div>
+        </>
       ) : mode === 'hover' ? (
         <HoverBody p={probe} />
       ) : (
         <PinnedBody p={probe} />
       )}
+      <footer className="ic-foot" data-testid="disclaimer">
+        試作です。避難の判断には使えません。実際の避難は、各区のハザードマップと避難情報に従ってください。
+      </footer>
     </section>
   );
 }

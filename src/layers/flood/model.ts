@@ -253,9 +253,21 @@ export function summarizeFlood(data: FloodData, options: LayerOptions): ProbeVal
 /** 断面で値を取る間隔（m）。標高と同じ。 */
 export const FLOOD_SECTION_STEP = 25;
 
+/** 隣り合う標本 lo と hi（値が違う）の間で、値が lo のものから変わる位置を、二分法で求める（段の境目の精度を、標本の間隔より細かくする）。 */
+function boundaryBetween(lo: number, hi: number, vLo: number | null, valueAt: (d: number) => number | null): number {
+  let a = lo;
+  let b = hi;
+  for (let i = 0; i < 8; i++) {
+    const mid = (a + b) / 2;
+    if (valueAt(mid) === vLo) a = mid;
+    else b = mid;
+  }
+  return (a + b) / 2;
+}
+
 /**
  * 線に沿った、段の位置の階段状の系列。値は段の位置（0 = 浸水なし、1〜）で、23区の外は null。
- * 同じ段が続く間は1つの段にまとめ、段の境目は隣り合う標本の中間に置く。
+ * 同じ段が続く間は1つの段にまとめる。段の境目は、値が変わる2つの標本の間を二分法で詰めて求める（標本は 25 m ごと、セルは 50 m）。
  * 縦軸は段のラベル（`ranks`）で読む。
  */
 export function sectionFlood(data: FloodData, line: SectionLine, options: LayerOptions): SectionSeries {
@@ -287,7 +299,7 @@ export function sectionFlood(data: FloodData, line: SectionLine, options: LayerO
   const pts = series.points;
   for (let k = 1; k <= samples.length; k++) {
     if (k < samples.length && samples[k].v === samples[start].v) continue;
-    const to = k < samples.length ? (samples[k - 1].d + samples[k].d) / 2 : len;
+    const to = k < samples.length ? boundaryBetween(samples[k - 1].d, samples[k].d, samples[k - 1].v, valueAt) : len;
     pts.push({ d: from, value: samples[start].v }, { d: to, value: samples[start].v });
     from = to;
     start = k;

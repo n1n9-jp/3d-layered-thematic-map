@@ -13,6 +13,7 @@ import type { MapState } from '../store';
 import { clearSection, clickSection, distanceAlongLine } from './interaction';
 import type { LineHeight } from './interaction';
 import { standHeight } from './model';
+import type { SectionLine } from '../types';
 
 /** カーソルが切り口の線の「近く」と見なす距離（px）。 */
 export const HOVER_NEAR_PX = 14;
@@ -80,6 +81,16 @@ export function onSectionClick(info: PickingInfo): void {
   s.setSectionStart(next.start);
   s.setSectionCursor(null);
   s.setSectionHover(null);
+}
+
+/** 例の線を、そのまま引く（クリックで始点・終点を置くのと同じ状態にする）。 */
+export function placeSection(line: SectionLine): void {
+  const s = useMapStore.getState();
+  s.setSection(line);
+  s.setSectionStart(null);
+  s.setSectionCursor(null);
+  s.setSectionHover(null);
+  s.setSectionFocus(null);
 }
 
 /** 線と、置きかけの始点を消す。 */

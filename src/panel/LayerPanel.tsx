@@ -268,11 +268,12 @@ export default function LayerPanel() {
                 </ul>
               )}
               {notes.length > 0 && (
-                <div className="lp-notes">
+                <details className="lp-notes" data-testid={`notes-${id}`}>
+                  <summary>読み方と注意</summary>
                   {notes.map((n) => (
                     <p key={n}>{n}</p>
                   ))}
-                </div>
+                </details>
               )}
             </li>
           );
