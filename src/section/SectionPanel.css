@@ -204,6 +204,11 @@
   fill: #ffb84a;
   stroke-width: 3.5px;
 }
+.sc-gap-unpub-deep {
+  font: 700 10px sans-serif;
+  fill: #e8c98a;
+  stroke-width: 3.5px;
+}
 .sc-gap-faint {
   fill: #8f98ad;
 }

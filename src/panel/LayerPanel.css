@@ -211,6 +211,10 @@
 .lp-swatch-hatch {
   background: repeating-linear-gradient(135deg, rgba(var(--sw), 0.9) 0 1.5px, transparent 1.5px 3.5px);
 }
+.lp-swatch-hatch-deep {
+  background: repeating-linear-gradient(135deg, rgba(176, 182, 204, 0.95) 0 1.5px, rgba(var(--sw), 0.3) 1.5px 3.5px);
+  border: 1.5px solid rgb(var(--sw));
+}
 .lp-swatch-alert {
   background: repeating-linear-gradient(135deg, rgb(var(--sw)) 0 2px, rgba(var(--sw), 0.28) 2px 4px);
   border: 1.5px solid rgb(var(--sw));

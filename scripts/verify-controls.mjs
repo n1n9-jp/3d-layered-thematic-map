@@ -148,8 +148,9 @@ const press = async (page, testid) => {
   check((await page.locator('[data-testid=section-examples]').count()) === 0, '線を引いたあとは、例の線のボタンは出ない');
   const head = await page.getAttribute('[data-testid=section-headline]', 'data-severe-m');
   check(Number(head) > 4500 && Number(head) < 6500, `浸水 3m 以上の区間の長さが出る（${head} m）`);
-  const gaps = await page.locator('[data-testid=section-gap][data-kind=unpublished]').count();
+  const gaps = await page.locator('[data-testid=section-gap][data-kind=unpublished], [data-testid=section-gap][data-kind=unpublished-deep]').count();
   check(gaps >= 1, `避難のグラフに、データ未公開の区間の網掛けが出る（${gaps}）`);
+  check((await page.locator('[data-testid=section-gap][data-kind=unpublished-deep]').count()) >= 1, 'データ未公開で浸水が深い区間（墨田・江東）の枠が出る');
   check((await page.locator('[data-testid=section-gap][data-kind=shallow-none]').count()) >= 1, '浸水が小さく指定がない区間（新宿）の枠が出る');
   check((await page.locator('[data-testid=section-gap][data-kind=deep-none]').count()) >= 1, '浸水が深いのに指定がない区間（江戸川）の枠が出る');
   check((await page.locator('[data-layer=flood] [data-testid=section-rank-tick]').count()) >= 3, '浸水のグラフの縦軸に、段のラベルが出る');
@@ -167,8 +168,8 @@ const press = async (page, testid) => {
   console.log('\n[5] 錦糸町（墨田区）のクローズアップ');
   check((await page.textContent('[data-testid=info-district]')) === '墨田区', '区名は墨田区');
   const t = await page.textContent('[data-testid=info-table]');
-  check(t.includes('データ未公開の区') && t.includes('墨田区'), '表に、データ未公開の区が出る');
-  check(t.includes('この区のデータ') && t.includes('墨田区は未公開'), '「この地点」に、この区が未公開であることが出る');
+  check(t.includes('データ未公開で浸水が深い区') && t.includes('墨田区'), '表に、データ未公開で浸水が深い区が出る');
+  check(t.includes('この区のデータ') && t.includes('墨田区は未公開') && t.includes('住む：浸水が深い'), '「この地点」に、この区が未公開で、浸水が深いことが出る');
   const ex = await page.locator('[data-testid=closeup-exposure-row]').count();
   check(ex === 7, `円の中の「浸水が想定される区域に住む人」の表が出る（${ex} 行）`);
   await ctx.close();

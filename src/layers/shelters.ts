@@ -84,13 +84,23 @@ const shelters: LayerModule<ShelterData> = {
         filled: true,
         extruded: false,
       }),
-      // データ未公開の区：薄い塗りと、斜めの網掛け（0 件の区ではなく、データがない区であることを示す）
+      // データ未公開の区（浸水が深い・小さいの両方）：薄い塗りと、斜めの網掛け（0 件の区ではなく、データがない区であることを示す）
       new SolidPolygonLayer<PolygonRings>({
         ...common,
         id: 'shelters-gap-fill',
         data: data.gapPolygons,
         getPolygon: getRings,
         getFillColor: [...HATCH_COLOR, 34],
+        filled: true,
+        extruded: false,
+      }),
+      // データ未公開で、浸水が深い区：網掛け（データがない）の上に、琥珀の薄い塗りと縁（浸水が深い）を重ねる
+      new SolidPolygonLayer<PolygonRings>({
+        ...common,
+        id: 'shelters-unpub-deep-fill',
+        data: data.unpubDeep.polygons,
+        getPolygon: getRings,
+        getFillColor: [...DEEP_NONE_COLOR, 70],
         filled: true,
         extruded: false,
       }),
@@ -103,6 +113,18 @@ const shelters: LayerModule<ShelterData> = {
         getWidth: 1,
         widthUnits: 'pixels',
         billboard: true,
+      }),
+      new PathLayer<Position[]>({
+        ...common,
+        id: 'shelters-unpub-deep-outline',
+        data: data.unpubDeep.outline,
+        getPath: getSegment,
+        getColor: [...DEEP_NONE_COLOR, 255],
+        getWidth: 2.4,
+        widthUnits: 'pixels',
+        billboard: true,
+        capRounded: true,
+        jointRounded: true,
       }),
       // 浸水が深いのに、洪水・高潮用の指定がない区：この地図の主題。琥珀色の塗り・太めの斜線・太い縁と、区名のラベルで見落とされないようにする
       new SolidPolygonLayer<PolygonRings>({
@@ -158,7 +180,7 @@ const shelters: LayerModule<ShelterData> = {
       new TextLayer<{ position: Position; text: string }>({
         ...common,
         id: 'shelters-deep-label',
-        data: data.deep.labels,
+        data: [...data.deep.labels, ...data.unpubDeep.labels],
         getPosition: (d) => [d.position[0], d.position[1], 0],
         getText: (d) => d.text,
         // 平面の拡縮に合わせて大きさを変える（小さい画面で、積層を覆わないように）。読める大きさ（9〜14 px）には収める
@@ -187,8 +209,9 @@ const shelters: LayerModule<ShelterData> = {
     { color: SHELTER_COLORS.usable, label: '洪水・高潮で使える避難場所' },
     { color: SHELTER_COLORS.other, label: 'それ以外の避難場所' },
     { color: SHELTER_COLORS.hospital, label: '病院' },
-    { color: HATCH_COLOR, label: '灰の網掛け：データ未公開の区', swatch: 'hatch' },
     { color: DEEP_NONE_COLOR, label: '琥珀の斜線と縁：浸水が深いのに、洪水・高潮用の指定がない区', swatch: 'alert' },
+    { color: DEEP_NONE_COLOR, label: '灰の網掛けに琥珀の縁：データ未公開で、浸水が深い区', swatch: 'hatch-deep' },
+    { color: HATCH_COLOR, label: '灰の網掛け：データ未公開で、浸水が小さい区', swatch: 'hatch' },
     { color: SHALLOW_NONE_COLOR, label: 'ごく薄い塗り：浸水が小さく、洪水・高潮用の指定がない区', swatch: 'faint' },
   ],
   notes: (data) => {
@@ -197,14 +220,22 @@ const shelters: LayerModule<ShelterData> = {
     ];
     if (data) {
       const o = shelterOverview(data);
-      notes.push(`灰の網掛けの区（${o.unpublished.join('・')}）は、このデータに指定緊急避難場所が載っていません。0 件は「ない」ではなく「データがない」です。`);
+      const shares = (ws: { severeShare: number | null }[]) => ws.map((w) => shareLabel(w.severeShare ?? 0)).join('・');
       if (o.deepNone.length > 0)
         notes.push(
-          `琥珀の区（${o.deepNone.map((w) => w.name).join('・')}）は、このデータに洪水・高潮で使える指定緊急避難場所が載っていません。区の人口の ${o.deepNone.map((w) => shareLabel(w.severeShare ?? 0)).join('・')}（順に）が、深さ 3m 以上の浸水想定の区域に住んでいます。「指定がない」ことは「避難できない」ことではありません。各区の避難の計画は、このデータからは分かりません。`,
+          `琥珀の斜線の区（${o.deepNone.map((w) => w.name).join('・')}）は、このデータに洪水・高潮で使える指定緊急避難場所が載っていません。区の人口の ${shares(o.deepNone)}（順に）が、深さ 3m 以上の浸水想定の区域に住んでいます。「指定がない」ことは「避難できない」ことではありません。各区の避難の計画は、このデータからは分かりません。`,
+        );
+      if (o.unpublishedDeep.length > 0)
+        notes.push(
+          `灰の網掛けに琥珀の縁の区（${o.unpublishedDeep.map((w) => w.name).join('・')}）は、このデータに指定緊急避難場所が載っていません（0 件は「ない」ではなく「データがない」です）。一方、区の人口の ${shares(o.unpublishedDeep)}（順に）が、深さ 3m 以上の浸水想定の区域に住んでいます。洪水・高潮用の避難場所があるかどうかは、このデータからは分かりません。`,
+        );
+      if (o.unpublishedShallow.length > 0)
+        notes.push(
+          `灰の網掛けだけの区（${o.unpublishedShallow.map((w) => w.name).join('・')}）も、このデータに指定緊急避難場所が載っていません（0 件は「ない」ではなく「データがない」です）。浸水の想定は小さい区です${o.unpublishedShallow.every((w) => w.severeShare !== null) ? `（深さ 3m 以上の区域に住む人は、区の人口の ${shares(o.unpublishedShallow)}（順に））` : ''}。`,
         );
       if (o.shallowNone.length > 0)
         notes.push(
-          `ごく薄い区（${o.shallowNone.map((w) => w.name).join('・')}）も、洪水・高潮用の指定は載っていませんが、浸水の想定は小さい区です（深さ 3m 以上の区域に住む人は、区の人口の ${o.shallowNone.map((w) => shareLabel(w.severeShare ?? 0)).join('・')}（順に））。`,
+          `ごく薄い区（${o.shallowNone.map((w) => w.name).join('・')}）も、洪水・高潮用の指定は載っていませんが、浸水の想定は小さい区です（深さ 3m 以上の区域に住む人は、区の人口の ${shares(o.shallowNone)}（順に））。`,
         );
     }
     return notes;

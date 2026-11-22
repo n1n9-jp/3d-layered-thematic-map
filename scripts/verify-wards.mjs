@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// 区ごとの「浸水が想定される区域に住む人の割合」「深さ 3m 以上の区域に住む人の割合」と、洪水・高潮用の指定が 0 件の区の分類を、
+// 区ごとの「浸水が想定される区域に住む人の割合」「深さ 3m 以上の区域に住む人の割合」と、洪水・高潮用の避難場所が確認できない区の分類を、
 // 画面とは別の方法（public/data/ のファイルを Node で直接読む。画面のコードは使わない）で求め直し、画面の値と照合する。
 //   node scripts/verify-wards.mjs [--data public/data] [--no-browser] [--url http://127.0.0.1:5173/]
 // 別の方法：人口の250mメッシュの中心（4隅の平均）を、区の輪郭（偶奇規則の点の内外判定）で区に振り分け、
 //   メッシュの中心を含む浸水想定のセル（50 m。洪水と高潮の大きいほう）のランクで、人口を丸ごと数える。
-//   分類：データを公開していて、洪水・高潮用の指定が 0 件の区のうち、深さ 3m 以上（ランク 3 以上）の区域に住む人が区の人口の 10% 以上 → 深い、未満 → 小さい。
+//   分類：洪水・高潮用の避難場所が確認できない区（データを公開していて 0 件の区と、データ未公開の区）を、深さ 3m 以上（ランク 3 以上）の区域に住む人が
+//   区の人口の 10% 以上 → 深い、未満 → 小さい、で分ける。deep-none（公開・0 件・深い）、shallow-none（公開・0 件・小さい）、
+//   unpublished-deep（未公開・深い）、unpublished（未公開・小さい）。
 // 画面の値は、Playwright で開いて window.__store の避難のデータ（区ごとの分類と割合）と、右の列の 23区全体の集計の文面から読む。
 // 1つでも食い違えば、内容を表示して終了コード 1 で終わる。--no-browser なら、求め直した値を表示するだけ。
 import { createRequire } from 'node:module';
@@ -88,7 +90,8 @@ const rows = boundary.features.map((f) => {
   const u = usable.get(name) ?? 0;
   const pub = published.get(name) !== false;
   const severeShare = a.people > 0 ? a.severe / a.people : 0;
-  const cls = !pub ? 'unpublished' : u > 0 ? null : severeShare >= THRESHOLD ? 'deep-none' : 'shallow-none';
+  const deep = severeShare >= THRESHOLD;
+  const cls = !pub ? (deep ? 'unpublished-deep' : 'unpublished') : u > 0 ? null : deep ? 'deep-none' : 'shallow-none';
   return { name, people: a.people, flooded: a.flooded, severe: a.severe, floodedShare: a.people > 0 ? a.flooded / a.people : 0, severeShare, usable: u, other: (total.get(name) ?? 0) - u, published: pub, cls };
 });
 const pct = (v) => `${(100 * v).toFixed(1)}%`;
@@ -97,7 +100,9 @@ console.log('区       公開 洪水・高潮用 それ以外  人口    浸水�
 for (const r of rows)
   console.log(`${r.name.padEnd(5, '　')} ${r.published ? 'Y' : 'N'}   ${String(r.usable).padStart(5)} ${String(r.other).padStart(8)}  ${String(r.people).padStart(8)}  ${pct(r.floodedShare).padStart(7)}      ${pct(r.severeShare).padStart(7)}     ${r.cls ?? '—（指定あり）'}`);
 const names = (c) => rows.filter((r) => r.cls === c).map((r) => r.name);
-console.log(`\n未公開：${names('unpublished').join('・')}\n浸水が深いのに指定がない：${names('deep-none').join('・')}\n浸水が小さく指定がない：${names('shallow-none').join('・')}`);
+console.log(
+  `\nデータ未公開で浸水が深い：${names('unpublished-deep').join('・')}\n浸水が深いのに指定がない：${names('deep-none').join('・')}\nデータ未公開で浸水が小さい：${names('unpublished').join('・')}\n浸水が小さく指定がない：${names('shallow-none').join('・')}`,
+);
 if (values['no-browser']) process.exit(0);
 
 /* ---------- 画面の値（Playwright） ---------- */
@@ -165,16 +170,36 @@ for (const r of rows) {
   check(!!same, `${r.name}：人口 ${r.people}・浸水想定 ${pct(r.floodedShare)}・3m以上 ${pct(r.severeShare)}（画面 ${s.exposure ? `${s.exposure.people}・${pct(s.exposure.floodedShare)}・${pct(s.exposure.severeShare)}` : 'なし'}）`);
   check(s.gap === r.cls && s.usable === r.usable, `${r.name}：分類 ${r.cls ?? '指定あり'}・洪水高潮用 ${r.usable}（画面 ${s.gap ?? '指定あり'}・${s.usable}）`);
 }
-// 23区全体の集計の文面に、分類の区名が入っていること
+// 23区全体の集計の文面に、分類の区名が入っていること。主題の枠は、浸水が深く洪水・高潮用の避難場所が確認できない区（指定がない区＋データ未公開の区）。
 const has = async (id) => (await page.textContent(`[data-testid=${id}]`).catch(() => '')) ?? '';
-const deepText = await has('overall-deep-names');
-for (const n of names('deep-none')) check(deepText.includes(n), `「浸水が深いのに指定がない区」に ${n} が出ている`);
-for (const n of [...names('shallow-none'), ...names('unpublished'), ...rows.filter((r) => r.usable > 0).map((r) => r.name)])
-  check(!deepText.includes(n), `「浸水が深いのに指定がない区」に ${n} は出ていない`);
+const deepNone = names('deep-none');
+const unpubDeep = names('unpublished-deep');
+const deepAll = [...deepNone, ...unpubDeep];
+const small = [...names('shallow-none'), ...names('unpublished')];
+const noShelterOk = rows.filter((r) => r.usable > 0).map((r) => r.name);
+const pubShare = (n) => {
+  const r = rows.find((x) => x.name === n);
+  return r.severeShare >= 0.1 ? `${Math.round(r.severeShare * 100)}%` : `${(r.severeShare * 100).toFixed(1)}%`;
+};
+const deepCount = await has('overall-deep-count');
+check(Number(deepCount) === deepAll.length, `主題の枠の区の数 ${deepAll.length}（画面 ${deepCount.trim()}）`);
+const noneText = await has('overall-deep-none');
+const noneCount = await has('overall-deep-none-count');
+const unpubDeepText = await has('overall-deep-unpublished');
+const unpubDeepCount = await has('overall-deep-unpublished-count');
+check(Number(noneCount) === deepNone.length, `内訳「指定がない」の区の数 ${deepNone.length}（画面 ${noneCount.trim()}）`);
+check(Number(unpubDeepCount) === unpubDeep.length, `内訳「データ未公開」の区の数 ${unpubDeep.length}（画面 ${unpubDeepCount.trim()}）`);
+for (const n of deepNone) check(noneText.includes(`${n} ${pubShare(n)}`), `内訳「指定がない」に ${n} と割合 ${pubShare(n)} が出ている`);
+for (const n of unpubDeep) check(unpubDeepText.includes(`${n} ${pubShare(n)}`), `内訳「データ未公開」に ${n} と割合 ${pubShare(n)} が出ている`);
+for (const n of [...unpubDeep, ...small, ...noShelterOk]) check(!noneText.includes(n), `内訳「指定がない」に ${n} は出ていない`);
+for (const n of [...deepNone, ...small, ...noShelterOk]) check(!unpubDeepText.includes(n), `内訳「データ未公開」に ${n} は出ていない`);
+const deepCard = await has('overall-deep');
+for (const n of [...small, ...noShelterOk]) check(!deepCard.includes(n), `主題の枠に ${n} は出ていない`);
 const shallowText = await has('overall-shallow');
-for (const n of names('shallow-none')) check(shallowText.includes(n), `「浸水が小さく指定がない」に ${n} が出ている`);
+for (const n of names('shallow-none')) check(shallowText.includes(n) && shallowText.includes(pubShare(n)), `「指定がなく浸水が小さい」に ${n} と割合が出ている`);
 const unpubText = await has('overall-unpublished');
-for (const n of names('unpublished')) check(unpubText.includes(n), `「データ未公開」に ${n} が出ている`);
+for (const n of names('unpublished')) check(unpubText.includes(n), `「データ未公開で浸水が小さい」に ${n} が出ている`);
+for (const n of [...deepAll, ...names('shallow-none')]) check(!unpubText.includes(n), `「データ未公開で浸水が小さい」に ${n} は出ていない`);
 await browser.close();
 if (failures.length) {
   console.log(`\n不合格 ${failures.length} 件`);

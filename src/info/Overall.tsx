@@ -9,7 +9,7 @@ import type { ShelterData } from '../layers/shelters/model';
 import { useMapStore } from '../store';
 import type { ElevationData } from '../types';
 import type { CSSProperties } from 'react';
-import { DEEP_SHARE_THRESHOLD, shareLabel } from '../aggregate/wardExposure';
+import { DEEP_SHARE_THRESHOLD } from '../aggregate/wardExposure';
 import { DEEP_NONE_COLOR, HATCH_COLOR, SHALLOW_NONE_COLOR } from '../layers/shelters/model';
 import { exposureTable, scenarioNote } from './exposureModel';
 import type { ExposureTable as Model } from './exposureModel';
@@ -116,48 +116,76 @@ export function ExposureTable({
   );
 }
 
-function Swatch({ kind }: { kind: 'hatch' | 'alert' | 'faint' }) {
-  const color = kind === 'hatch' ? HATCH_COLOR : kind === 'alert' ? DEEP_NONE_COLOR : SHALLOW_NONE_COLOR;
+function Swatch({ kind }: { kind: 'hatch' | 'hatch-deep' | 'alert' | 'faint' }) {
+  const color = kind === 'hatch' ? HATCH_COLOR : kind === 'faint' ? SHALLOW_NONE_COLOR : DEEP_NONE_COLOR;
   return <span className={`lp-swatch lp-swatch-${kind} ov-sw`} style={{ '--sw': color.join(',') } as CSSProperties} aria-hidden="true" />;
 }
 
-/** 洪水・高潮用の指定がない区、データ未公開の区（3通りの見分け）。浸水が深いのに指定がない区は大きく、ほかの2つは小さく添える。 */
+/**
+ * 洪水・高潮用の避難場所が、このデータで区内に確認できない区。
+ * 主題の枠は、浸水が深い区（指定がない区と、データ未公開の区を合わせた数）。内訳の2つは意味が違う（載っていて 0 件／載っていないので分からない）ので、数と区名を分けて出す。
+ * 浸水が小さい区（データ未公開と、指定がない区）は、その下に小さく添える。
+ */
 function ShelterGaps({ o }: { o: ReturnType<typeof shelterOverview> }) {
   return (
     <>
-      {o.deepNone.length > 0 && (
+      {o.deepWithoutShelter.length > 0 && (
         <section className="ov-alert" data-testid="overall-deep">
           <div className="ov-kicker">
             <Swatch kind="alert" />
-            浸水が深いのに、洪水・高潮用の指定がない区
+            浸水が深く、このデータで区内に洪水・高潮用の避難場所が確認できない区
           </div>
           <div className="ov-alert-main">
             <span className="ov-num ov-num-alert" data-testid="overall-deep-count">
-              {o.deepNone.length}
+              {o.deepWithoutShelter.length}
             </span>
             <span className="ov-unit">区</span>
-            <span className="ov-wards" data-testid="overall-deep-names">
-              {namesText(o.deepNone.map((w) => w.name))}
-            </span>
+            <span className="ov-alert-sub">区名のあとの数字は、区の人口のうち深さ 3m 以上の区域に住む人の割合（どの区も {Math.round(DEEP_SHARE_THRESHOLD * 100)}% 以上）</span>
           </div>
-          <p className="ov-note" data-testid="overall-deep-share">
-            深さ 3m 以上の区域に住む人は、区の人口の {wardSharesText(o.deepNone)}。このデータに、洪水・高潮で使える指定緊急避難場所が載っていません（地震・火事などの
-            {o.deepNone.map((w) => `${w.total} か所`).join('・')}のみ）。
-          </p>
+          <ul className="ov-split">
+            {o.deepNone.length > 0 && (
+              <li data-testid="overall-deep-none">
+                <Swatch kind="alert" />
+                <span>
+                  <b>
+                    指定がない <span data-testid="overall-deep-none-count">{o.deepNone.length}</span> 区
+                  </b>
+                  ：<span data-testid="overall-deep-none-names">{wardSharesText(o.deepNone)}</span>
+                  <span className="ov-split-note">
+                    洪水・高潮用の指定が 0 件（地震・火事などの{o.deepNone.map((w) => `${w.total} か所`).join('・')}のみ）
+                  </span>
+                </span>
+              </li>
+            )}
+            {o.unpublishedDeep.length > 0 && (
+              <li data-testid="overall-deep-unpublished">
+                <Swatch kind="hatch-deep" />
+                <span>
+                  <b>
+                    データ未公開 <span data-testid="overall-deep-unpublished-count">{o.unpublishedDeep.length}</span> 区
+                  </b>
+                  ：<span data-testid="overall-deep-unpublished-names">{wardSharesText(o.unpublishedDeep)}</span>
+                  <span className="ov-split-note">このデータに指定緊急避難場所が載っていないので、あるかどうかは分かりません</span>
+                </span>
+              </li>
+            )}
+          </ul>
         </section>
       )}
       <ul className="ov-gaps">
-        <li data-testid="overall-unpublished">
-          <Swatch kind="hatch" />
-          <span>
-            <b>データ未公開</b>：{namesText(o.unpublished)}。このデータに指定緊急避難場所が載っていないだけで、「ない」とは限りません。
-          </span>
-        </li>
+        {o.unpublishedShallow.length > 0 && (
+          <li data-testid="overall-unpublished">
+            <Swatch kind="hatch" />
+            <span>
+              <b>データ未公開で浸水が小さい</b>：{wardSharesText(o.unpublishedShallow)}（深さ 3m 以上の区域に住む人の割合）。「ない」とは限りません。
+            </span>
+          </li>
+        )}
         {o.shallowNone.length > 0 && (
           <li data-testid="overall-shallow">
             <Swatch kind="faint" />
             <span>
-              <b>浸水が小さく指定がない</b>：{wardSharesText(o.shallowNone)}（深さ 3m 以上の区域に住む人の割合）。
+              <b>指定がなく浸水が小さい</b>：{wardSharesText(o.shallowNone)}（同じ割合）。
             </span>
           </li>
         )}
@@ -211,8 +239,14 @@ function Notes({ exposure, shelters }: { exposure: Exposure | null; shelters: Sh
                 「指定がない」ことは「避難できない」ことではありません。このデータから分かるのは、洪水・高潮で使える指定緊急避難場所が載っているかどうかまでで、各区の避難の計画は分かりません。
               </p>
               <p>
-                洪水・高潮用の指定が 0 件で、データを公開している区は、深さ 3m 以上の区域に住む人が区の人口の {Math.round(DEEP_SHARE_THRESHOLD * 100)}% 以上かどうかで分けています（
-                {[...o.deepNone, ...o.shallowNone].map((w) => `${w.name} ${shareLabel(w.severeShare ?? 0)}`).join('、') || '該当なし'}。洪水と高潮の大きいほうの想定）。
+                洪水・高潮で使える避難場所が区内に確認できない区（洪水・高潮用の指定が 0 件の区と、データ未公開の区）は、どちらも、深さ 3m 以上の区域に住む人が区の人口の{' '}
+                {Math.round(DEEP_SHARE_THRESHOLD * 100)}% 以上かどうかで、浸水が深い区と小さい区に分けています（洪水と高潮の大きいほうの想定。区の名前は決め打ちにせず、データから求めます）。
+              </p>
+              <p>
+                分け方は 4 通りです。<b>指定がない</b>（データに載っていて、洪水・高潮用が 0 件）で浸水が深い区：
+                {wardSharesText(o.deepNone) || '該当なし'}。<b>データ未公開</b>（このデータに指定緊急避難場所が載っていない。あるかどうかは分からない）で浸水が深い区：
+                {wardSharesText(o.unpublishedDeep) || '該当なし'}。<b>データ未公開</b>で浸水が小さい区：{wardSharesText(o.unpublishedShallow) || '該当なし'}。
+                <b>指定がない</b>で浸水が小さい区：{wardSharesText(o.shallowNone) || '該当なし'}。
               </p>
             </>
           )}

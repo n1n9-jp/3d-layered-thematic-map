@@ -196,11 +196,12 @@ for (const sc of ['max', 'river', 'tide']) {
 }
 const usable = await page.textContent('[data-testid=overall-usable]');
 check(num(usable) === exp.usable, `洪水・高潮で使える避難場所 ${exp.usable}（画面 ${usable}）`);
-const unpubText = await page.textContent('[data-testid=overall-unpublished]');
-for (const n of exp.unpublished) check(unpubText.includes(n), `データ未公開の区に ${n} が出ている`);
-// 洪水・高潮用が 0 件の区は、浸水の想定で「深い」「小さい」に分かれて出る（分類そのものは verify-wards.mjs で求め直して照合する）
-const deepText = await page.textContent('[data-testid=overall-deep-names]').catch(() => '');
-const shallowText = await page.textContent('[data-testid=overall-shallow]').catch(() => '');
+// データ未公開の区は、浸水の想定で「深い」「小さい」に分かれて出る。洪水・高潮用が 0 件の区も同じ（分類そのものは verify-wards.mjs で求め直して照合する）
+const textOf = async (id) => (await page.textContent(`[data-testid=${id}]`).catch(() => '')) ?? '';
+const unpubText = (await textOf('overall-unpublished')) + (await textOf('overall-deep-unpublished'));
+for (const n of exp.unpublished) check(unpubText.includes(n), `データ未公開の区に ${n} が、深い・小さいのどちらかに出ている`);
+const deepText = await textOf('overall-deep-none');
+const shallowText = await textOf('overall-shallow');
 for (const n of exp.zero) check(deepText.includes(n) || shallowText.includes(n), `洪水・高潮用が 0 件の区 ${n} が、深い・小さいのどちらかに出ている`);
 // 折りたたみは、既定では閉じている（注記は読みたい人が開く）。「試作で避難の判断には使えない」は常に見える
 check((await page.locator('[data-testid=overall-notes-body]').count()) === 0, '数え方・データの注意は、既定では折りたたまれている');

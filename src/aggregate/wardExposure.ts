@@ -1,13 +1,16 @@
 /**
- * 区ごとの「浸水が想定される区域に住む人の割合」と、洪水・高潮用の指定が 0 件の区の分類。純粋な計算（deck.gl・React に依存しない）。
+ * 区ごとの「浸水が想定される区域に住む人の割合」と、洪水・高潮用の避難場所が確認できない区の分類。純粋な計算（deck.gl・React に依存しない）。
  *
  * 数え方は、23区全体の集計（`exposure.ts`）と同じ：人口の250mメッシュごとに、メッシュの中心を含む浸水想定のセル（50 m）の深さの段を引き、
  * メッシュの人口を丸ごと数える（面積での按分はしない）。メッシュは、中心を含む区に数える。想定は、洪水と高潮の大きいほう（`max`）に固定する
  * （画面の想定の切り替えで、区の分類が変わらないようにする）。
  *
- * 分類：洪水・高潮用の指定緊急避難場所が 0 件で、データを公開している区を、その区の浸水の想定で2つに分ける。
- *   深さ 3m 以上の区域に住む人が、区の人口の `DEEP_SHARE_THRESHOLD`（10%）以上 → 「浸水が深いのに指定がない」（deep-none）
- *   それ未満 → 「浸水が小さく指定がない」（shallow-none）
+ * 分類：洪水・高潮用の指定緊急避難場所が区内に確認できない区（データを公開していて 0 件の区と、データ未公開の区）を、
+ * それぞれ、その区の浸水の想定で2つに分ける。
+ *   深さ 3m 以上の区域に住む人が、区の人口の `DEEP_SHARE_THRESHOLD`（10%）以上 → 深い
+ *     公開していて 0 件：「浸水が深いのに指定がない」（deep-none）／未公開：「データ未公開で浸水が深い」（unpublished-deep）
+ *   それ未満 → 小さい
+ *     公開していて 0 件：「浸水が小さく指定がない」（shallow-none）／未公開：「データ未公開」（unpublished。浸水が小さい）
  * 区の名前は決め打ちにしない（データから求める）。
  */
 import { gridCell } from '../lib/grid';
@@ -69,13 +72,20 @@ export function computeWardExposure(pop: Pick<PopulationData, 'cells'>, flood: F
 }
 
 /**
- * 避難場所の指定の状況で分けた区の種類。指定緊急避難場所が洪水・高潮で使える区（`null`）以外の4通り。
- *   unpublished  : データ未公開。このデータに指定緊急避難場所を公開していない（「ない」ではなく「データがない」）
- *   deep-none    : 洪水・高潮用の指定が 0 件で、浸水が深い（深さ 3m 以上の区域に住む人が区の人口の 10% 以上）
- *   shallow-none : 洪水・高潮用の指定が 0 件で、浸水が小さい
- *   unrated      : 洪水・高潮用の指定が 0 件だが、浸水の想定から区の様子を求められなかった（人口か浸水想定の読み込み失敗）
+ * 避難場所の指定の状況で分けた区の種類。指定緊急避難場所が洪水・高潮で使える区（`null`）以外の5通り。
+ *   unpublished-deep : データ未公開（このデータに指定緊急避難場所を公開していない。「ない」ではなく「データがない」）で、浸水が深い
+ *                      （深さ 3m 以上の区域に住む人が区の人口の 10% 以上）
+ *   unpublished      : データ未公開で、浸水が小さい（浸水の想定から区の様子を求められなかったときも、ここに入れる）
+ *   deep-none        : 洪水・高潮用の指定が 0 件で、浸水が深い
+ *   shallow-none     : 洪水・高潮用の指定が 0 件で、浸水が小さい
+ *   unrated          : 洪水・高潮用の指定が 0 件だが、浸水の想定から区の様子を求められなかった（人口か浸水想定の読み込み失敗）
  */
-export type ShelterGap = 'unpublished' | 'deep-none' | 'shallow-none' | 'unrated';
+export type ShelterGap = 'unpublished-deep' | 'unpublished' | 'deep-none' | 'shallow-none' | 'unrated';
+
+/** データ未公開の区か（浸水の深い・小さいを問わない）。 */
+export const isUnpublishedGap = (g: ShelterGap | null): boolean => g === 'unpublished' || g === 'unpublished-deep';
+/** 浸水が深い区か（指定がない区と、データ未公開の区の両方）。 */
+export const isDeepGap = (g: ShelterGap | null): boolean => g === 'deep-none' || g === 'unpublished-deep';
 
 export interface WardShelterFacts {
   published: boolean;
@@ -85,10 +95,11 @@ export interface WardShelterFacts {
 
 /** 区の分類。洪水・高潮で使える避難場所がある区は null。 */
 export function classifyWard(ward: WardShelterFacts, exposure: Pick<WardExposure, 'severeShare'> | undefined, threshold = DEEP_SHARE_THRESHOLD): ShelterGap | null {
-  if (!ward.published) return 'unpublished';
+  const deep = exposure !== undefined && exposure.severeShare >= threshold;
+  if (!ward.published) return deep ? 'unpublished-deep' : 'unpublished';
   if (ward.usable > 0) return null;
   if (!exposure) return 'unrated';
-  return exposure.severeShare >= threshold ? 'deep-none' : 'shallow-none';
+  return deep ? 'deep-none' : 'shallow-none';
 }
 
 /** 割合（0〜1）の表示。10% 以上は整数、それ未満は小数1桁、0.05% 未満で 0 でなければ「0.1% 未満」。 */

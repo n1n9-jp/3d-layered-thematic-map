@@ -163,7 +163,7 @@ export interface SectionMarks {
   /** 線から離れた地物を探した距離（m）。縦軸（線からの距離）の左右の端。指定がなければレイヤーごとの既定 */
   radius?: number;
   /** 線に沿った区間のうち、データがない（公開されていない）区間。グラフの上に網掛けで示す */
-  gaps?: { d0: number; d1: number; label: string; kind: 'unpublished' | 'deep-none' | 'shallow-none' | 'unrated' }[];
+  gaps?: { d0: number; d1: number; label: string; kind: 'unpublished-deep' | 'unpublished' | 'deep-none' | 'shallow-none' | 'unrated' }[];
 }
 
 export type SectionTrack = SectionSeries | SectionMarks;
@@ -195,8 +195,11 @@ export interface OptionControl {
 export interface LegendItem {
   color: [number, number, number];
   label: string;
-  /** 見本の形。省略は塗りの四角。'hatch' は斜線（データ未公開の区）、'alert' は太い斜線と縁（浸水が深いのに指定がない区）、'faint' はごく薄い塗り（浸水が小さく指定がない区） */
-  swatch?: 'hatch' | 'alert' | 'faint';
+  /**
+   * 見本の形。省略は塗りの四角。'hatch' は灰の斜線（データ未公開で、浸水が小さい区）、'hatch-deep' は灰の斜線に琥珀の塗りと縁（データ未公開で、浸水が深い区）、
+   * 'alert' は琥珀の太い斜線と縁（浸水が深いのに指定がない区）、'faint' はごく薄い塗り（浸水が小さく指定がない区）
+   */
+  swatch?: 'hatch' | 'hatch-deep' | 'alert' | 'faint';
 }
 
 export interface ProbeValue {

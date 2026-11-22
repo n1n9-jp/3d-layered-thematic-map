@@ -66,14 +66,19 @@ describe('classifyWard：洪水・高潮用が 0 件の区を、深さ 3m 以上
     expect(classifyWard(pub, { severeShare: 0.603 })).toBe('deep-none');
     expect(classifyWard(pub, { severeShare: 0.007 })).toBe('shallow-none');
   });
-  it('未公開は、浸水にかかわらず unpublished。洪水・高潮用があれば null。浸水の想定がなければ unrated', () => {
-    expect(classifyWard({ published: false, usable: 0 }, { severeShare: 0.9 })).toBe('unpublished');
-    expect(classifyWard({ published: false, usable: 0 }, undefined)).toBe('unpublished');
+  it('未公開は、同じ基準（10%）で、浸水が深い unpublished-deep と、小さい unpublished に分ける。浸水の想定がなければ unpublished。洪水・高潮用があれば null。公開していて浸水の想定がなければ unrated', () => {
+    const unpub = { published: false, usable: 0 };
+    expect(classifyWard(unpub, { severeShare: 0.9 })).toBe('unpublished-deep');
+    expect(classifyWard(unpub, { severeShare: 0.1 })).toBe('unpublished-deep');
+    expect(classifyWard(unpub, { severeShare: 0.0999 })).toBe('unpublished');
+    expect(classifyWard(unpub, { severeShare: 0 })).toBe('unpublished');
+    expect(classifyWard(unpub, undefined)).toBe('unpublished');
     expect(classifyWard({ published: true, usable: 3 }, { severeShare: 0.9 })).toBeNull();
     expect(classifyWard(pub, undefined)).toBe('unrated');
   });
   it('基準は引数で変えられる', () => {
     expect(classifyWard(pub, { severeShare: 0.3 }, 0.5)).toBe('shallow-none');
+    expect(classifyWard({ published: false, usable: 0 }, { severeShare: 0.3 }, 0.5)).toBe('unpublished');
   });
 });
 

@@ -33,6 +33,7 @@ describe('wardSharesText / namesText', () => {
     const w = (name: string, severeShare: number | null) => ({ name, total: 1, severeShare, floodedShare: severeShare });
     expect(wardSharesText([w('江戸川区', 0.754), w('足立区', 0.603)])).toBe('江戸川区 75%・足立区 60%');
     expect(wardSharesText([w('新宿区', 0.007)])).toBe('新宿区 0.7%');
+    expect(wardSharesText([w('葛飾区', 0.773), w('墨田区', 0.745), w('江東区', 0.626)])).toBe('葛飾区 77%・墨田区 75%・江東区 63%');
     expect(wardSharesText([w('X区', null)])).toBe('X区');
     expect(namesText([])).toBe('なし');
     expect(namesText(['墨田区', '江東区'])).toBe('墨田区・江東区');

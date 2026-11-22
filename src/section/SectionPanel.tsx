@@ -206,6 +206,31 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
               )}
             </g>
           );
+        if (g.kind === 'unpublished-deep')
+          // データ未公開で、浸水が深い区間：灰の斜線（データがない）に、琥珀の薄い塗りと縁（浸水が深い）を重ねる。斜線が灰なので、琥珀の斜線の「指定なし」とは見分けられる
+          return (
+            <g key={`g${i}`} data-testid="section-gap" data-kind="unpublished-deep">
+              <title>{g.label}</title>
+              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`rgba(${AMBER},0.12)`} />
+              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${patternId})`} stroke={`rgba(${AMBER},0.95)`} strokeWidth={1.4} />
+              {w > 58 ? (
+                <>
+                  <text x={cx} y={cy - 2} textAnchor="middle" className="sc-gap-label sc-gap-unpub-deep">
+                    {w > 90 ? 'データ未公開' : '未公開'}
+                  </text>
+                  <text x={cx} y={cy + 11} textAnchor="middle" className="sc-gap-label sc-gap-unpub-deep">
+                    浸水が深い
+                  </text>
+                </>
+              ) : (
+                w > 44 && (
+                  <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-unpub-deep">
+                    未公開
+                  </text>
+                )
+              )}
+            </g>
+          );
         if (g.kind === 'deep-none')
           // 浸水が深いのに、洪水・高潮用の指定がない区間：この地図の主題。琥珀色の斜線・塗り・縁と太い文字で、見落とされないようにする
           return (
