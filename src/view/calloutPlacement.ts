@@ -63,9 +63,9 @@ const W_LABEL_OVERLAP = 100000;
 const W_ANCHOR_COVER = 100000;
 const W_LINE_ON_LABEL = 50000;
 const W_LINE_CROSS = 30000;
-const W_SOFT = 1200;
+const W_SOFT = 600;
 /** 引き出し線が、ほかの段のデータのある範囲の中を通る、1 px あたりの費用。 */
-const W_LEADER_OTHER = 15;
+const W_LEADER_OTHER = 3;
 /** 座標降下の最大の巡回数。 */
 const MAX_ROUNDS = 10;
 /** 札ごとに、費用の小さい候補だけを組み合わせる数。これで重なりが解けなければ、全部の候補で試し直す。 */
