@@ -110,9 +110,9 @@ describe('sampleShelters（探針）', () => {
   it('未公開の区では、その旨を添える。洪水・高潮用が 0 件の区でも、その旨を添える', () => {
     const b = sampleShelters(data, 1500, 500);
     expect(b[2].label).toBe('この区のデータ');
-    expect(String(b[2].value)).toContain('B区は、指定緊急避難場所のデータを公開していません');
+    expect(String(b[2].value)).toContain('B区は未公開');
     const c = sampleShelters(data, 2400, 500);
-    expect(String(c[2].value)).toContain('C区に、洪水・高潮で使える避難場所の指定はありません');
+    expect(String(c[2].value)).toContain('C区は洪水・高潮用の指定が 0 件');
     // 公開していて、使える場所がある区では、添えない
     expect(sampleShelters(data, 600, 500)).toHaveLength(2);
   });

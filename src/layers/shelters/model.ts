@@ -280,8 +280,8 @@ export function sampleShelters(data: ShelterData, x: number, y: number): ProbeVa
   ];
   const ward = cachedDistrictLookup(data.boundary)(x, y);
   const info = ward === null ? undefined : data.wards.find((w) => w.name === ward);
-  if (info && !info.published) out.push({ label: 'この区のデータ', value: `${info.name}は、指定緊急避難場所のデータを公開していません（「ない」とは限りません）` });
-  else if (info && info.usable === 0) out.push({ label: 'この区のデータ', value: `${info.name}に、洪水・高潮で使える避難場所の指定はありません（0 件。${info.total} 件は地震・火事など）` });
+  if (info && !info.published) out.push({ label: 'この区のデータ', value: `${info.name}は未公開（指定緊急避難場所のデータなし。「ない」とは限らない）` });
+  else if (info && info.usable === 0) out.push({ label: 'この区のデータ', value: `${info.name}は洪水・高潮用の指定が 0 件（${info.total} 件は地震・火事など）` });
   return out;
 }
 

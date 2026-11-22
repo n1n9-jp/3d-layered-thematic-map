@@ -130,7 +130,7 @@ const press = async (page, testid) => {
   for (const [k, v] of [['洪水の深さ', '3〜5m'], ['高潮の深さ', '3〜5m'], ['洪水の継続', '2週間〜4週間'], ['高潮の継続', '1週間以上（上限なし）']]) check(text.includes(k) && text.includes(v), `${k}：${v}`);
   const sh = await page.textContent('[data-layer=shelters]');
   check(sh.includes('最寄りの避難場所') && sh.includes('最寄りの病院'), '避難：最寄りの避難場所と病院が出る');
-  check(sh.includes('江戸川区に、洪水・高潮で使える避難場所の指定はありません'), '避難：江戸川区は洪水・高潮用が 0 件であることが出る');
+  check(sh.includes('江戸川区は洪水・高潮用の指定が 0 件'), '避難：江戸川区は洪水・高潮用が 0 件であることが出る');
   await ctx.close();
 }
 
@@ -167,7 +167,7 @@ const press = async (page, testid) => {
   check((await page.textContent('[data-testid=info-district]')) === '墨田区', '区名は墨田区');
   const t = await page.textContent('[data-testid=info-table]');
   check(t.includes('データ未公開の区') && t.includes('墨田区'), '表に、データ未公開の区が出る');
-  check(t.includes('この区のデータ') && t.includes('公開していません'), '「この地点」に、この区が未公開であることが出る');
+  check(t.includes('この区のデータ') && t.includes('墨田区は未公開'), '「この地点」に、この区が未公開であることが出る');
   const ex = await page.locator('[data-testid=closeup-exposure-row]').count();
   check(ex === 7, `円の中の「浸水が想定される区域に住む人」の表が出る（${ex} 行）`);
   await ctx.close();
