@@ -235,12 +235,12 @@ async function interactions(browser, base, size) {
   const coords1 = await page.textContent('[data-testid=info-coords]');
   check(coords1.includes(Math.round(s1.probe.x).toLocaleString('ja-JP')), `右の列の座標が追従する（${coords1}）`);
 
-  // 2. クローズアップの中をクリック
+  // 2. クローズアップの中をクリック（円の中心から 30 px。クローズアップの円は、表が長いぶん、直径が約 190 px）
   const box = await page.evaluate(() => {
     const r = document.querySelector('.cu-canvas').getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   });
-  await page.mouse.click(box.x + 80, box.y);
+  await page.mouse.click(box.x + 30, box.y);
   await waitFor(page, (b) => {
     const p = window.__store.getState().probe;
     return p !== null && (p.x !== b.x || p.y !== b.y);
