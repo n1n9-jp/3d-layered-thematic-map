@@ -181,3 +181,4 @@ if (failures.length) {
   process.exit(1);
 }
 console.log('\nすべて合格');
+process.exit(0); // 起動した Vite（切り離した子プロセス）が残っても、ここで終える（終了時に止める）
