@@ -10,7 +10,8 @@
 // シナリオの形式: { name, query, size: "WxH", actions: [...], criteria }
 //   actions の要素:
 //     { type: "hover", x: "center"|<px>, y: "center"|<px> }                        マウスを動かす
-//     { type: "click", button: <ボタンの名前>, settled?: { rotationX, rotationOrbit } }   名前のボタンを押す。settled があれば、
+//     { type: "click", button: <ボタンの名前>, partial?: true, settled?: { rotationX, rotationOrbit } }   名前のボタンを押す。partial が true のときは、名前の一部が合うボタン
+//       （既定は名前が完全に一致するボタン。例の線のボタンのように、説明の文が名前に続くものに使う）。settled があれば、
 //       視点がその角度（方位は360度の違いを無視）になり、描画が追いつくまで待つ（視点のボタン用）
 //     { type: "drag-mark", dx, dy }        固定した探針の、真ん中の段の輪をつかみ、(dx, dy) px だけドラッグする（地点が動き終わるまで待つ）
 //     { type: "click-closeup", dx, dy }    クローズアップの積層の領域の中心から (dx, dy) px の位置をクリックする（地点が動くまで待つ）
@@ -188,7 +189,7 @@ async function runActions(page, actions, viewport) {
       await page.mouse.move(x, y);
       await sleep(300);
     } else if (a.type === 'click') {
-      await page.getByRole('button', { name: a.button, exact: true }).click();
+      await page.getByRole('button', { name: a.button, exact: a.partial !== true }).click();
       if (a.settled) {
         await page.waitForFunction(
           ({ rotationX, rotationOrbit }) => {
