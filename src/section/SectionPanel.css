@@ -199,6 +199,15 @@
   stroke-width: 3px;
 }
 
+.sc-gap-deep {
+  font: 700 10.5px sans-serif;
+  fill: #ffb84a;
+  stroke-width: 3.5px;
+}
+.sc-gap-faint {
+  fill: #8f98ad;
+}
+
 /* 線に沿った集計（浸水 3m 以上の区間の長さと、その近くの避難場所の数）。 */
 .sc-headline {
   margin-top: 4px;

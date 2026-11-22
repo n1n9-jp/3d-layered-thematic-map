@@ -1,5 +1,6 @@
 import { SolidPolygonLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
+import { memoLoad } from '../lib/memoLoad';
 import { fetchJson } from '../lib/fetch';
 import { pointInCircle } from '../lib/circleClip';
 import type { Circle } from '../lib/circleClip';
@@ -201,11 +202,11 @@ export function elderlyProbe(c: Pick<Cell, 'elderly' | 'elderlyMerged'>): ProbeV
 const population: LayerModule<PopulationData> = {
   id: 'population',
   label: '人口',
-  async load(base) {
+  load: memoLoad(async (base) => {
     const data = buildPopulationData(await fetchJson<PopulationCollection>(`${base}population.geojson`));
     populationSectionIndex(data); // 断面の索引は、利用者の操作の前に作っておく
     return data;
-  },
+  }),
   render: (data, ctx) => [
     new SolidPolygonLayer<Cell>({
       id: 'population-fill',

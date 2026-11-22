@@ -1,5 +1,6 @@
 import { BitmapLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
+import { memoLoad } from '../lib/memoLoad';
 import { fetchBuffer, fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { LayerModule } from '../types';
@@ -22,7 +23,7 @@ function boundsOf(d: FloodData): [number, number, number, number] {
 const flood: LayerModule<FloodData> = {
   id: 'flood',
   label: '浸水',
-  async load(base) {
+  load: memoLoad(async (base) => {
     const meta = await fetchJson<FloodMeta>(`${base}flood.json`);
     const [riverDepth, tideDepth, riverDuration, tideDuration] = await Promise.all([
       fetchBuffer(`${base}${meta.files.riverDepth}`),
@@ -33,7 +34,7 @@ const flood: LayerModule<FloodData> = {
     const data = buildFloodData(meta, { riverDepth, tideDepth, riverDuration, tideDuration });
     floodImage(data, schemeOf({ floodScenario: 'max', floodView: 'depth' })); // 既定の画像は、利用者の操作の前に作っておく
     return data;
-  },
+  }),
   render(data, ctx) {
     // 画像は、データと（想定, 見るもの）の組ごとに1回だけ作る。組を切り替えると、別の画像に差し替わる。
     return [

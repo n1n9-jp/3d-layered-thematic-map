@@ -20,6 +20,8 @@ export interface ExposureRow {
   share: string;
   /** その区分の人口（強調の判定などに使う） */
   peopleValue: number;
+  /** 横棒の長さ：その区分の人口 ÷ 区分ごとの人口の最大（0〜1）。「浸水なし」を含めた最大に対する比 */
+  barRatio: number;
 }
 
 export interface ExposureTable {
@@ -44,6 +46,16 @@ export function shareText(part: number, whole: number): string {
   return `${p.toFixed(1)}%`;
 }
 
+/**
+ * 想定の切り替えと、いま出ている数字の対応を、画面に添える一文。
+ * 「大きいほう」は、洪水と高潮を足し合わせたものではない（セルごとに、深いほうを採る）。
+ */
+export function scenarioNote(scenario: Exposure['scenario']): string {
+  if (scenario === 'river') return '洪水だけの想定です（高潮は含みません）。';
+  if (scenario === 'tide') return '高潮だけの想定です（洪水は含みません）。';
+  return '「大きいほう」は、洪水と高潮を足し合わせたものではなく、地点ごとに、深いほうの想定を採ったものです。';
+}
+
 export function exposureTable(e: Exposure): ExposureTable {
   const scheme = floodScheme(e.scenario, 'depth');
   const whole = e.total.people;
@@ -58,7 +70,10 @@ export function exposureTable(e: Exposure): ExposureTable {
       elderly: peopleText(c.elderly),
       share: shareText(c.people, whole),
       peopleValue: c.people,
+      barRatio: 0,
     }));
+  const maxPeople = Math.max(0, ...rows.map((r) => r.peopleValue));
+  for (const r of rows) r.barRatio = maxPeople > 0 ? r.peopleValue / maxPeople : 0;
   const notes = [
     '数え方：人口の250mメッシュの中心を含む浸水想定のセル（50m）の深さで、メッシュの人口を丸ごと数えます。面積での按分はしていません。',
   ];

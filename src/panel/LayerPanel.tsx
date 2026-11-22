@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, PointerEvent } from 'react';
+import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react';
 import type { LayerId } from '../config';
 import { registry } from '../layers';
 import { useMapStore } from '../store';
@@ -263,7 +263,10 @@ export default function LayerPanel() {
                 <ul className="lp-legend" data-testid={`legend-${id}`}>
                   {legend.map((l) => (
                     <li key={l.label}>
-                      <span className="lp-swatch" style={{ background: `rgb(${l.color.join(',')})` }} />
+                      <span
+                        className={`lp-swatch${l.swatch ? ` lp-swatch-${l.swatch}` : ''}`}
+                        style={l.swatch ? ({ '--sw': l.color.join(',') } as CSSProperties) : { background: `rgb(${l.color.join(',')})` }}
+                      />
                       {l.label}
                     </li>
                   ))}

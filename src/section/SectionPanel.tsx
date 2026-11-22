@@ -175,6 +175,8 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
   const mid = PAD_Y + ph / 2;
   const yOf = (offset: number) => mid - (offset / R) * (ph / 2 - 5);
   const patternId = `sc-hatch-${id}`;
+  const deepPatternId = `sc-hatch-deep-${id}`;
+  const AMBER = '255,170,30';
   return (
     <>
       {gaps.length > 0 && (
@@ -182,26 +184,61 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
           <pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <line x1={0} y1={0} x2={0} y2={6} stroke="rgba(176,182,204,0.7)" strokeWidth={1.6} />
           </pattern>
+          <pattern id={deepPatternId} width={5} height={5} patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+            <line x1={0} y1={0} x2={0} y2={5} stroke={`rgba(${AMBER},0.85)`} strokeWidth={1.8} />
+          </pattern>
         </defs>
       )}
       {gaps.map((g, i) => {
         const x0 = dToX(sc, g.d0);
         const w = Math.max(1, dToX(sc, g.d1) - x0);
-        return g.kind === 'unpublished' ? (
-          <g key={`g${i}`} data-testid="section-gap" data-kind="unpublished">
-            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${patternId})`} stroke="rgba(176,182,204,0.6)" strokeWidth={0.8} />
+        const cx = fix(x0 + w / 2);
+        const cy = PAD_Y + ph / 2;
+        if (g.kind === 'unpublished')
+          return (
+            <g key={`g${i}`} data-testid="section-gap" data-kind="unpublished">
+              <title>{g.label}</title>
+              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${patternId})`} stroke="rgba(176,182,204,0.6)" strokeWidth={0.8} />
+              {w > 44 && (
+                <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label">
+                  データ未公開
+                </text>
+              )}
+            </g>
+          );
+        if (g.kind === 'deep-none')
+          // 浸水が深いのに、洪水・高潮用の指定がない区間：この地図の主題。琥珀色の斜線・塗り・縁と太い文字で、見落とされないようにする
+          return (
+            <g key={`g${i}`} data-testid="section-gap" data-kind="deep-none">
+              <title>{g.label}</title>
+              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`rgba(${AMBER},0.16)`} />
+              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${deepPatternId})`} stroke={`rgba(${AMBER},0.95)`} strokeWidth={1.6} />
+              {w > 90 ? (
+                <>
+                  <text x={cx} y={cy - 2} textAnchor="middle" className="sc-gap-label sc-gap-deep">
+                    浸水が深いのに
+                  </text>
+                  <text x={cx} y={cy + 11} textAnchor="middle" className="sc-gap-label sc-gap-deep">
+                    指定なし
+                  </text>
+                </>
+              ) : (
+                w > 44 && (
+                  <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-deep">
+                    指定なし
+                  </text>
+                )
+              )}
+            </g>
+          );
+        // 浸水が小さく指定がない区間（目立たせない：薄い点線の枠と、小さな文字）と、浸水の想定を求められなかった区間
+        return (
+          <g key={`g${i}`} data-testid="section-gap" data-kind={g.kind}>
+            <title>{g.label}</title>
+            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill="rgba(255,255,255,0.04)" stroke="rgba(176,182,204,0.4)" strokeWidth={0.8} strokeDasharray="3 2" />
             {w > 44 && (
-              <text x={fix(x0 + w / 2)} y={PAD_Y + ph / 2 + 3} textAnchor="middle" className="sc-gap-label">
-                データ未公開
-              </text>
-            )}
-          </g>
-        ) : (
-          <g key={`g${i}`} data-testid="section-gap" data-kind="none">
-            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill="rgba(255,255,255,0.05)" stroke="rgba(176,182,204,0.45)" strokeWidth={0.8} strokeDasharray="3 2" />
-            {w > 44 && (
-              <text x={fix(x0 + w / 2)} y={PAD_Y + ph / 2 + 3} textAnchor="middle" className="sc-gap-label">
-                指定 0 件
+              <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-faint">
+                {g.kind === 'shallow-none' && w > 84 ? '指定なし（浸水小）' : '指定なし'}
               </text>
             )}
           </g>

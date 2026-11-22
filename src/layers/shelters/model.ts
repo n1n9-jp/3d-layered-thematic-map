@@ -2,9 +2,11 @@
  * 避難の段のデータ：指定緊急避難場所と病院。純粋な計算（読み込みの fetch と deck.gl の描画は `../shelters.ts`）。
  *
  * - 「洪水・高潮で使える」避難場所（`flood` か `tide` が true）を目立たせ、それ以外（地震・火事・津波・崖崩れなど）は控えめに出す。
- * - 避難場所は区による偏りが大きい。墨田・江東・渋谷・葛飾の4区は、このデータに指定緊急避難場所を公開していない（`published: false`）。
- *   その区の 0 件は「ない」ではなく「データがない」。画面では網掛けで示す。
- *   江戸川・足立は、公開しているが、洪水・高潮で使える場所が 0 件。
+ * - 避難場所は区による偏りが大きい。区は、避難場所の指定の状況で4通りに分かれる（`ShelterGap`。`../../aggregate/wardExposure.ts`）。
+ *   データ未公開（墨田・江東・渋谷・葛飾。`published: false`。0 件は「ない」ではなく「データがない」。網掛け）、
+ *   洪水・高潮用の指定が 0 件で、浸水が深い区（足立・江戸川。琥珀色の斜線・塗り・縁）、
+ *   洪水・高潮用の指定が 0 件で、浸水が小さい区（新宿・文京。ごく薄い塗りだけ）、洪水・高潮で使える場所のある区（印なし）。
+ *   0 件の区を2つに分ける基準は、その区の浸水の想定（深さ 3m 以上の区域に住む人の割合）。区の名前は決め打ちにせず、データから求める。
  */
 import { clipPolylineToCircle, pointInCircle } from '../../lib/circleClip';
 import type { Circle } from '../../lib/circleClip';
@@ -24,6 +26,8 @@ import type {
   ShelterCollection,
   ShelterSummary,
 } from '../../types';
+import { classifyWard, shareLabel } from '../../aggregate/wardExposure';
+import type { ShelterGap, WardExposure } from '../../aggregate/wardExposure';
 import { simplifyPath } from '../simplify';
 import { formatDistance } from '../format';
 
@@ -38,6 +42,18 @@ export const SHELTER_COLORS: Record<ShelterKind, Rgb> = {
 };
 /** 網掛け（データ未公開の区）の色。 */
 export const HATCH_COLOR: Rgb = [176, 182, 204];
+/** 浸水が深いのに洪水・高潮用の指定がない区の色（琥珀）。避難の段の緑・赤、浸水の段の桃色と見分けられ、この地図の主題として目に留まる。 */
+export const DEEP_NONE_COLOR: Rgb = [255, 170, 30];
+/** 浸水が小さく洪水・高潮用の指定がない区の色（ごく薄い青灰。問題を示すものではないので、目立たせない）。 */
+export const SHALLOW_NONE_COLOR: Rgb = [120, 136, 168];
+
+/** 区の種類の名前（凡例・断面）。 */
+export const GAP_LABEL: Record<ShelterGap, string> = {
+  unpublished: 'データ未公開',
+  'deep-none': '浸水が深いのに指定がない',
+  'shallow-none': '浸水が小さく指定がない',
+  unrated: '指定 0 件',
+};
 
 export const SHELTER_KIND_LABEL: Record<ShelterKind, string> = {
   usable: '避難場所（洪水・高潮用）',
@@ -49,6 +65,8 @@ export const SHELTER_KIND_LABEL: Record<ShelterKind, string> = {
 export const SHELTER_SECTION_RADIUS = 1000;
 /** 網掛けの線の間隔（m）。 */
 const HATCH_SPACING = 380;
+/** 浸水が深いのに指定がない区の斜線の間隔（m）。網掛け（データ未公開）より細かく、はっきりした色で引く。 */
+const DEEP_HATCH_SPACING = 240;
 /** 網掛けと塗りに使う区の輪郭を間引く許容誤差（m）。 */
 const HATCH_SIMPLIFY = 25;
 
@@ -60,6 +78,10 @@ export interface WardInfo {
   /** 洪水か高潮で使える避難場所の数（データから数えた値） */
   usable: number;
   total: number;
+  /** 区の種類。洪水・高潮で使える避難場所のある区は null */
+  gap: ShelterGap | null;
+  /** 区の人口のうち、浸水が想定される区域・深さ 3m 以上の区域に住む人の割合など（洪水と高潮の大きいほう）。求められなければ undefined */
+  exposure?: WardExposure;
 }
 
 interface KindIndex {
@@ -89,14 +111,57 @@ export interface ShelterData {
   gapPolygons: PolygonRings[];
   /** 描画用：データ未公開の区の網掛けの線分（2点）。切り出しでは、円で切ったもの */
   hatch: Position[][];
+  /** 描画用：浸水が深いのに洪水・高潮用の指定がない区の輪郭（間引いたもの）、斜線の線分、縁の線（輪郭の線）。切り出しでは、塗りは空、線は円で切ったもの */
+  deep: { polygons: PolygonRings[]; hatch: Position[][]; outline: Position[][]; labels: { position: Position; text: string }[] };
+  /** 描画用：浸水が小さく洪水・高潮用の指定がない区の輪郭（間引いたもの）。切り出しでは空 */
+  shallow: PolygonRings[];
   summary: ShelterSummary;
-  /** subset の結果のとき、円がかかる区（網掛けの区、洪水・高潮用が 0 件の区の名前） */
-  touching?: { unpublished: string[]; none: string[] };
+  /** subset の結果のとき、円がかかる区の名前（種類ごと） */
+  touching?: Record<ShelterGap, string[]>;
   /** subset の結果のとき、切り出した円。この円の外の地点は sample が値なしにする */
   clip?: Circle;
 }
 
 const KINDS: ShelterKind[] = ['usable', 'other', 'hospital'];
+
+/** 多角形の列のうち、外周の面積が最大のものの外周。 */
+function largestRing(polygons: readonly PolygonRings[]): Position[] | null {
+  let best: Position[] | null = null;
+  let bestArea = -1;
+  for (const p of polygons) {
+    const ring = p[0] as Position[] | undefined;
+    if (!ring) continue;
+    const a = Math.abs(ringSignedArea(ring));
+    if (a > bestArea) {
+      best = ring;
+      bestArea = a;
+    }
+  }
+  return best;
+}
+
+function ringSignedArea(ring: readonly Position[]): number {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  return a / 2;
+}
+
+/** 外周の面積の重心（ラベルを置く位置）。面積が 0 なら頂点の平均。 */
+function ringCentroid(ring: readonly Position[]): Position {
+  const a = ringSignedArea(ring);
+  if (Math.abs(a) < 1e-9) {
+    const n = Math.max(1, ring.length);
+    return [ring.reduce((t, p) => t + p[0], 0) / n, ring.reduce((t, p) => t + p[1], 0) / n];
+  }
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const f = ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    cx += (ring[j][0] + ring[i][0]) * f;
+    cy += (ring[j][1] + ring[i][1]) * f;
+  }
+  return [Math.round(cx / (6 * a)), Math.round(cy / (6 * a))];
+}
 
 function partsOf(g: BoundaryData['features'][number]['geometry']): PolygonRings[] {
   return g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
@@ -107,6 +172,8 @@ export function buildShelterData(
   summary: ShelterSummary,
   facilities: FacilityCollection,
   boundary: BoundaryData,
+  /** 区ごとの浸水の想定（`computeWardExposure`）。渡さなければ、洪水・高潮用が 0 件の区は `unrated` になる */
+  exposure?: ReadonlyMap<string, WardExposure>,
 ): ShelterData {
   const all: Position[] = [];
   const kind: ShelterKind[] = [];
@@ -151,22 +218,43 @@ export function buildShelterData(
     if (k === 'usable') c.usable++;
     counts.set(ward[i], c);
   });
-  const wards: WardInfo[] = boundary.features.map((f) => ({
-    name: f.properties.name,
-    polygons: partsOf(f.geometry),
-    published: published.get(f.properties.name) !== false,
-    usable: counts.get(f.properties.name)?.usable ?? 0,
-    total: counts.get(f.properties.name)?.total ?? 0,
-  }));
+  const wards: WardInfo[] = boundary.features.map((f) => {
+    const name = f.properties.name;
+    const info = {
+      published: published.get(name) !== false,
+      usable: counts.get(name)?.usable ?? 0,
+    };
+    const ex = exposure?.get(name);
+    return {
+      name,
+      polygons: partsOf(f.geometry),
+      ...info,
+      total: counts.get(name)?.total ?? 0,
+      gap: classifyWard(info, ex),
+      exposure: ex,
+    };
+  });
 
   const gapPolygons: PolygonRings[] = [];
   const hatch: Position[][] = [];
+  const deep: ShelterData['deep'] = { polygons: [], hatch: [], outline: [], labels: [] };
+  const shallow: PolygonRings[] = [];
   for (const w of wards) {
-    if (w.published) continue;
+    if (w.gap !== 'unpublished' && w.gap !== 'deep-none' && w.gap !== 'shallow-none') continue;
     for (const poly of w.polygons) {
       const simple = poly.map((ring) => simplifyPath(ring, HATCH_SIMPLIFY));
-      gapPolygons.push(simple);
-      hatch.push(...hatchPolygon(simple, HATCH_SPACING));
+      if (w.gap === 'unpublished') {
+        gapPolygons.push(simple);
+        hatch.push(...hatchPolygon(simple, HATCH_SPACING));
+      } else if (w.gap === 'deep-none') {
+        deep.polygons.push(simple);
+        deep.hatch.push(...hatchPolygon(simple, DEEP_HATCH_SPACING));
+        deep.outline.push(...simple);
+      } else shallow.push(simple);
+    }
+    if (w.gap === 'deep-none') {
+      const main = largestRing(w.polygons);
+      if (main) deep.labels.push({ position: ringCentroid(main), text: `${w.name}\n指定なし` });
     }
   }
 
@@ -184,19 +272,20 @@ export function buildShelterData(
     wards,
     gapPolygons,
     hatch,
+    deep,
+    shallow,
     summary,
   };
 }
 
-/** 円にかかる区（網掛けの区、洪水・高潮用が 0 件の区）。円の中心が区の中にあるか、区の輪郭が円の中を通る区。 */
-export function wardsTouching(wards: readonly WardInfo[], circle: Circle): { unpublished: string[]; none: string[] } {
-  const out = { unpublished: [] as string[], none: [] as string[] };
+/** 円にかかる区（種類ごと。洪水・高潮で使える場所のある区は含めない）。円の中心が区の中にあるか、区の輪郭が円の中を通る区。 */
+export function wardsTouching(wards: readonly WardInfo[], circle: Circle): Record<ShelterGap, string[]> {
+  const out: Record<ShelterGap, string[]> = { unpublished: [], 'deep-none': [], 'shallow-none': [], unrated: [] };
   for (const w of wards) {
-    const target = !w.published ? out.unpublished : w.usable === 0 ? out.none : null;
-    if (!target) continue;
+    if (!w.gap) continue;
     const inside = w.polygons.some((p) => pointInPolygon(circle.cx, circle.cy, p));
     const crosses = !inside && w.polygons.some((p) => p.some((ring) => clipPolylineToCircle(ring, circle.cx, circle.cy, circle.r).length > 0));
-    if (inside || crosses) target.push(w.name);
+    if (inside || crosses) out[w.gap].push(w.name);
   }
   return out;
 }
@@ -217,6 +306,7 @@ export function subsetShelters(data: ShelterData, cx: number, cy: number, radius
     return { index: createPointIndex(ids.map((i) => all[i])), ids };
   };
   const hatch = data.hatch.flatMap((seg) => clipPolylineToCircle(seg, cx, cy, radius));
+  const clipAll = (paths: Position[][]) => paths.flatMap((seg) => clipPolylineToCircle(seg, cx, cy, radius));
   return {
     ...data,
     all,
@@ -230,6 +320,13 @@ export function subsetShelters(data: ShelterData, cx: number, cy: number, radius
     hospital: kindIndex('hospital'),
     gapPolygons: [],
     hatch,
+    deep: {
+      polygons: [],
+      hatch: clipAll(data.deep.hatch),
+      outline: clipAll(data.deep.outline),
+      labels: data.deep.labels.filter((l) => pointInCircle(l.position[0], l.position[1], cx, cy, radius)),
+    },
+    shallow: [],
     touching: wardsTouching(data.wards, circle),
     clip: circle,
   };
@@ -243,7 +340,9 @@ export function summarizeShelters(data: ShelterData): ProbeValue[] {
   ];
   const t = data.touching;
   if (t && t.unpublished.length > 0) out.push({ label: 'データ未公開の区', value: `${t.unpublished.join('・')}（避難場所のデータを公開していない）` });
-  if (t && t.none.length > 0) out.push({ label: '洪水・高潮用が 0 件の区', value: t.none.join('・') });
+  if (t && t['deep-none'].length > 0) out.push({ label: '浸水が深いのに洪水・高潮用の指定がない区', value: t['deep-none'].join('・') });
+  if (t && t['shallow-none'].length > 0) out.push({ label: '浸水が小さく洪水・高潮用の指定がない区', value: t['shallow-none'].join('・') });
+  if (t && t.unrated.length > 0) out.push({ label: '洪水・高潮用が 0 件の区', value: t.unrated.join('・') });
   return out;
 }
 
@@ -280,9 +379,30 @@ export function sampleShelters(data: ShelterData, x: number, y: number): ProbeVa
   ];
   const ward = cachedDistrictLookup(data.boundary)(x, y);
   const info = ward === null ? undefined : data.wards.find((w) => w.name === ward);
-  if (info && !info.published) out.push({ label: 'この区のデータ', value: `${info.name}は未公開（指定緊急避難場所のデータなし。「ない」とは限らない）` });
-  else if (info && info.usable === 0) out.push({ label: 'この区のデータ', value: `${info.name}は洪水・高潮用の指定が 0 件（${info.total} 件は地震・火事など）` });
+  const note = info ? wardNote(info) : null;
+  if (note) out.push({ label: 'この区のデータ', value: note });
   return out;
+}
+
+/**
+ * 探針の「この区のデータ」の文。洪水・高潮で使える避難場所のある区は null。
+ * 言えるのは、データに載っているか（指定の有無）と、区の人口のうち深さ 3m 以上の区域に住む人の割合まで。避難計画の内容は書かない。
+ */
+export function wardNote(w: WardInfo): string | null {
+  const other = `地震・火事など ${w.total} 件`;
+  const severe = w.exposure ? shareLabel(w.exposure.severeShare) : null;
+  switch (w.gap) {
+    case 'unpublished':
+      return `${w.name}は未公開（このデータに指定緊急避難場所が載っていない。「ない」とは限らない）`;
+    case 'deep-none':
+      return `${w.name}は洪水・高潮用の指定が 0 件（${other}）。人口の ${severe} が深さ 3m 以上の区域に住む：浸水が深いのに指定がない`;
+    case 'shallow-none':
+      return `${w.name}は洪水・高潮用の指定が 0 件（${other}）。深さ 3m 以上の区域に住む人は人口の ${severe}：浸水が小さく指定がない`;
+    case 'unrated':
+      return `${w.name}は洪水・高潮用の指定が 0 件（${other}）`;
+    default:
+      return null;
+  }
 }
 
 /* ---------- 断面 ---------- */
@@ -313,19 +433,23 @@ export function mergeSpans(spans: [number, number][]): [number, number][] {
   return out;
 }
 
-/** 線が、網掛けの区（データ未公開）と、洪水・高潮用が 0 件の区を通る区間。 */
+/** 線が、データ未公開の区、洪水・高潮用が 0 件の区（浸水が深い・小さい）を通る区間。 */
 export function sectionGaps(data: ShelterData, line: SectionLine): NonNullable<SectionMarks['gaps']> {
   const gaps: NonNullable<SectionMarks['gaps']> = [];
   if (!isUsableLine(line)) return gaps;
   for (const w of data.wards) {
-    if (w.published && w.usable > 0) continue;
+    if (!w.gap) continue;
     const spans = mergeSpans(w.polygons.flatMap((p) => lineInsidePolygon(line, p as never)));
-    for (const [d0, d1] of spans)
-      gaps.push(
-        w.published
-          ? { d0, d1, kind: 'none', label: `${w.name}（洪水・高潮用の指定 0 件）` }
-          : { d0, d1, kind: 'unpublished', label: `${w.name}（データ未公開）` },
-      );
+    const share = w.exposure ? `。人口の ${shareLabel(w.exposure.severeShare)} が深さ 3m 以上の区域に住む` : '';
+    const label =
+      w.gap === 'unpublished'
+        ? `${w.name}（データ未公開）`
+        : w.gap === 'deep-none'
+          ? `${w.name}（洪水・高潮用の指定 0 件${share}：浸水が深いのに指定がない）`
+          : w.gap === 'shallow-none'
+            ? `${w.name}（洪水・高潮用の指定 0 件${share}：浸水が小さく指定がない）`
+            : `${w.name}（洪水・高潮用の指定 0 件）`;
+    for (const [d0, d1] of spans) gaps.push({ d0, d1, kind: w.gap, label });
   }
   return gaps.sort((a, b) => a.d0 - b.d0);
 }
@@ -364,24 +488,45 @@ export function sectionShelters(data: ShelterData, line: SectionLine): SectionMa
   return track;
 }
 
-/** 洪水・高潮で使える避難場所の数と、データのない区の一覧（23区全体の集計）。 */
+export interface WardGapSummary {
+  name: string;
+  /** 洪水・高潮用ではない避難場所（地震・火事など）の数 */
+  total: number;
+  /** 区の人口のうち、深さ 3m 以上の区域に住む人の割合（0〜1）。求められなければ null */
+  severeShare: number | null;
+  /** 区の人口のうち、浸水が想定される区域に住む人の割合（0〜1）。求められなければ null */
+  floodedShare: number | null;
+}
+
+/** 洪水・高潮で使える避難場所の数と、種類ごとの区の一覧（23区全体の集計）。 */
 export function shelterOverview(data: ShelterData): {
   usable: number;
   other: number;
   hospitals: number;
   unpublished: string[];
+  /** 洪水・高潮用が 0 件で、浸水が深い区（深さ 3m 以上の区域に住む人の割合の大きい順） */
+  deepNone: WardGapSummary[];
+  /** 洪水・高潮用が 0 件で、浸水が小さい区 */
+  shallowNone: WardGapSummary[];
+  /** 洪水・高潮用が 0 件の区の名前（浸水が深い・小さい・求められない、をまとめたもの） */
   zeroUsable: string[];
-  /** 洪水・高潮用が 0 件の区の、それ以外の避難場所の数（区名と件数） */
-  zeroUsableOther: { name: string; total: number }[];
   updated: string;
 } {
+  const summaryOf = (w: WardInfo): WardGapSummary => ({
+    name: w.name,
+    total: w.total,
+    severeShare: w.exposure ? w.exposure.severeShare : null,
+    floodedShare: w.exposure ? w.exposure.floodedShare : null,
+  });
+  const byShare = (a: WardGapSummary, b: WardGapSummary) => (b.severeShare ?? 0) - (a.severeShare ?? 0);
   return {
     usable: data.points.usable.length,
     other: data.points.other.length,
     hospitals: data.points.hospital.length,
-    unpublished: data.wards.filter((w) => !w.published).map((w) => w.name),
+    unpublished: data.wards.filter((w) => w.gap === 'unpublished').map((w) => w.name),
+    deepNone: data.wards.filter((w) => w.gap === 'deep-none').map(summaryOf).sort(byShare),
+    shallowNone: data.wards.filter((w) => w.gap === 'shallow-none').map(summaryOf),
     zeroUsable: data.wards.filter((w) => w.published && w.usable === 0).map((w) => w.name),
-    zeroUsableOther: data.wards.filter((w) => w.published && w.usable === 0).map((w) => ({ name: w.name, total: w.total })),
     updated: data.summary.updated,
   };
 }

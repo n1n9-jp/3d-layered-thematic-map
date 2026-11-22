@@ -165,24 +165,50 @@ for (const sc of ['max', 'river', 'tide']) {
   await page.evaluate((s) => window.__store.getState().setOption('floodScenario', s), sc);
   await page.waitForFunction((s) => document.querySelector('[data-testid=overall-exposure]')?.getAttribute('data-scenario') === s, sc, { timeout: 30000 });
   const rows = await page.$$eval('[data-testid=overall-exposure-row]', (els) =>
-    els.map((el) => ({ rank: Number(el.getAttribute('data-rank')), cells: [...el.querySelectorAll('td')].map((td) => td.textContent) })),
+    els.map((el) => ({
+      rank: Number(el.getAttribute('data-rank')),
+      cells: [...el.querySelectorAll('td[data-col]')].map((td) => td.textContent),
+    })),
   );
+  // 人口が 0 の深い区分は、1行にまとめて出す（data-ranks）。その区分の求め直した値が、本当に 0 であることを確かめる
+  const emptyRanks = (await page.getAttribute('[data-testid=overall-exposure-empty]', 'data-ranks').catch(() => null))?.split(',').map(Number) ?? [];
   const e = exp.byScenario[sc];
   for (const r of rows) {
     check(num(r.cells[0].split(' ')[0]) === e.people[r.rank] && num(r.cells[1]) === e.elderly[r.rank], `${sc}：${LABELS[r.rank]} 人口 ${fmt(e.people[r.rank])}・65歳以上 ${fmt(e.elderly[r.rank])}（画面 ${r.cells[0].split(' ')[0]} / ${r.cells[1]}）`);
   }
-  check(rows.length === 7, `${sc}：区分が7行（${rows.length}）`);
-  const total = await page.$$eval('[data-testid=overall-exposure-total] td', (els) => els.map((e) => e.textContent));
+  for (const rank of emptyRanks) check(e.people[rank] === 0 && e.elderly[rank] === 0, `${sc}：${LABELS[rank]} は 0 人でまとめて表示（求め直し ${fmt(e.people[rank])}）`);
+  check(rows.length + emptyRanks.length === 7, `${sc}：区分が7つ（表の行 ${rows.length} + まとめた ${emptyRanks.length}）`);
+  check(rows.every((r) => !emptyRanks.includes(r.rank)) && rows.length === 7 - emptyRanks.length, `${sc}：表に出た行とまとめた区分が重ならない`);
+  const total = await page.$$eval('[data-testid=overall-exposure-total] td[data-col]', (els) => els.map((e) => e.textContent));
   check(num(total[0]) === e.total && num(total[1]) === e.totalElderly, `${sc}：合計 ${fmt(e.total)}・${fmt(e.totalElderly)}（画面 ${total.join(' / ')}）`);
-  const below = await page.$$eval('[data-testid=overall-exposure-below] td', (els) => els.map((e) => e.textContent));
+  const below = await page.$$eval('[data-testid=overall-exposure-below] td[data-col]', (els) => els.map((e) => e.textContent));
   check(num(below[0]) === e.below.people && num(below[1]) === e.below.elderly, `${sc}：標高 0m 未満 ${fmt(e.below.people)}・${fmt(e.below.elderly)}（画面 ${below.join(' / ')}）`);
+  // 大きく見せる数字（概数）：深さ 3m 以上（ランク 3 以上）の人口と65歳以上、標高 0m 未満の人口
+  const sev = e.people.slice(3).reduce((a, b) => a + b, 0);
+  const sevE = e.elderly.slice(3).reduce((a, b) => a + b, 0);
+  const approx = (n) => (n >= 100000 ? `約${Math.round(n / 10000).toLocaleString('ja-JP')}万人` : n);
+  check((await page.textContent('[data-testid=overall-severe]')).trim() === approx(sev), `${sc}：大きな数字（深さ 3m 以上の人口）${approx(sev)}（画面 ${(await page.textContent('[data-testid=overall-severe]')).trim()}）`);
+  check((await page.textContent('[data-testid=overall-severe-elderly]')).trim() === approx(sevE), `${sc}：大きな数字（うち65歳以上）${approx(sevE)}（画面 ${(await page.textContent('[data-testid=overall-severe-elderly]')).trim()}）`);
+  check((await page.textContent('[data-testid=overall-below] .ov-num')).trim() === approx(e.below.people), `${sc}：大きな数字（標高 0m 未満）${approx(e.below.people)}`);
+  // 想定の表示が、数字の近くに出ていて、「大きいほう」は足し合わせでないと書いてある
+  const scenText = await page.textContent('[data-testid=overall-scenario]');
+  check(sc === 'max' ? scenText.includes('大きいほう') && scenText.includes('足し合わせたものではなく') : scenText.includes(sc === 'river' ? '洪水だけ' : '高潮だけ'), `${sc}：想定の表示（${scenText.trim().slice(0, 40)}…）`);
 }
 const usable = await page.textContent('[data-testid=overall-usable]');
 check(num(usable) === exp.usable, `洪水・高潮で使える避難場所 ${exp.usable}（画面 ${usable}）`);
-const shelterText = await page.textContent('[data-testid=overall-shelters]');
-for (const n of exp.unpublished) check(shelterText.includes(n), `データ未公開の区に ${n} が出ている`);
-const zeroText = await page.textContent('[data-testid=overall-zero]');
-for (const n of exp.zero) check(zeroText.includes(n), `洪水・高潮用が 0 件の区に ${n} が出ている`);
+const unpubText = await page.textContent('[data-testid=overall-unpublished]');
+for (const n of exp.unpublished) check(unpubText.includes(n), `データ未公開の区に ${n} が出ている`);
+// 洪水・高潮用が 0 件の区は、浸水の想定で「深い」「小さい」に分かれて出る（分類そのものは verify-wards.mjs で求め直して照合する）
+const deepText = await page.textContent('[data-testid=overall-deep-names]').catch(() => '');
+const shallowText = await page.textContent('[data-testid=overall-shallow]').catch(() => '');
+for (const n of exp.zero) check(deepText.includes(n) || shallowText.includes(n), `洪水・高潮用が 0 件の区 ${n} が、深い・小さいのどちらかに出ている`);
+// 折りたたみは、既定では閉じている（注記は読みたい人が開く）。「試作で避難の判断には使えない」は常に見える
+check((await page.locator('[data-testid=overall-notes-body]').count()) === 0, '数え方・データの注意は、既定では折りたたまれている');
+check(await page.isVisible('[data-testid=disclaimer]'), '「避難の判断には使えません」の注意が見える');
+check((await page.textContent('[data-testid=disclaimer]')).includes('避難の判断には使えません'), '注意の文に「避難の判断には使えません」');
+await page.click('[data-testid=overall-notes-toggle]');
+const notes = await page.textContent('[data-testid=overall-notes-body]');
+check(notes.includes('按分') && notes.includes('避難できない'), '折りたたみを開くと、数え方（按分なし）と、「指定がない」≠「避難できない」の注意が読める');
 await browser.close();
 if (failures.length) {
   console.log(`\n不合格 ${failures.length} 件`);

@@ -130,7 +130,7 @@ const press = async (page, testid) => {
   for (const [k, v] of [['洪水の深さ', '3〜5m'], ['高潮の深さ', '3〜5m'], ['洪水の継続', '2週間〜4週間'], ['高潮の継続', '1週間以上（上限なし）']]) check(text.includes(k) && text.includes(v), `${k}：${v}`);
   const sh = await page.textContent('[data-layer=shelters]');
   check(sh.includes('最寄りの避難場所') && sh.includes('最寄りの病院'), '避難：最寄りの避難場所と病院が出る');
-  check(sh.includes('江戸川区は洪水・高潮用の指定が 0 件'), '避難：江戸川区は洪水・高潮用が 0 件であることが出る');
+  check(sh.includes('江戸川区は洪水・高潮用の指定が 0 件') && sh.includes('浸水が深いのに指定がない'), '避難：江戸川区は洪水・高潮用が 0 件で、浸水が深いのに指定がないことが出る');
   await ctx.close();
 }
 
@@ -150,7 +150,8 @@ const press = async (page, testid) => {
   check(Number(head) > 4500 && Number(head) < 6500, `浸水 3m 以上の区間の長さが出る（${head} m）`);
   const gaps = await page.locator('[data-testid=section-gap][data-kind=unpublished]').count();
   check(gaps >= 1, `避難のグラフに、データ未公開の区間の網掛けが出る（${gaps}）`);
-  check((await page.locator('[data-testid=section-gap][data-kind=none]').count()) >= 1, '洪水・高潮用が 0 件の区間の枠が出る');
+  check((await page.locator('[data-testid=section-gap][data-kind=shallow-none]').count()) >= 1, '浸水が小さく指定がない区間（新宿）の枠が出る');
+  check((await page.locator('[data-testid=section-gap][data-kind=deep-none]').count()) >= 1, '浸水が深いのに指定がない区間（江戸川）の枠が出る');
   check((await page.locator('[data-layer=flood] [data-testid=section-rank-tick]').count()) >= 3, '浸水のグラフの縦軸に、段のラベルが出る');
   // 想定を切り替えると、断面の集計が変わる
   await press(page, 'opt-floodScenario-tide');

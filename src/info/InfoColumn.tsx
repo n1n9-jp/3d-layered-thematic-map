@@ -227,9 +227,10 @@ export default function InfoColumn({ width }: { width: number }) {
         <>
           <div className="ic-scroll ic-scroll-solo ic-overall" data-testid="overall-scroll">
             <Overall />
-            <div className="ic-hint ic-hint-short" data-testid="info-hint">
-              <p>平面にカーソルを置くと各層の値、クリックで固定すると周辺のクローズアップ（半径内の集計つき）が出ます。「断面」では、線で切って見られます。</p>
-            </div>
+          </div>
+          {/* 操作の手がかりは、スクロールする集計の外に置き、列の下端で切れないようにする */}
+          <div className="ic-hint ic-hint-short" data-testid="info-hint">
+            <p>平面にカーソルを置くと各層の値、クリックで固定すると周辺のクローズアップが出ます。「断面」では、線で切って見られます。</p>
           </div>
         </>
       ) : mode === 'hover' ? (
@@ -238,7 +239,7 @@ export default function InfoColumn({ width }: { width: number }) {
         <PinnedBody p={probe} />
       )}
       <footer className="ic-foot" data-testid="disclaimer">
-        試作です。実際の避難は、各区のハザードマップと避難情報に従ってください。
+        試作です。避難の判断には使えません。実際の避難は、各区のハザードマップと避難情報に従ってください。
       </footer>
     </section>
   );
