@@ -39,7 +39,7 @@ export default function App() {
     <>
       <StackView columnWidth={cw} />
       {/* 何の地図かが、開いてすぐ分かる題。ドラッグなどの操作は、題の下の地図にそのまま届く。 */}
-      <header data-testid="page-title" style={{ position: 'absolute', top: 14, left: 18, maxWidth: 340, pointerEvents: 'none', color: '#fff', font: '14px sans-serif' }}>
+      <header data-testid="page-title" style={{ position: 'absolute', top: 8, left: 8, maxWidth: 340, pointerEvents: 'none', color: '#fff', font: '14px sans-serif', background: 'rgba(0, 0, 0, 0.78)', padding: '6px 10px', borderRadius: 6 }}>
         <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700, lineHeight: 1.3 }}>東京23区の水害を読む地図</h1>
         <p style={{ margin: '5px 0 0', fontSize: 11.5, lineHeight: 1.5, color: '#e6c36a' }}>試作です。避難の判断には使えません。</p>
       </header>
