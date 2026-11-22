@@ -88,17 +88,49 @@
       "maxH": null
     }
   ],
+  "tideDurationRanks": [
+    {
+      "rank": 1,
+      "label": "12時間未満",
+      "minH": 0,
+      "maxH": 12
+    },
+    {
+      "rank": 2,
+      "label": "12〜24時間",
+      "minH": 12,
+      "maxH": 24
+    },
+    {
+      "rank": 3,
+      "label": "1日〜3日",
+      "minH": 24,
+      "maxH": 72
+    },
+    {
+      "rank": 4,
+      "label": "3日〜1週間",
+      "minH": 72,
+      "maxH": 168
+    },
+    {
+      "rank": 5,
+      "label": "1週間以上",
+      "minH": 168,
+      "maxH": null
+    }
+  ],
   "files": {
     "riverDepth": "flood-river.bin",
     "tideDepth": "flood-tide.bin",
     "riverDuration": "flood-river-duration.bin",
-    "tideDuration": null
+    "tideDuration": "flood-tide-duration.bin"
   },
   "values": {
     "none": 0,
     "outside": 255
   },
-  "tideDurationNote": "高潮の浸水継続時間（flood-tide-duration.bin）は作っていない。港湾局のデータの計算期間は約1週間で、1週間を超えて引かなかったセルは値が 999999 に なっており、洪水の 1週間〜2週間・2週間〜4週間・4週間以上に分けられない。",
+  "tideDurationNote": "高潮の浸水継続時間（flood-tide-duration.bin）のランクは、tideDurationRanks の表を使う（洪水の durationRanks とは別）。港湾局のデータは計算期間が約1週間で、1週間を超えて引かなかったセルは特別値（999999 分）になっており、それ以上は区別できない。そのため、ランク 1〜4 は洪水と同じ区切り（12時間未満、12〜24時間、1日〜3日、3日〜1週間）、1週間以上（1週間を超える有限の値と特別値）はすべてランク 5 にまとめ、ランク 6・7 は使わない。継続時間は浸水深 0.5m 以上が続く時間で、浸水深 0.5m 未満のセルには値がない（0）。",
   "sources": {
     "river": {
       "name": "国土数値情報 洪水浸水想定区域データ（A31b）",

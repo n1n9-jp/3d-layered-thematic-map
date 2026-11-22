@@ -13,12 +13,13 @@ export function generateFloodFixture(elevationBin, wards) {
   const riverDepth = Buffer.alloc(grid.width * grid.height);
   const tideDepth = Buffer.alloc(grid.width * grid.height);
   const riverDuration = Buffer.alloc(grid.width * grid.height);
+  const tideDuration = Buffer.alloc(grid.width * grid.height);
   for (let row = 0; row < grid.height; row++) {
     const y = cellCenterY(grid, row);
     for (let col = 0; col < grid.width; col++) {
       const i = row * grid.width + col;
       if (!wards.contains(cellCenterX(grid, col), y)) {
-        riverDepth[i] = tideDepth[i] = riverDuration[i] = OUTSIDE;
+        riverDepth[i] = tideDepth[i] = riverDuration[i] = tideDuration[i] = OUTSIDE;
         continue;
       }
       const raw = view.getFloat32(i * 4, true);
@@ -26,7 +27,8 @@ export function generateFloodFixture(elevationBin, wards) {
       riverDepth[i] = e < 0 ? 4 : e < 2 ? 3 : e < 5 ? 2 : e < 8 ? 1 : 0;
       tideDepth[i] = e < 1 ? 3 : e < 3 ? 2 : e < 5 ? 1 : 0;
       riverDuration[i] = e < 0 ? 6 : e < 2 ? 5 : e < 5 ? 3 : e < 8 ? 1 : 0;
+      tideDuration[i] = e < 0 ? 5 : e < 2 ? 4 : e < 5 ? 2 : 0; // 高潮の継続時間は最大 5（1週間以上）
     }
   }
-  return { meta: createFloodMeta(grid), bins: { riverDepth, tideDepth, riverDuration } };
+  return { meta: createFloodMeta(grid), bins: { riverDepth, tideDepth, riverDuration, tideDuration } };
 }

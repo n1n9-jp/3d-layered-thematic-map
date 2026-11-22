@@ -13,6 +13,8 @@ import {
   planeIXToLocal,
   polygonsOf,
   readDbfNumbers,
+  TIDE_DURATION_RANKS,
+  tideDurationRankOf,
 } from './flood.mjs';
 import { toLonLat } from './projection.mjs';
 import { createWards } from './wards.mjs';
@@ -32,6 +34,24 @@ describe('ランクへの換算', () => {
       [10080, 5], [20159, 5], [20160, 6], [40319, 6], [40320, 7], [999999, 7],
     ];
     for (const [min, rank] of cases) expect(durationRankOfMinutes(min), `${min} 分`).toBe(rank);
+  });
+
+  it('高潮の継続時間は、1〜4 は洪水と同じ区切り、1週間以上（有限の値と特別値 999999）はすべて 5。値がなければ 0', () => {
+    const cases = [
+      [NaN, 0], [undefined, 0], [-1, 0],
+      [0, 1], [1, 1], [719, 1], [720, 2], [1439, 2], [1440, 3], [4319, 3], [4320, 4], [10079, 4],
+      [10080, 5], [13027, 5], [20160, 5], [40320, 5], [999999, 5],
+    ];
+    for (const [min, rank] of cases) expect(tideDurationRankOf(min), `${min} 分`).toBe(rank);
+    // 1〜4 は洪水と同じ換算
+    for (const min of [1, 719, 720, 1440, 4319, 4320, 10079]) expect(tideDurationRankOf(min)).toBe(durationRankOfMinutes(min));
+  });
+
+  it('高潮の継続時間のランクの表：1〜4 は洪水と同じ、5 は「1週間以上」で上限なし', () => {
+    expect(TIDE_DURATION_RANKS.slice(0, 4)).toEqual(DURATION_RANKS.slice(0, 4));
+    expect(TIDE_DURATION_RANKS[4]).toEqual({ rank: 5, label: '1週間以上', minH: 168, maxH: null });
+    expect(TIDE_DURATION_RANKS.map((r) => r.rank)).toEqual([1, 2, 3, 4, 5]);
+    for (const { rank, minH } of TIDE_DURATION_RANKS) expect(tideDurationRankOf(minH === 0 ? 1 : minH * 60)).toBe(rank);
   });
 
   it('ランクの表は、換算関数の区切りと一致する', () => {

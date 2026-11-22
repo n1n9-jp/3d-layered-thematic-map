@@ -299,6 +299,7 @@ describe('validateFlood（浸水想定の格子）', () => {
     riverDepth: Buffer.from(floodFixture.bins.riverDepth),
     tideDepth: Buffer.from(floodFixture.bins.tideDepth),
     riverDuration: Buffer.from(floodFixture.bins.riverDuration),
+    tideDuration: Buffer.from(floodFixture.bins.tideDuration),
   });
   const insideIndex = () => {
     for (let i = 0; i < W * W; i++) if (floodFixture.bins.riverDepth[i] !== 255) return i;
@@ -340,7 +341,7 @@ describe('validateFlood（浸水想定の格子）', () => {
     expect(messages(validateFlood(meta(), b))).toMatch(/flood-tide\.bin: バイト数は width × height = 518400/);
   });
 
-  it('値の範囲を検出する（浸水深は 6、継続時間は 7 まで。255 は区の外）', () => {
+  it('値の範囲を検出する（浸水深は 6、洪水の継続時間は 7 まで。255 は区の外）', () => {
     const i = insideIndex();
     let b = bins();
     b.riverDepth[i] = 7;
@@ -368,24 +369,39 @@ describe('validateFlood（浸水想定の格子）', () => {
     expect(validateFlood(meta(), b).violationCount).toBe(0);
   });
 
-  it('高潮の浸水継続時間は、なくてもよい。あるときは検査し、flood.json の files が示している必要がある', () => {
-    expect(validateFlood(meta(), bins()).violationCount).toBe(0); // なし（仮データの meta は files.tideDuration が null）
+  it('高潮の浸水継続時間は、最大 5（1週間以上）。6 以上は違反（洪水の継続時間は 7 まで）', () => {
+    const i = insideIndex();
     const b = bins();
-    b.tideDuration = Buffer.from(floodFixture.bins.riverDuration);
-    expect(messages(validateFlood(meta(), b))).toMatch(/files\.tideDuration が示していない/);
-    const m = meta();
-    m.files.tideDuration = FLOOD_FILES.tideDuration;
-    expect(validateFlood(m, b, { wards: fixtureWards }).violationCount).toBe(0);
-    b.tideDuration[insideIndex()] = 9;
-    expect(messages(validateFlood(m, b))).toMatch(/flood-tide-duration\.bin: 値が 0〜7/);
-    // meta が示しているのにファイルがない
-    expect(messages(validateFlood(m, bins()))).toMatch(/flood-tide-duration\.bin: ファイルがない/);
+    b.tideDuration[i] = 5;
+    expect(validateFlood(meta(), b, { wards: fixtureWards }).violationCount).toBe(0);
+    b.tideDuration[i] = 6;
+    expect(messages(validateFlood(meta(), b))).toMatch(/flood-tide-duration\.bin: 値が 0〜5 と 255/);
+    b.riverDuration[i] = 7; // 洪水のほうは 7 まで
+    expect(validateFlood(meta(), { ...b, tideDuration: floodFixture.bins.tideDuration }).violationCount).toBe(0);
+  });
+
+  it('高潮の継続時間のランクの表（tideDurationRanks）と注記・files の食い違いを検出する', () => {
+    let m = meta();
+    m.tideDurationRanks.push({ rank: 6, label: '2週間〜4週間' });
+    expect(messages(validateFlood(m, bins()))).toMatch(/tideDurationRanks は 5 件/);
+    m = meta();
+    m.tideDurationRanks[4].label = '';
+    expect(messages(validateFlood(m, bins()))).toMatch(/tideDurationRanks\[4\]\.label/);
+    expect(meta().tideDurationRanks[4]).toMatchObject({ rank: 5, label: '1週間以上' });
+    m = meta();
+    delete m.tideDurationNote;
+    expect(messages(validateFlood(m, bins()))).toMatch(/tideDurationNote/);
+    m = meta();
+    m.files.tideDuration = null;
+    expect(messages(validateFlood(m, bins()))).toMatch(/files\.tideDuration は "flood-tide-duration\.bin" であること/);
   });
 
   it('必須の格子がなければ違反', () => {
     const b = bins();
     delete b.riverDuration;
+    delete b.tideDuration;
     expect(messages(validateFlood(meta(), b))).toMatch(/flood-river-duration\.bin: ファイルがない/);
+    expect(messages(validateFlood(meta(), b))).toMatch(/flood-tide-duration\.bin: ファイルがない/);
   });
 });
 
@@ -420,7 +436,7 @@ describe('validateDirectory', () => {
     }
     if (!skip.includes('elevation.json')) await writeFile(path.join(dir, 'elevation.json'), JSON.stringify(fixtures.elevation.meta));
     if (!skip.includes('elevation.bin')) await writeFile(path.join(dir, 'elevation.bin'), fixtures.elevation.bin);
-    const flood = { [FLOOD_FILES.meta]: JSON.stringify(floodFixture.meta) + '\n', [FLOOD_FILES.riverDepth]: floodFixture.bins.riverDepth, [FLOOD_FILES.tideDepth]: floodFixture.bins.tideDepth, [FLOOD_FILES.riverDuration]: floodFixture.bins.riverDuration };
+    const flood = { [FLOOD_FILES.meta]: JSON.stringify(floodFixture.meta) + '\n', [FLOOD_FILES.riverDepth]: floodFixture.bins.riverDepth, [FLOOD_FILES.tideDepth]: floodFixture.bins.tideDepth, [FLOOD_FILES.riverDuration]: floodFixture.bins.riverDuration, [FLOOD_FILES.tideDuration]: floodFixture.bins.tideDuration };
     for (const [name, content] of Object.entries(flood)) {
       if (!skip.includes(name)) await writeFile(path.join(dir, name), content);
     }

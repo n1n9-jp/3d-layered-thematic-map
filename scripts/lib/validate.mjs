@@ -5,7 +5,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { EXTENT } from './projection.mjs';
 import { createWards } from './wards.mjs';
-import { DEPTH_RANKS, DURATION_RANKS, FLOOD_FILES, OUTSIDE } from './flood.mjs';
+import { DEPTH_RANKS, DURATION_RANKS, FLOOD_FILES, OUTSIDE, TIDE_DURATION_RANKS } from './flood.mjs';
 
 /** ファイルサイズの上限（1MB = 1024*1024 byte として扱う）。 */
 export const SIZE_LIMITS = {
@@ -403,13 +403,13 @@ export function validateElevation(meta, bin, { wards = null } = {}) {
 
 /**
  * 浸水想定の格子（標高と同じ 720×720、50m）の仕様。値は Uint8 で、区の外は 255、区内で浸水なしは 0。
- * required でないファイルは、あれば検査し、なくても違反にしない（高潮の浸水継続時間は、作れないことがある）。
+ * 高潮の浸水継続時間は、1週間以上をすべてランク 5 にまとめるので、最大は 5（洪水の継続時間は 7）。
  */
 export const FLOOD_BINS = [
   { key: 'riverDepth', file: FLOOD_FILES.riverDepth, maxRank: DEPTH_RANKS.length, required: true },
   { key: 'tideDepth', file: FLOOD_FILES.tideDepth, maxRank: DEPTH_RANKS.length, required: true },
   { key: 'riverDuration', file: FLOOD_FILES.riverDuration, maxRank: DURATION_RANKS.length, required: true },
-  { key: 'tideDuration', file: FLOOD_FILES.tideDuration, maxRank: DURATION_RANKS.length, required: false },
+  { key: 'tideDuration', file: FLOOD_FILES.tideDuration, maxRank: TIDE_DURATION_RANKS.length, required: true },
 ];
 
 /** 検査の対象にするファイル名（flood.json と格子）。 */
@@ -454,10 +454,11 @@ export function validateFlood(meta, bins, { wards = null } = {}) {
   expectEq('minY', EXTENT.minY);
   expectEq('maxX', EXTENT.maxX);
   expectEq('maxY', EXTENT.maxY);
-  for (const [key, expected] of [['depthRanks', DEPTH_RANKS], ['durationRanks', DURATION_RANKS]]) {
+  for (const [key, expected] of [['depthRanks', DEPTH_RANKS], ['durationRanks', DURATION_RANKS], ['tideDurationRanks', TIDE_DURATION_RANKS]]) {
     const p = rankListProblem(meta[key], expected, key);
     if (p) v.add(W, p);
   }
+  if (!isNonEmptyString(meta.tideDurationNote)) v.add(W, 'tideDurationNote（高潮の継続時間のランクの注記）が空でない文字列でない');
   if (meta.sources === null || typeof meta.sources !== 'object') {
     v.add(W, 'sources がオブジェクトでない');
   } else {
@@ -472,14 +473,10 @@ export function validateFlood(meta, bins, { wards = null } = {}) {
 
   for (const { key, file, maxRank, required } of FLOOD_BINS) {
     const bin = bins[key];
+    if (meta.files?.[key] !== file) v.add(W, `files.${key} は ${show(file)} であること（実際: ${show(meta.files?.[key])}）`);
     if (!nonMissing(bin)) {
-      const declared = meta.files?.[key];
       if (required) v.add(file, 'ファイルがない（flood.json があるのに、格子がない）');
-      else if (typeof declared === 'string') v.add(file, `ファイルがない（flood.json の files.${key} が ${show(declared)} になっている）`);
       continue;
-    }
-    if (!required && meta.files?.[key] == null) {
-      v.add(W, `${file} があるのに、files.${key} が示していない（実際: ${show(meta.files?.[key])}）`);
     }
     if (bin.byteLength !== expectedBytes) {
       v.add(file, `バイト数は width × height = ${expectedBytes} であること（実際: ${bin.byteLength}）`);

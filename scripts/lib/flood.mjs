@@ -25,6 +25,15 @@ export const DURATION_RANKS = [
   { rank: 7, label: '4週間以上', minH: 672, maxH: null },
 ];
 
+/**
+ * 高潮の浸水継続時間のランク。1〜4 は洪水と同じ区切り。港湾局のデータは計算期間が約1週間で、1週間を超えて引かなかったセルは
+ * 特別値（999999 分）になっており、1週間を超える値の違いは区別できないので、1週間以上をすべてランク 5 にまとめる。
+ */
+export const TIDE_DURATION_RANKS = [
+  ...DURATION_RANKS.slice(0, 4),
+  { rank: 5, label: '1週間以上', minH: 168, maxH: null },
+];
+
 /** 区の外のセルの値。 */
 export const OUTSIDE = 255;
 
@@ -50,6 +59,16 @@ export function durationRankOfMinutes(minutes) {
   if (h < 336) return 5;
   if (h < 672) return 6;
   return 7;
+}
+
+/**
+ * 高潮の浸水継続時間（分。TermMin）→ ランク（TIDE_DURATION_RANKS）。値がない（数値でない）ものは 0。
+ * 継続時間の値があるセルは浸水深 0.5m 以上になったセルなので、0 分でもランク 1（12時間未満）とする。
+ * 1週間以上（有限の値で 10080 分以上のものと、特別値 999999）は 5。
+ */
+export function tideDurationRankOf(minutes) {
+  if (!(minutes >= 0)) return 0;
+  return Math.min(5, Math.max(1, durationRankOfMinutes(minutes)));
 }
 
 /** 出典と、想定の前提（flood.json の sources）。 */
@@ -81,10 +100,12 @@ export const FLOOD_SOURCES = {
   },
 };
 
-/** 高潮の浸水継続時間を作っていない理由（flood.json の tideDurationNote）。 */
+/** 高潮の浸水継続時間のランクの注記（flood.json の tideDurationNote）。 */
 export const TIDE_DURATION_NOTE =
-  '高潮の浸水継続時間（flood-tide-duration.bin）は作っていない。港湾局のデータの計算期間は約1週間で、1週間を超えて引かなかったセルは値が 999999 に ' +
-  'なっており、洪水の 1週間〜2週間・2週間〜4週間・4週間以上に分けられない。';
+  '高潮の浸水継続時間（flood-tide-duration.bin）のランクは、tideDurationRanks の表を使う（洪水の durationRanks とは別）。' +
+  '港湾局のデータは計算期間が約1週間で、1週間を超えて引かなかったセルは特別値（999999 分）になっており、それ以上は区別できない。' +
+  'そのため、ランク 1〜4 は洪水と同じ区切り（12時間未満、12〜24時間、1日〜3日、3日〜1週間）、1週間以上（1週間を超える有限の値と特別値）はすべてランク 5 にまとめ、ランク 6・7 は使わない。' +
+  '継続時間は浸水深 0.5m 以上が続く時間で、浸水深 0.5m 未満のセルには値がない（0）。';
 
 
 // ---------------------------------------------------------------- flood.json
@@ -98,8 +119,8 @@ export const FLOOD_FILES = {
   meta: 'flood.json',
 };
 
-/** flood.json の中身。tideDuration は、高潮の浸水継続時間のファイルを作ったときだけ true にする。 */
-export function createFloodMeta(grid, { tideDuration = false } = {}) {
+/** flood.json の中身。 */
+export function createFloodMeta(grid) {
   return {
     width: grid.width,
     height: grid.height,
@@ -110,14 +131,15 @@ export function createFloodMeta(grid, { tideDuration = false } = {}) {
     maxY: grid.maxY,
     depthRanks: DEPTH_RANKS,
     durationRanks: DURATION_RANKS,
+    tideDurationRanks: TIDE_DURATION_RANKS,
     files: {
       riverDepth: FLOOD_FILES.riverDepth,
       tideDepth: FLOOD_FILES.tideDepth,
       riverDuration: FLOOD_FILES.riverDuration,
-      tideDuration: tideDuration ? FLOOD_FILES.tideDuration : null,
+      tideDuration: FLOOD_FILES.tideDuration,
     },
     values: { none: 0, outside: OUTSIDE },
-    ...(tideDuration ? {} : { tideDurationNote: TIDE_DURATION_NOTE }),
+    tideDurationNote: TIDE_DURATION_NOTE,
     sources: FLOOD_SOURCES,
   };
 }

@@ -4,7 +4,6 @@
 //   node scripts/build-flood.mjs                     格子を生成し、生成後に確認（地点・ランクごとのセル数・標高との突き合わせ）も表示する
 //   node scripts/build-flood.mjs --check             生成済みの出力だけを確認する
 //   node scripts/build-flood.mjs --preview dir       生成後（--check なら生成済みの出力）に、確認用の画像（北が上）を dir に書く
-//   node scripts/build-flood.mjs --report-tide-duration  高潮の浸水継続時間（shape(term).zip）を読み、洪水のランクへ換算できるかの集計を表示する（出力は作らない）
 //
 // 先に build-boundary.mjs を実行しておく（23区の判定に boundary.geojson を使う）。標高との突き合わせには build-elevation.mjs の出力を使う。
 //
@@ -31,6 +30,7 @@ import {
   DURATION_RANKS,
   FLOOD_FILES,
   OUTSIDE,
+  TIDE_DURATION_RANKS,
   accumulateMax,
   cellCenterX,
   cellCenterY,
@@ -38,11 +38,11 @@ import {
   createFloodMeta,
   createGrid,
   depthRankOf,
-  durationRankOfMinutes,
   fillPolygonMax,
   planeIXToLocal,
   polygonsOf,
   readDbfNumbers,
+  tideDurationRankOf,
 } from './lib/flood.mjs';
 import { DATA_DIR } from './lib/paths.mjs';
 import { EXTENT, toLocal, toLonLat } from './lib/projection.mjs';
@@ -66,6 +66,7 @@ const FILES = {
   river: FLOOD_FILES.riverDepth,
   tide: FLOOD_FILES.tideDepth,
   riverDuration: FLOOD_FILES.riverDuration,
+  tideDuration: FLOOD_FILES.tideDuration,
   meta: FLOOD_FILES.meta,
 };
 const file = (name) => path.join(DATA_DIR, name);
@@ -227,32 +228,36 @@ async function buildTide(wards) {
   return { ranks, depthM: cells };
 }
 
-/** 高潮の浸水継続時間（出力は作らない）。洪水と同じ区切りに対応づけられるかを調べるための集計。 */
-async function reportTideDuration(wards, inside) {
+/** 高潮の浸水継続時間のランク（1〜5。値のないセルは 0）。あわせて、元の値の内訳を表示する。 */
+async function buildTideDuration(wards, inside) {
   console.log(`取得: ${TIDE_TERM_URL}`);
   const zip = await fetchCached(TIDE_TERM_URL);
+  lap(`ZIP を読み込み（${(zip.length / 1e6).toFixed(1)}MB）`);
   const { cells, stats, tiles } = accumulateTide(zip, 'TermMin', wards);
-  lap(`高潮の継続時間: 図郭 ${tiles}、10m セル ${fmt(stats.records)} 件（TermMin は分。999999 は、計算期間内に浸水深 0.5m 未満まで引かなかったことを示す値）`);
+  lap(`高潮の継続時間: 図郭 ${tiles}、10m セル ${fmt(stats.records)} 件（TermMin は分。999999 は、計算期間（約1週間）内に引かなかったことを示す特別値）`);
   const SENTINEL = 999999;
-  const counts = new Map();
-  let finiteMax = 0;
-  let total = 0;
+  const ranks = new Uint8Array(CELLS);
+  let withValue = 0, unresolved = 0, finiteMax = 0, finiteOverWeek = 0;
   for (let i = 0; i < CELLS; i++) {
+    ranks[i] = tideDurationRankOf(cells[i]);
     if (!inside[i] || Number.isNaN(cells[i])) continue;
-    total++;
-    const v = cells[i];
-    // 50m セルの最大。999999 を含むセルは、最大が 999999 になる
-    const label = v >= SENTINEL ? '未解消（999999）' : `ランク ${durationRankOfMinutes(v)}（${DURATION_RANKS[durationRankOfMinutes(v) - 1]?.label ?? '0'}）`;
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-    if (v < SENTINEL && v > finiteMax) finiteMax = v;
+    withValue++;
+    if (cells[i] >= SENTINEL) unresolved++;
+    else {
+      if (cells[i] > finiteMax) finiteMax = cells[i];
+      if (cells[i] >= 10080) finiteOverWeek++;
+    }
   }
-  console.log(`  区内の、継続時間のあるセル ${fmt(total)}（セル内の最大。洪水と同じ区切りに換算）。有限の値の最大 ${finiteMax} 分（${(finiteMax / 1440).toFixed(1)} 日）`);
-  for (const [k, n] of [...counts].sort()) console.log(`    ${k}: ${fmt(n)}`);
+  console.log(
+    `  区内の、継続時間のあるセル ${fmt(withValue)}：特別値（999999）${fmt(unresolved)}（${((unresolved * 100) / withValue).toFixed(1)}%）、` +
+      `1週間を超える有限の値 ${fmt(finiteOverWeek)}、有限の値の最大 ${finiteMax} 分（${(finiteMax / 1440).toFixed(1)} 日）。1週間以上はすべてランク 5`,
+  );
+  return ranks;
 }
 
 // ---------------------------------------------------------------- 出力
 
-async function writeOutputs(wards, inside, river, tide) {
+async function writeOutputs(wards, inside, river, tide, tideDuration) {
   const mask = (src) => {
     const out = new Uint8Array(CELLS);
     for (let i = 0; i < CELLS; i++) out[i] = inside[i] ? src[i] : OUTSIDE;
@@ -263,6 +268,7 @@ async function writeOutputs(wards, inside, river, tide) {
     [FILES.river, mask(river.depth)],
     [FILES.tide, mask(tide.ranks)],
     [FILES.riverDuration, mask(river.duration)],
+    [FILES.tideDuration, mask(tideDuration)],
   ];
   for (const [name, data] of outputs) await writeFile(file(name), data);
   const meta = createFloodMeta(grid);
@@ -319,12 +325,14 @@ async function check(wards) {
   const river = await readBin(FILES.river);
   const tide = await readBin(FILES.tide);
   const riverDuration = await readBin(FILES.riverDuration);
+  const tideDuration = await readBin(FILES.tideDuration);
   console.log('\n各格子のランクごとのセル数（区の外は 255）:');
   printRankCounts('洪水 浸水深（flood-river）', river, 6, DEPTH_RANKS);
   printRankCounts('高潮 浸水深（flood-tide）', tide, 6, DEPTH_RANKS);
   printRankCounts('洪水 浸水継続時間（flood-river-duration）', riverDuration, 7, DURATION_RANKS);
+  printRankCounts('高潮 浸水継続時間（flood-tide-duration。1週間以上はすべて 5）', tideDuration, 5, TIDE_DURATION_RANKS);
   const outsideCount = (b) => b.reduce((n, v) => n + (v === OUTSIDE ? 1 : 0), 0);
-  console.log(`  区の外（255）のセル数: 洪水 ${fmt(outsideCount(river))} / 高潮 ${fmt(outsideCount(tide))} / 継続時間 ${fmt(outsideCount(riverDuration))}`);
+  console.log(`  区の外（255）のセル数: 洪水 ${fmt(outsideCount(river))} / 高潮 ${fmt(outsideCount(tide))} / 洪水の継続時間 ${fmt(outsideCount(riverDuration))} / 高潮の継続時間 ${fmt(outsideCount(tideDuration))}`);
   const ge = (bin, k) => bin.reduce((n, v) => n + (v >= k && v !== OUTSIDE ? 1 : 0), 0);
   console.log(`  洪水の継続時間 ランク 4 以上（3日以上） ${fmt(ge(riverDuration, 4))} セル、ランク 5 以上（1週間以上） ${fmt(ge(riverDuration, 5))} セル`);
 
@@ -338,7 +346,7 @@ async function check(wards) {
     const ok = meets(p.river, r) && meets(p.tide, t);
     if (!ok) bad++;
     const show = (v) => (v === OUTSIDE ? '区の外' : v);
-    console.log(`  ${ok ? 'OK ' : 'NG '} ${p.name}: 洪水 ${show(r)}（期待 ${p.river ?? '—'}）、高潮 ${show(t)}（期待 ${p.tide ?? '—'}）、洪水の継続時間 ${show(riverDuration[i])}`);
+    console.log(`  ${ok ? 'OK ' : 'NG '} ${p.name}: 洪水 ${show(r)}（期待 ${p.river ?? '—'}）、高潮 ${show(t)}（期待 ${p.tide ?? '—'}）、洪水の継続時間 ${show(riverDuration[i])}、高潮の継続時間 ${show(tideDuration[i])}`);
   }
   if (bad) console.log(`  ${bad} 地点が期待と違う`);
 
@@ -435,7 +443,7 @@ async function check(wards) {
 async function writePreviews(dir) {
   const elevation = await readElevation().catch(() => null);
   const targets = [
-    ['river', FILES.river, 6], ['tide', FILES.tide, 6], ['river-duration', FILES.riverDuration, 7],
+    ['river', FILES.river, 6], ['tide', FILES.tide, 6], ['river-duration', FILES.riverDuration, 7], ['tide-duration', FILES.tideDuration, 5],
   ];
   const depthColors = [[255, 255, 140], [255, 200, 60], [255, 120, 30], [225, 40, 40], [160, 20, 120], [90, 0, 170]];
   const durationColors = [[255, 255, 140], [255, 215, 70], [255, 160, 40], [240, 90, 30], [210, 30, 60], [150, 20, 120], [90, 0, 170]];
@@ -443,7 +451,7 @@ async function writePreviews(dir) {
   const images = [];
   for (const [label, name, maxRank] of targets) {
     const bin = await readBin(name);
-    const colors = maxRank === 6 ? depthColors : durationColors;
+    const colors = maxRank === 6 ? depthColors : durationColors; // 高潮の継続時間（5）は、洪水の 1〜5 と同じ色
     const png = new PNG({ width: WIDTH, height: HEIGHT });
     for (let i = 0; i < CELLS; i++) {
       const v = bin[i];
@@ -462,13 +470,13 @@ async function writePreviews(dir) {
     images.push({ label, png });
     console.log(`確認用の画像: ${p}`);
   }
-  // 2×2 に並べた画像（洪水の深さ・高潮の深さ・洪水の継続時間。右下は空き）
+  // 2×2 に並べた画像（洪水の深さ・高潮の深さ・洪水の継続時間・高潮の継続時間）
   const montage = new PNG({ width: WIDTH * 2 + 4, height: HEIGHT * 2 + 4 });
   montage.data.fill(255);
   images.forEach(({ png }, k) => PNG.bitblt(png, montage, 0, 0, WIDTH, HEIGHT, (k % 2) * (WIDTH + 4), Math.floor(k / 2) * (HEIGHT + 4)));
   const mp = path.join(dir, 'flood-all.png');
   await writeFile(mp, PNG.sync.write(montage));
-  console.log(`確認用の画像（左上：洪水の深さ、右上：高潮の深さ、左下：洪水の継続時間）: ${mp}`);
+  console.log(`確認用の画像（左上：洪水の深さ、右上：高潮の深さ、左下：洪水の継続時間、右下：高潮の継続時間）: ${mp}`);
 }
 
 // ---------------------------------------------------------------- 実行
@@ -485,16 +493,13 @@ const wards = loadWards();
 const inside = insideMask(wards);
 lap(`区内のセル ${fmt(inside.reduce((n, v) => n + v, 0))} / ${fmt(CELLS)}`);
 
-if (args.includes('--report-tide-duration')) {
-  await reportTideDuration(wards, inside);
-} else {
-  if (!args.includes('--check')) {
-    const river = await buildRiver();
-    const tide = await buildTide(wards);
-    await writeOutputs(wards, inside, river, tide);
-    lap('完了');
-  }
-  const bad = await check(wards);
-  if (previewDir) await writePreviews(previewDir);
-  if (bad) process.exitCode = 1;
+if (!args.includes('--check')) {
+  const river = await buildRiver();
+  const tide = await buildTide(wards);
+  const tideDuration = await buildTideDuration(wards, inside);
+  await writeOutputs(wards, inside, river, tide, tideDuration);
+  lap('完了');
 }
+const bad = await check(wards);
+if (previewDir) await writePreviews(previewDir);
+if (bad) process.exitCode = 1;
