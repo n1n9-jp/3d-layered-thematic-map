@@ -1,6 +1,18 @@
 import { create } from 'zustand';
-import { CLOSEUP_RADII, DEFAULT_ANGLES, DEFAULT_CLOSEUP_RADIUS, EXTENT, LAYER_IDS, SPACING, VIEW_LIMITS } from './config';
-import type { CloseupRadius, LayerId } from './config';
+import {
+  CLOSEUP_RADII,
+  DEFAULT_ANGLES,
+  DEFAULT_CLOSEUP_RADIUS,
+  DEFAULT_OPTIONS,
+  EXTENT,
+  FLOOD_SCENARIOS,
+  FLOOD_VIEWS,
+  LAYER_IDS,
+  POPULATION_VIEWS,
+  SPACING,
+  VIEW_LIMITS,
+} from './config';
+import type { CloseupRadius, LayerId, LayerOptions } from './config';
 import { sectionFromQuery } from './section/interaction';
 import type { SectionLine } from './types';
 
@@ -33,6 +45,8 @@ export interface MapState {
   viewState: ViewState;
   /** true の間は、画面の大きさや積層の高さに合わせて視点を自動で収め直す（利用者が視点を動かすと false）。 */
   autoFit: boolean;
+  /** レイヤー一覧の行にある切り替え（浸水の想定と見るもの、人口の総数と65歳以上） */
+  options: LayerOptions;
   /** ローカル座標（m） */
   probe: { x: number; y: number } | null;
   probePinned: boolean;
@@ -58,6 +72,7 @@ export interface MapState {
   moveLayer(id: LayerId, toIndex: number): void;
   setVisible(id: LayerId, v: boolean): void;
   setSolo(id: LayerId | null): void;
+  setOption<K extends keyof LayerOptions>(key: K, value: LayerOptions[K]): void;
   setViewState(v: MapState['viewState']): void;
   setAutoFit(v: boolean): void;
   setProbe(p: MapState['probe']): void;
@@ -89,7 +104,7 @@ const DEFAULT_VIEW: ViewState = {
 
 type InitialState = Pick<
   MapState,
-  'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius' | 'mode' | 'section'
+  'order' | 'visible' | 'solo' | 'spacing' | 'viewState' | 'probe' | 'probePinned' | 'closeupRadius' | 'mode' | 'section' | 'options'
 >;
 
 function isLayerId(s: string): s is LayerId {
@@ -126,6 +141,20 @@ export function radiusQuery(search: string): CloseupRadius {
   return CLOSEUP_RADII.find((r) => r === n) ?? DEFAULT_CLOSEUP_RADIUS;
 }
 
+function oneOf<T extends string>(choices: readonly T[], v: string | null, fallback: T): T {
+  return choices.find((c) => c === v) ?? fallback;
+}
+
+/** URL クエリの `flood`（想定）、`floodview`（見るもの）、`pop`（人口で見るもの）。値が合わないものは既定値。 */
+export function optionsQuery(search: string): LayerOptions {
+  const q = new URLSearchParams(search);
+  return {
+    floodScenario: oneOf(FLOOD_SCENARIOS, q.get('flood'), DEFAULT_OPTIONS.floodScenario),
+    floodView: oneOf(FLOOD_VIEWS, q.get('floodview'), DEFAULT_OPTIONS.floodView),
+    populationView: oneOf(POPULATION_VIEWS, q.get('pop'), DEFAULT_OPTIONS.populationView),
+  };
+}
+
 function ids(v: string | null): LayerId[] {
   return (v ?? '')
     .split(',')
@@ -137,7 +166,8 @@ function ids(v: string | null): LayerId[] {
  * URL クエリから初期状態を作る。
  * `spacing=<m>`, `order=<id,id,...>`, `hidden=<id,id>`, `solo=<id>`, `probe=<x>,<y>`,
  * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）,
- * `section=<ax>,<ay>,<bx>,<by>`（断面の線。あれば「断面」に切り替わった状態で開く）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
+ * `section=<ax>,<ay>,<bx>,<by>`（断面の線。あれば「断面」に切り替わった状態で開く）,
+ * `flood=max|river|tide`（浸水の想定）, `floodview=depth|duration`（浸水で見るもの）, `pop=total|elderly`（人口で見るもの）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
@@ -184,6 +214,7 @@ export function initialStateFromQuery(search: string): InitialState {
     closeupRadius: radiusQuery(search),
     mode: section ? 'section' : 'point',
     section,
+    options: optionsQuery(search),
   };
 }
 
@@ -211,6 +242,7 @@ export const useMapStore = create<MapState>()((set) => ({
     }),
   setVisible: (id, v) => set((s) => ({ visible: { ...s.visible, [id]: v } })),
   setSolo: (id) => set({ solo: id }),
+  setOption: (key, value) => set((s) => (s.options[key] === value ? {} : { options: { ...s.options, [key]: value } })),
   setViewState: (v) => set({ viewState: v }),
   setAutoFit: (v) => set({ autoFit: v }),
   setProbe: (p) => set({ probe: p }),

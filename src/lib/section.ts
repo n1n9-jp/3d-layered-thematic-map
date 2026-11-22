@@ -124,6 +124,19 @@ export function lineInsideRing(line: SectionLine, ring: readonly (readonly [numb
   return out;
 }
 
+/**
+ * 線が、多角形（外周と穴のリングの列。偶奇規則）の内側を通る区間を、線に沿った距離 [d0, d1]（0〜長さに収める）で返す。
+ * 穴の中は除く。距離の昇順。
+ */
+export function lineInsidePolygon(line: SectionLine, rings: readonly (readonly (readonly [number, number])[])[]): [number, number][] {
+  const events: number[] = [];
+  for (const ring of rings) for (const [a, b] of lineInsideRing(line, ring)) events.push(a, b);
+  events.sort((a, b) => a - b);
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < events.length; i += 2) if (events[i + 1] > events[i]) out.push([events[i], events[i + 1]]);
+  return out;
+}
+
 /** 線が、軸に平行な長方形（縁を含む）と交わるか。 */
 export function lineTouchesBox(
   line: SectionLine,

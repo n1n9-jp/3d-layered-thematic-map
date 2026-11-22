@@ -28,8 +28,9 @@ const DECK_PARAMETERS = { depthCompare: 'always', depthWriteEnabled: false } as 
 export function useCloseupCut(circle: CloseupCircle): CloseupCut {
   const data = useMapStore((s) => s.data);
   const status = useMapStore((s) => s.status);
-  // 切り出しは、固定した地点・半径・データが変わったときだけ行う。視点の角度や間隔が変わっても作り直さない。
-  return useMemo(() => cutCloseup(data, status, circle), [data, status, circle.x, circle.y, circle.r]); // eslint-disable-line react-hooks/exhaustive-deps
+  const options = useMapStore((s) => s.options);
+  // 切り出しは、固定した地点・半径・データ・切り替えが変わったときだけ行う。視点の角度や間隔が変わっても作り直さない。
+  return useMemo(() => cutCloseup(data, status, circle, options), [data, status, options, circle.x, circle.y, circle.r]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** 積層（切り出した範囲だけを拡大したもの）。表示専用で、ドラッグも探針も受け付けない。 */
@@ -39,6 +40,7 @@ export function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
   const visible = useMapStore((s) => s.visible);
   const solo = useMapStore((s) => s.solo);
   const spacing = useMapStore((s) => s.spacing);
+  const options = useMapStore((s) => s.options);
   const rotationX = useMapStore((s) => s.viewState.rotationX);
   const rotationOrbit = useMapStore((s) => s.viewState.rotationOrbit);
 
@@ -61,10 +63,10 @@ export function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
       out[id] =
         z === null || sub === undefined
           ? []
-          : registry[id].render(sub, { z, modelMatrix: translationMatrix(z), opacity: 1, solo: solo === id, boundary: null });
+          : registry[id].render(sub, { z, modelMatrix: translationMatrix(z), opacity: 1, solo: solo === id, boundary: null, options });
     }
     return out;
-  }, [cut, targets, solo]);
+  }, [cut, targets, solo, options]);
 
   const tiers = LAYER_IDS.filter((id) => shown[id] !== null)
     .map((id) => ({ id, z: shown[id] as number, i: order.indexOf(id) }))

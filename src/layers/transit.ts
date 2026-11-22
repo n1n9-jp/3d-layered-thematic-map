@@ -74,7 +74,7 @@ const transit: LayerModule<TransitData> = {
   section: (data, line) => sectionTransit(data, line, { rail: RAIL_COLOR, station: STATION_COLOR }),
   subset: subsetTransit,
   summarize: summarizeTransit,
-  legend: [
+  legend: () => [
     { color: RAIL_COLOR, label: '鉄道路線' },
     { color: STATION_COLOR, label: '駅' },
   ],

@@ -74,10 +74,12 @@ const elevation: LayerModule<ElevationLayerData> = {
         : { label: '標高', value: roundTo1(v), unit: 'm' },
     ];
   },
-  legend: LEGEND_STOPS.map(({ value, label }) => ({
-    color: elevationColor(value).slice(0, 3) as [number, number, number],
-    label,
-  })),
+  legend: () =>
+    LEGEND_STOPS.map(({ value, label }) => ({
+      color: elevationColor(value).slice(0, 3) as [number, number, number],
+      label,
+    })),
+  notes: () => ['青い所（0m 未満）は、海面より低い土地です。'],
 };
 
 const boundsCache = new WeakMap<ElevationData, [number, number, number, number]>();

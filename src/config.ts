@@ -19,10 +19,28 @@ export const DATA_OUTLINE: readonly (readonly [number, number])[] = [
   [5568, -17141], [5645, -17121], [5713, -17081], [6970, -15824], [14140, -3405], [15587, 1994],
 ];
 
-/** レイヤーID。下から上の順。 */
-export const LAYER_IDS = ['elevation', 'population', 'roads', 'transit', 'facilities'] as const;
+/** レイヤーID。下から上の順（標高、浸水、人口、公共交通、避難）。 */
+export const LAYER_IDS = ['elevation', 'flood', 'population', 'transit', 'shelters'] as const;
 
 export type LayerId = (typeof LAYER_IDS)[number];
+
+/** 浸水の想定：洪水と高潮の大きいほう（既定）、洪水、高潮。洪水と高潮は別々の災害の想定で、足し合わせない。 */
+export const FLOOD_SCENARIOS = ['max', 'river', 'tide'] as const;
+export type FloodScenario = (typeof FLOOD_SCENARIOS)[number];
+/** 浸水で見るもの：深さ（既定）、水が引くまでの期間（浸水継続時間）。 */
+export const FLOOD_VIEWS = ['depth', 'duration'] as const;
+export type FloodView = (typeof FLOOD_VIEWS)[number];
+/** 人口で見るもの：総人口（既定）、65歳以上（人口密度で塗る）。 */
+export const POPULATION_VIEWS = ['total', 'elderly'] as const;
+export type PopulationView = (typeof POPULATION_VIEWS)[number];
+
+/** レイヤー一覧の行にある切り替えの状態。描画・凡例・断面・クローズアップの集計が、これに従う。 */
+export interface LayerOptions {
+  floodScenario: FloodScenario;
+  floodView: FloodView;
+  populationView: PopulationView;
+}
+export const DEFAULT_OPTIONS: LayerOptions = { floodScenario: 'max', floodView: 'depth', populationView: 'total' };
 
 /** レイヤー間隔（m）。 */
 export const SPACING = { min: 0, max: 20000, default: 12000 } as const;

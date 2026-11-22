@@ -56,8 +56,9 @@ function multiplesIn(lo: number, hi: number, step: number): number[] {
   return out;
 }
 
-/** 縦軸の目盛り（3つほど）。 */
-export function valueTicks(domain: readonly [number, number]): number[] {
+/** 縦軸の目盛り（3つほど）。段（ランク）の系列は、すべての段（ラベルの重なりは、描く側で間引く）。 */
+export function valueTicks(domain: readonly [number, number], ranks?: SectionSeries['ranks']): number[] {
+  if (ranks) return ranks.map((r) => r.value);
   const [lo, hi] = domain;
   return multiplesIn(lo, hi, niceStep(hi - lo, 3));
 }
@@ -123,7 +124,7 @@ export function nearestMark(marks: readonly Mark[], d: number, tolerance: number
 }
 
 /** 線から離れた地物（駅、学校、病院）か。交差（道路、鉄道）は false。 */
-const NEAR_CATEGORIES: ReadonlySet<string> = new Set(['station', 'school', 'hospital']);
+const NEAR_CATEGORIES: ReadonlySet<string> = new Set(['station', 'school', 'hospital', 'shelter-usable', 'shelter-other']);
 export function isNearMark(m: Pick<Mark, 'category'>): boolean {
   return NEAR_CATEGORIES.has(m.category);
 }
@@ -135,13 +136,19 @@ export function markText(m: Mark): string {
   return m.name ? `${m.name}（${m.categoryLabel}${where}）` : `${m.categoryLabel}${where}`;
 }
 
+/** 系列の値の文字列。段（ランク）の系列は、段の名前（0 は「浸水なし」）。数値の系列は、桁区切りと単位。 */
+export function seriesValueText(t: SectionSeries, v: number): string {
+  if (t.ranks) return v === 0 ? 'なし' : (t.ranks.find((r) => r.value === v)?.label ?? '—');
+  return `${num(v)} ${t.unit}`;
+}
+
 /** カーソル位置 d の、そのレイヤーの値の文字列。値がなければ null。 */
 export function readoutText(tracks: readonly SectionTrack[], d: number, toleranceM: number): string | null {
   const marks: Mark[] = [];
   for (const t of tracks) {
     if (t.kind === 'series') {
       const v = valueAt(t, d);
-      return v === null ? null : `${t.label} ${num(v)} ${t.unit}`;
+      return v === null ? null : `${t.label} ${seriesValueText(t, v)}`;
     }
     marks.push(...t.marks);
   }
@@ -288,22 +295,6 @@ export function postsOf(line: SectionLine, tracks: readonly SectionTrack[]): Pos
 
 /* ---------- 要約 ---------- */
 
-const ROAD_ORDER = ['motorway', 'national', 'prefectural', 'other'];
-
-function countBy(marks: readonly Mark[], order: readonly string[] = []): { label: string; n: number; category: string }[] {
-  const byCat = new Map<string, { label: string; n: number; category: string }>();
-  for (const m of marks) {
-    const e = byCat.get(m.category);
-    if (e) e.n++;
-    else byCat.set(m.category, { label: m.categoryLabel, n: 1, category: m.category });
-  }
-  const rank = (c: string) => {
-    const i = order.indexOf(c);
-    return i < 0 ? order.length : i;
-  };
-  return [...byCat.values()].sort((a, b) => rank(a.category) - rank(b.category));
-}
-
 function seriesValues(t: SectionSeries): number[] {
   return t.points.flatMap((p) => (p.value === null ? [] : [p.value]));
 }
@@ -319,24 +310,27 @@ export function summaryLine(id: LayerId, tracks: readonly SectionTrack[]): strin
       if (v.length === 0) return '標高のデータなし';
       return `標高 ${num(Math.min(...v))}〜${num(Math.max(...v))} m`;
     }
+    case 'flood': {
+      const v = series ? seriesValues(series) : [];
+      if (v.length === 0 || !series) return '浸水想定のデータなし';
+      const max = Math.max(...v);
+      return `${series.label} 最大 ${seriesValueText(series, max)}`;
+    }
     case 'population': {
       const v = series ? seriesValues(series) : [];
-      if (v.length === 0) return '人口密度のデータなし';
-      return `人口密度の最大 ${num(Math.max(...v))} 人/km²`;
-    }
-    case 'roads': {
-      const parts = countBy(all, ROAD_ORDER).map((c) => `${c.label} ${c.n}`);
-      return `道路との交差 ${all.length}${parts.length ? `（${parts.join('・')}）` : ''}`;
+      if (v.length === 0) return `${series?.label ?? '人口密度'}のデータなし`;
+      return `${series?.label ?? '人口密度'}の最大 ${num(Math.max(...v))} 人/km²`;
     }
     case 'transit': {
       const rail = all.filter((m) => m.category === 'rail').length;
       const stations = all.filter((m) => m.category === 'station').length;
       return `路線との交差 ${rail}・近くの駅 ${stations}`;
     }
-    case 'facilities': {
-      const school = all.filter((m) => m.category === 'school').length;
+    case 'shelters': {
+      const usable = all.filter((m) => m.category === 'shelter-usable').length;
+      const other = all.filter((m) => m.category === 'shelter-other').length;
       const hospital = all.filter((m) => m.category === 'hospital').length;
-      return `学校 ${school}・病院 ${hospital}`;
+      return `避難場所 洪水・高潮用 ${usable}・それ以外 ${other}・病院 ${hospital}`;
     }
     default: {
       return tracks.map((t) => t.label).join('・');

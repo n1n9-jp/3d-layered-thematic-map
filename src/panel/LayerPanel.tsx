@@ -35,6 +35,9 @@ export default function LayerPanel() {
   const visible = useMapStore((s) => s.visible);
   const solo = useMapStore((s) => s.solo);
   const status = useMapStore((s) => s.status);
+  const options = useMapStore((s) => s.options);
+  const data = useMapStore((s) => s.data);
+  const setOption = useMapStore((s) => s.setOption);
   const moveLayer = useMapStore((s) => s.moveLayer);
   const setVisible = useMapStore((s) => s.setVisible);
   const setSolo = useMapStore((s) => s.setSolo);
@@ -150,6 +153,8 @@ export default function LayerPanel() {
           const st = status[id];
           const isSolo = solo === id;
           const isDragged = drag?.id === id;
+          const legend = mod.legend(options);
+          const notes = mod.notes?.(st === 'ready' ? data[id] : undefined) ?? [];
           const cls = [
             'lp-row',
             !visible[id] && 'lp-hidden',
@@ -232,15 +237,42 @@ export default function LayerPanel() {
                 )}
               </div>
 
-              {mod.legend.length > 0 && (
-                <ul className="lp-legend">
-                  {mod.legend.map((l) => (
+              {mod.controls?.map((c) => (
+                <div key={c.key} className="lp-line lp-sub lp-opt" role="group" aria-label={`${mod.label}の${c.label}`} data-testid={`opt-${c.key}`}>
+                  <span className="lp-opt-label">{c.label}</span>
+                  <div className="lp-seg">
+                    {c.choices.map((ch) => (
+                      <button
+                        key={ch.value}
+                        type="button"
+                        aria-pressed={options[c.key] === ch.value}
+                        title={ch.title}
+                        data-testid={`opt-${c.key}-${ch.value}`}
+                        onClick={() => setOption(c.key, ch.value as never)}
+                      >
+                        {ch.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {legend.length > 0 && (
+                <ul className="lp-legend" data-testid={`legend-${id}`}>
+                  {legend.map((l) => (
                     <li key={l.label}>
                       <span className="lp-swatch" style={{ background: `rgb(${l.color.join(',')})` }} />
                       {l.label}
                     </li>
                   ))}
                 </ul>
+              )}
+              {notes.length > 0 && (
+                <div className="lp-notes">
+                  {notes.map((n) => (
+                    <p key={n}>{n}</p>
+                  ))}
+                </div>
               )}
             </li>
           );

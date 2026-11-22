@@ -3,7 +3,6 @@ import type { ReactElement } from 'react';
 import { LAYER_IDS } from '../config';
 import type { LayerId } from '../config';
 import { registry } from '../layers';
-import { FACILITY_SECTION_RADIUS } from '../layers/facilitiesModel';
 import { STATION_SECTION_RADIUS } from '../layers/transitModel';
 import { lineLength } from '../lib/section';
 import { cachedDistrictLookup } from '../probe/district';
@@ -41,7 +40,7 @@ import './SectionPanel.css';
  * 左の名前は、全体の地図の各段の右脇の名前と向かい合う（同じ高さ）。
  */
 const ML = 58;
-const MR = 40;
+const MR = 58;
 /** 枠の中の縦の余白（px）。 */
 const PAD_Y = 1;
 /** 列の左右の余白（px）。 */
@@ -114,9 +113,13 @@ interface ChartProps {
   onHover(d: number | null): void;
 }
 
-function nearRadius(id: LayerId): number {
-  return id === 'transit' ? STATION_SECTION_RADIUS : FACILITY_SECTION_RADIUS;
+/** 線から離れた地物を探した距離（m）。縦軸（線からの距離）の左右の端。 */
+function nearRadius(tracks: readonly SectionMarks[]): number {
+  return tracks.find((t) => t.radius !== undefined)?.radius ?? STATION_SECTION_RADIUS;
 }
+
+/** 縦軸の段のラベルは、この間隔（px）より詰まるとき、間引く（上の段を残す）。 */
+const RANK_LABEL_GAP = 10;
 
 function SeriesContent({ series, sc, ph }: { series: SectionSeries; sc: XScale; ph: number }) {
   const y = (t: number) => PAD_Y + (1 - t) * ph;
@@ -160,14 +163,46 @@ function SeriesContent({ series, sc, ph }: { series: SectionSeries; sc: XScale; 
 
 function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMarks[]; sc: XScale; ph: number }) {
   const marks = tracks.flatMap((t) => t.marks);
+  const gaps = tracks.flatMap((t) => t.gaps ?? []);
   const crossings = marks.filter((m) => !isNearMark(m));
   const near = marks.filter(isNearMark);
-  const R = nearRadius(id);
+  const R = nearRadius(tracks);
   const mid = PAD_Y + ph / 2;
   const yOf = (offset: number) => mid - (offset / R) * (ph / 2 - 5);
+  const patternId = `sc-hatch-${id}`;
   return (
     <>
-      {near.length > 0 || id === 'facilities' ? <line x1={sc.left} x2={sc.left + sc.width} y1={mid} y2={mid} stroke="rgba(255,255,255,0.22)" strokeDasharray="3 3" /> : null}
+      {gaps.length > 0 && (
+        <defs>
+          <pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1={0} y1={0} x2={0} y2={6} stroke="rgba(176,182,204,0.7)" strokeWidth={1.6} />
+          </pattern>
+        </defs>
+      )}
+      {gaps.map((g, i) => {
+        const x0 = dToX(sc, g.d0);
+        const w = Math.max(1, dToX(sc, g.d1) - x0);
+        return g.kind === 'unpublished' ? (
+          <g key={`g${i}`} data-testid="section-gap" data-kind="unpublished">
+            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${patternId})`} stroke="rgba(176,182,204,0.6)" strokeWidth={0.8} />
+            {w > 44 && (
+              <text x={fix(x0 + w / 2)} y={PAD_Y + ph / 2 + 3} textAnchor="middle" className="sc-gap-label">
+                データ未公開
+              </text>
+            )}
+          </g>
+        ) : (
+          <g key={`g${i}`} data-testid="section-gap" data-kind="none">
+            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill="rgba(255,255,255,0.05)" stroke="rgba(176,182,204,0.45)" strokeWidth={0.8} strokeDasharray="3 2" />
+            {w > 44 && (
+              <text x={fix(x0 + w / 2)} y={PAD_Y + ph / 2 + 3} textAnchor="middle" className="sc-gap-label">
+                指定 0 件
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {near.length > 0 || id === 'shelters' ? <line x1={sc.left} x2={sc.left + sc.width} y1={mid} y2={mid} stroke="rgba(255,255,255,0.22)" strokeDasharray="3 3" /> : null}
       {crossings.map((m, i) => (
         <line key={`c${i}`} x1={fix(dToX(sc, m.d))} x2={fix(dToX(sc, m.d))} y1={PAD_Y} y2={PAD_Y + ph} stroke={rgb(m.color)} strokeWidth={1.5} strokeOpacity={0.9} />
       ))}
@@ -175,7 +210,11 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
         const cx = dToX(sc, m.d);
         const cy = yOf(m.offset);
         return m.category === 'hospital' ? (
-          <rect key={`n${i}`} x={cx - 3.6} y={cy - 3.6} width={7.2} height={7.2} transform={`rotate(45 ${fix(cx)} ${fix(cy)})`} fill={rgb(m.color)} stroke="rgba(0,0,0,0.8)" strokeWidth={0.8} />
+          <rect key={`n${i}`} x={cx - 3.6} y={cy - 3.6} width={7.2} height={7.2} transform={`rotate(45 ${fix(cx)} ${fix(cy)})`} fill={rgb(m.color)} stroke="rgba(255,255,255,0.9)" strokeWidth={0.9} />
+        ) : m.category === 'shelter-other' ? (
+          <circle key={`n${i}`} cx={fix(cx)} cy={fix(cy)} r={2.2} fill={rgb(m.color)} fillOpacity={0.85} stroke="rgba(0,0,0,0.6)" strokeWidth={0.5} />
+        ) : m.category === 'shelter-usable' ? (
+          <circle key={`n${i}`} cx={fix(cx)} cy={fix(cy)} r={4.4} fill={rgb(m.color)} stroke="rgba(255,255,255,0.95)" strokeWidth={1} />
         ) : (
           <circle key={`n${i}`} cx={fix(cx)} cy={fix(cy)} r={3.6} fill={rgb(m.color)} stroke="rgba(0,0,0,0.8)" strokeWidth={0.8} />
         );
@@ -191,12 +230,25 @@ const Chart = memo(function Chart({ id, tracks, length, width, frameH, hoverD, h
   const sc: XScale = { left: ML, width: pw, length };
   const series = tracks.find((t): t is SectionSeries => t.kind === 'series');
   const markTracks = tracks.filter((t): t is SectionMarks => t.kind === 'marks');
-  const hasNear = markTracks.some((t) => t.marks.some(isNearMark)) || id === 'facilities' || id === 'transit';
+  const hasNear = markTracks.some((t) => t.marks.some(isNearMark)) || id === 'shelters' || id === 'transit';
   const xt = useMemo(() => distanceTicks(length), [length]);
-  const yTicks = series ? valueTicks(series.domain) : [];
+  const yTicks = series ? valueTicks(series.domain, series.ranks) : [];
   const yOfValue = (v: number) => (series ? PAD_Y + (1 - (v - series.domain[0]) / (series.domain[1] - series.domain[0])) * ph : 0);
-  const R = nearRadius(id);
+  const R = nearRadius(markTracks);
   const tickX = ML + pw + 5;
+  // 段（ランク）の縦軸：段の名前を、段の高さに置く。詰まるときは、上の段を残して間引く。
+  const rankLabels = (() => {
+    if (!series?.ranks) return null;
+    const out: { v: number; text: string }[] = [];
+    let lastY = Infinity;
+    for (const r of [...series.ranks].reverse()) {
+      const y = yOfValue(r.value);
+      if (lastY - y < RANK_LABEL_GAP && out.length > 0) continue;
+      out.push({ v: r.value, text: r.short });
+      lastY = y;
+    }
+    return out;
+  })();
 
   const readout = hoverD === null ? null : readoutText(tracks, hoverD, (READ_TOLERANCE_PX * length) / pw);
   const hoverValue = series && hoverD !== null ? valueAt(series, hoverD) : null;
@@ -228,14 +280,19 @@ const Chart = memo(function Chart({ id, tracks, length, width, frameH, hoverD, h
         {xt.map((t) => (
           <line key={t.d} x1={fix(dToX(sc, t.d))} x2={fix(dToX(sc, t.d))} y1={PAD_Y} y2={PAD_Y + ph} stroke="rgba(255,255,255,0.07)" />
         ))}
-        {yTicks.map((v) => (
-          <g key={v}>
-            <line x1={ML} x2={ML + pw} y1={fix(yOfValue(v))} y2={fix(yOfValue(v))} stroke="rgba(255,255,255,0.14)" />
-            <text x={tickX} y={yOfValue(v) + 3.5} className="sc-tick">
-              {v.toLocaleString('ja-JP')}
-            </text>
-          </g>
-        ))}
+        {yTicks.map((v) => {
+          const rank = rankLabels?.find((r) => r.v === v);
+          return (
+            <g key={v}>
+              <line x1={ML} x2={ML + pw} y1={fix(yOfValue(v))} y2={fix(yOfValue(v))} stroke="rgba(255,255,255,0.14)" />
+              {(!rankLabels || rank) && (
+                <text x={tickX} y={yOfValue(v) + 3.5} className="sc-tick" data-testid={rank ? 'section-rank-tick' : undefined}>
+                  {rank ? rank.text : v.toLocaleString('ja-JP')}
+                </text>
+              )}
+            </g>
+          );
+        })}
         {hasNear && (
           <>
             <text x={tickX} y={PAD_Y + 9} className="sc-tick">

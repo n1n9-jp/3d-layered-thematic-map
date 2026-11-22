@@ -189,3 +189,12 @@
   background: #ffb000;
   font-weight: 600;
 }
+
+/* 避難のグラフで、データ未公開の区間・洪水・高潮用が 0 件の区間に出す名前。 */
+.sc-gap-label {
+  font: 9.5px sans-serif;
+  fill: #c9cfdf;
+  paint-order: stroke;
+  stroke: #0b0f16;
+  stroke-width: 3px;
+}

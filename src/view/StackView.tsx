@@ -95,7 +95,7 @@ interface Props {
 
 export default function StackView({ columnWidth }: Props) {
   const state = useMapStore();
-  const { order, visible, solo, spacing, data, status, viewState, closeupRadius } = state;
+  const { order, visible, solo, spacing, data, status, viewState, closeupRadius, options } = state;
   const sectionMode = state.mode === 'section';
   // 範囲の円は「地点」のときだけ。「断面」のあいだは、固定した探針は残っているが、描かない。
   const closeup = !sectionMode && state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
@@ -328,10 +328,10 @@ export default function StackView({ columnWidth }: Props) {
       out[id] =
         z === null || status[id] !== 'ready'
           ? []
-          : registry[id].render(data[id], { z, modelMatrix: translationMatrix(z), opacity: 1, solo: solo === id, boundary });
+          : registry[id].render(data[id], { z, modelMatrix: translationMatrix(z), opacity: 1, solo: solo === id, boundary, options });
     }
     return out;
-  }, [targets, solo, data, status]);
+  }, [targets, solo, data, status, options]);
 
   // 断面：段ごとに、切り口に沿って立てるグラフ。段の目標の高さで作っておく（補間中の高さへは withHeight で移す）。
   const standH = solo === null ? standHeight(spacing) : 0;

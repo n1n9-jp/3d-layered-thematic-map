@@ -8,8 +8,9 @@ import type { BoxIndex } from '../lib/section';
 import { createPolygonIndex } from '../lib/spatialIndex';
 import type { PolygonIndex } from '../lib/spatialIndex';
 import { asModelMatrix } from '../stack';
+import type { LayerOptions, PopulationView } from '../config';
 import type { LayerModule, Position, PopulationCollection, ProbeValue, SectionLine, SectionSeries } from '../types';
-import { densityColor, densityLegend } from './population/classes';
+import { densityColor, densityLegend, elderlyColor, elderlyLegend } from './population/classes';
 
 /** 描画用に整形したメッシュ1個。 */
 interface Cell {
@@ -17,6 +18,14 @@ interface Cell {
   color: [number, number, number, number];
   population: number;
   density: number;
+  /** 65歳以上人口。秘匿されたメッシュは null */
+  elderly: number | null;
+  /** 周辺の秘匿メッシュの分を含むか */
+  elderlyMerged: boolean;
+  /** 65歳以上の人口密度（人/km²）。elderly が null なら null */
+  elderlyDensity: number | null;
+  /** 65歳以上の人口密度の色 */
+  elderlyColor: [number, number, number, number];
   /** 4隅の平均（subset の「セルの中心」） */
   center: Position;
   /** メッシュの面積（m²）。人口密度の集計に使う */
@@ -60,20 +69,28 @@ function makeData(cells: Cell[]): PopulationData {
 // アクセサは固定の参照にして、render のたびに属性が再計算されないようにする。
 const getPolygon = (d: Cell) => d.polygon;
 const getFillColor = (d: Cell) => d.color;
+const getElderlyColor = (d: Cell) => d.elderlyColor;
 
 export function buildPopulationData(fc: PopulationCollection): PopulationData {
   const features = fc.features.filter((f) => f.geometry?.type === 'Polygon');
   const cells: Cell[] = features.map((f) => {
-    const { population, density } = f.properties;
+    const { population, density, elderly, elderlyMerged } = f.properties;
     const [r, g, b] = densityColor(density);
     const polygon = f.geometry.coordinates[0];
+    const area = ringArea(polygon);
+    const elderlyDensity = typeof elderly === 'number' && area > 0 ? elderly / (area / 1e6) : null;
+    const [er, eg, eb] = elderlyColor(elderlyDensity);
     return {
       polygon,
       color: [r, g, b, 255],
       population,
       density,
+      elderly: typeof elderly === 'number' ? elderly : null,
+      elderlyMerged: elderlyMerged === true,
+      elderlyDensity,
+      elderlyColor: [er, eg, eb, 255],
       center: ringCenter(polygon),
-      area: ringArea(polygon),
+      area,
     };
   });
   const index = createPolygonIndex(features.map((f) => f.geometry.coordinates));
@@ -82,6 +99,8 @@ export function buildPopulationData(fc: PopulationCollection): PopulationData {
 
 /** 断面の縦軸の範囲の目安（人/km²）。配色は 30,000 以上が最上段なので、その上に少し余白を取る。 */
 export const POPULATION_SECTION_DOMAIN: [number, number] = [0, 40000];
+/** 65歳以上の断面の縦軸の範囲（人/km²）。配色の最上段は 6,500 以上で、実データの 99% 点が約 9,800。 */
+export const ELDERLY_SECTION_DOMAIN: [number, number] = [0, 12000];
 /** この距離（m）より短い隙間は、隙間とみなさない（メッシュの辺の計算誤差） */
 const SECTION_GAP_EPS = 1e-6;
 
@@ -116,14 +135,15 @@ export function populationSectionIndex(data: PopulationData): BoxIndex {
  * 線の長さが 0 のとき、線がメッシュの範囲に届かないときは、点のない系列を返す。
  * subset の結果（`clip` つき）では、円の外を null にする（`sample` と同じ）。
  */
-export function sectionPopulation(data: PopulationData, line: SectionLine): SectionSeries {
+export function sectionPopulation(data: PopulationData, line: SectionLine, view: PopulationView = 'total'): SectionSeries {
+  const elderly = view === 'elderly';
   const series: SectionSeries = {
     kind: 'series',
-    label: '人口密度',
+    label: elderly ? '65歳以上の人口密度' : '人口密度',
     unit: '人/km²',
     points: [],
-    domain: POPULATION_SECTION_DOMAIN,
-    color: densityColor,
+    domain: elderly ? ELDERLY_SECTION_DOMAIN : POPULATION_SECTION_DOMAIN,
+    color: elderly ? elderlyColor : densityColor,
   };
   const idx = populationSectionIndex(data);
   if (!isUsableLine(line) || !idx.bounds || !lineTouchesBox(line, idx.bounds)) return series;
@@ -134,7 +154,8 @@ export function sectionPopulation(data: PopulationData, line: SectionLine): Sect
   const spans: { a: number; b: number; v: number | null }[] = [];
   idx.near(line, 0, (i) => {
     const c = data.cells[i];
-    const v = Number.isFinite(c.density) ? c.density : null;
+    const raw = elderly ? c.elderlyDensity : c.density;
+    const v = raw !== null && Number.isFinite(raw) ? raw : null; // 65歳以上が不明（秘匿）のメッシュは、値なし
     for (const [d0, d1] of lineInsideRing(line, c.polygon)) {
       const a = Math.max(d0, lo);
       const b = Math.min(d1, hi);
@@ -165,7 +186,17 @@ export function sectionPopulation(data: PopulationData, line: SectionLine): Sect
   return series;
 }
 
-const noPopulation = (): ProbeValue[] => [{ label: '人口', value: null }];
+const noPopulation = (): ProbeValue[] => [
+  { label: '人口', value: null },
+  { label: '65歳以上', value: null },
+];
+
+/** 65歳以上の表示。秘匿されたメッシュは「不明」、合算先のメッシュは、周辺の秘匿分を含むことを添える。 */
+export function elderlyProbe(c: Pick<Cell, 'elderly' | 'elderlyMerged'>): ProbeValue {
+  if (c.elderly === null) return { label: '65歳以上', value: '不明（秘匿）' };
+  if (c.elderlyMerged) return { label: '65歳以上', value: `${c.elderly.toLocaleString('ja-JP')} 人（周辺の秘匿分を含む）` };
+  return { label: '65歳以上', value: c.elderly, unit: '人' };
+}
 
 const population: LayerModule<PopulationData> = {
   id: 'population',
@@ -182,14 +213,15 @@ const population: LayerModule<PopulationData> = {
       coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
       modelMatrix: asModelMatrix(ctx.modelMatrix),
       getPolygon,
-      getFillColor,
+      getFillColor: ctx.options.populationView === 'elderly' ? getElderlyColor : getFillColor,
+      updateTriggers: { getFillColor: ctx.options.populationView },
       opacity: ctx.opacity,
       filled: true,
       extruded: false,
       pickable: false,
     }),
   ],
-  section: (data, line) => [sectionPopulation(data, line)],
+  section: (data, line, options) => [sectionPopulation(data, line, options.populationView)],
   subset(data, cx, cy, radius) {
     const cells = data.cells.filter((c) => pointInCircle(c.center[0], c.center[1], cx, cy, radius));
     return { ...makeData(cells), clip: { cx, cy, r: radius } };
@@ -197,28 +229,52 @@ const population: LayerModule<PopulationData> = {
   summarize(data) {
     let total = 0;
     let area = 0;
+    let elderly = 0;
+    let unknownCells = 0;
+    let unknownPeople = 0;
     for (const c of data.cells) {
       if (Number.isFinite(c.population)) total += c.population;
       area += c.area;
+      if (c.elderly === null) {
+        unknownCells++;
+        if (Number.isFinite(c.population)) unknownPeople += c.population;
+      } else elderly += c.elderly;
     }
-    return [
+    const out: ProbeValue[] = [
       { label: '人口', value: total, unit: '人' },
+      { label: '65歳以上', value: elderly, unit: '人' },
+    ];
+    if (unknownCells > 0) out.push({ label: '65歳以上が不明', value: `${unknownCells} メッシュ（総人口 ${unknownPeople.toLocaleString('ja-JP')} 人）` });
+    out.push(
       area > 0
         ? { label: '人口密度', value: Math.round(total / (area / 1e6)), unit: '人/km²' }
         : { label: '人口密度', value: null },
-    ];
+    );
+    return out;
   },
   sample(data, x, y) {
     if (data.clip && !pointInCircle(x, y, data.clip.cx, data.clip.cy, data.clip.r)) return noPopulation();
     const [i] = data.index.containing(x, y);
     if (i === undefined) return noPopulation();
-    const { population: pop, density } = data.cells[i];
+    const c = data.cells[i];
     return [
-      { label: '人口', value: pop, unit: '人' },
-      { label: '人口密度', value: density, unit: '人/km²' },
+      { label: '人口', value: c.population, unit: '人' },
+      elderlyProbe(c),
+      { label: '人口密度', value: c.density, unit: '人/km²' },
     ];
   },
-  legend: densityLegend(),
+  legend: (options: LayerOptions) => (options.populationView === 'elderly' ? elderlyLegend() : densityLegend()),
+  controls: [
+    {
+      key: 'populationView',
+      label: '見るもの',
+      choices: [
+        { value: 'total', label: '総人口' },
+        { value: 'elderly', label: '65歳以上', title: '65歳以上人口 ÷ メッシュの面積（人口密度）で塗る' },
+      ],
+    },
+  ],
+  notes: () => ['250m メッシュ（令和2年国勢調査）。65歳以上は、秘匿されたメッシュ（灰色）を含みません。'],
 };
 
 export default population;

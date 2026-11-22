@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { LAYER_IDS } from '../config';
-import type { LayerId } from '../config';
+import type { LayerId, LayerOptions } from '../config';
 import { registry } from '../layers';
 import { useMapStore } from '../store';
 import type { LayerStatus } from '../store';
@@ -16,6 +16,7 @@ export function computeSectionTracks(
   line: SectionLine,
   data: Partial<Record<string, unknown>>,
   status: Record<string, LayerStatus>,
+  options: LayerOptions,
   modules: Record<LayerId, Pick<LayerModule<unknown>, 'section'>> = registry,
   onError?: (id: LayerId, e: unknown) => void,
 ): SectionTracks {
@@ -23,7 +24,7 @@ export function computeSectionTracks(
   for (const id of LAYER_IDS) {
     if (status[id] !== 'ready') continue;
     try {
-      out[id] = modules[id].section(data[id], line);
+      out[id] = modules[id].section(data[id], line, options);
     } catch (e) {
       onError?.(id, e);
     }
@@ -36,9 +37,10 @@ export function useSectionTracks(): { line: SectionLine | null; tracks: SectionT
   const line = useMapStore((s) => s.section);
   const data = useMapStore((s) => s.data);
   const status = useMapStore((s) => s.status);
+  const options = useMapStore((s) => s.options);
   const tracks = useMemo(
-    () => (line ? computeSectionTracks(line, data, status, registry, (id, e) => console.error(`[section] ${id}.section`, e)) : {}),
-    [line, data, status],
+    () => (line ? computeSectionTracks(line, data, status, options, registry, (id, e) => console.error(`[section] ${id}.section`, e)) : {}),
+    [line, data, status, options],
   );
   return { line, tracks };
 }

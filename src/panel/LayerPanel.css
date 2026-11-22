@@ -214,3 +214,48 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* レイヤーの行の切り替え（浸水の想定と見るもの、人口の総数と65歳以上）。 */
+.lp-opt {
+  align-items: center;
+}
+.lp-opt-label {
+  flex: none;
+  width: 48px;
+  font-size: 11px;
+  color: #9a9a9a;
+}
+.lp-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.lp-seg button {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #303030;
+  font-size: 12px;
+}
+.lp-seg button:hover {
+  background: #404040;
+}
+.lp-seg button[aria-pressed='true'] {
+  border-color: #ffb000;
+  background: #4a3600;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 凡例の下の、利用上の注意（小さく）。 */
+.lp-notes {
+  margin: 4px 0 0;
+  padding: 0 0 0 26px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #a8a8a8;
+}
+.lp-notes p {
+  margin: 0 0 2px;
+}
