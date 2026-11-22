@@ -49,7 +49,7 @@ const EDGE = 4;
 /** いちばん大きい札で、引き出し線がどれもこの長さ（px）以下なら、ほかの段階は試さずに、それに決める。 */
 const SHORT_LEADER = 120;
 /** 段階を1つ下げることに払う、引き出し線の長さ（合計 px）相当の費用。 */
-const LEVEL_PENALTY = 200;
+const LEVEL_PENALTY = 600;
 /** 右の列と札の隙間（px）。 */
 const COLUMN_GAP = 8;
 
