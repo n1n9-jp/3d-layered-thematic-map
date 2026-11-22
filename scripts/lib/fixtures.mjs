@@ -87,6 +87,98 @@ function makePopulation(rand) {
   return collection(features);
 }
 
+// ---- 高齢者（人口メッシュの elderly / elderlyMerged） ------------------------
+
+/**
+ * 人口メッシュに、65歳以上人口（elderly）と合算先の印（elderlyMerged）を足す。
+ * 既存の乱数列を使い回さない（ほかの仮データを変えないため）ので、別の種の乱数 rand を受け取る。
+ * 中心から遠いほど高齢者の割合が高い。秘匿（elderly: null）、合算先（総人口を上限に丸めたもの）、通常の3通りを混ぜる。
+ */
+function addElderly(population, rand) {
+  population.features.forEach((f, i) => {
+    const [x0, y0] = f.geometry.coordinates[0][0];
+    const r = Math.hypot(x0 + 250, y0 + 250);
+    const share = 0.12 + 0.18 * (r / CITY_RADIUS) + (rand() - 0.5) * 0.08;
+    const pop = f.properties.population;
+    let elderly = Math.min(pop, Math.round(pop * share));
+    let elderlyMerged = false;
+    if (i % 23 === 5) elderly = null; // 秘匿
+    else if (i % 23 === 6) {
+      elderlyMerged = true; // 合算先：周辺の秘匿メッシュの分を含むので、割合が高い
+      elderly = Math.min(pop, Math.round(pop * share * 1.6));
+    }
+    f.properties.elderly = elderly;
+    f.properties.elderlyMerged = elderlyMerged;
+  });
+  return population;
+}
+
+// ---- 避難場所 ----------------------------------------------------------------
+
+/**
+ * 区ごとの避難場所の作り方：件数（count）と、災害種別ごとに「使える」確率。
+ * 仮D区は未公開（0件）、仮E区は洪水・高潮が 0 件（地震と大規模な火事だけ）。
+ */
+const SHELTER_PROFILES = [
+  { count: 14, flood: 0.8, tide: 0.7, inland: 0.5, quake: 0.6, fire: 0.3, tsunami: 0.2, landslide: 0.1 },
+  { count: 12, flood: 0.7, tide: 0.0, inland: 0.6, quake: 0.7, fire: 0.3, tsunami: 0.0, landslide: 0.3 },
+  { count: 10, flood: 0.2, tide: 0.6, inland: 0.3, quake: 0.8, fire: 0.4, tsunami: 0.3, landslide: 0.0 },
+  { count: 0 },
+  { count: 9, flood: 0, tide: 0, inland: 0.2, quake: 1, fire: 0.6, tsunami: 0, landslide: 0 },
+  { count: 16, flood: 0.5, tide: 0.5, inland: 0.5, quake: 0.5, fire: 0.5, tsunami: 0.5, landslide: 0.2 },
+];
+const SHELTER_NOTES = ['河川が氾濫するおそれがある場合は、開設しない（仮）', '2階以上が避難スペース（仮）'];
+
+/**
+ * 区の多角形の内側に避難場所を置く（点の位置から区名を求め、ward に入れる）。
+ * 洪水か高潮で使える場所を先に並べる（実データと同じ並び）。別の種の乱数 rand を受け取る。
+ */
+function makeShelters(rand, boundary) {
+  const wards = createWards(boundary.features);
+  const items = [];
+  boundary.features.forEach((ward, k) => {
+    const profile = SHELTER_PROFILES[k % SHELTER_PROFILES.length];
+    for (let i = 1; i <= profile.count; i++) {
+      let coordinates;
+      do coordinates = polar((CITY_RADIUS - 600) * Math.pow(rand(), 0.7), rand() * 2 * Math.PI);
+      while (wards.wardAt(coordinates[0], coordinates[1])?.code !== ward.properties.code);
+      const flags = Object.fromEntries(
+        ['flood', 'tide', 'inland', 'quake', 'fire', 'tsunami', 'landslide'].map((key) => [key, rand() < profile[key]]),
+      );
+      const note = rand() < 0.12 ? SHELTER_NOTES[Math.floor(rand() * SHELTER_NOTES.length)] : null;
+      items.push({
+        coordinates,
+        properties: {
+          name: `仮避難所${ward.properties.name}${pad(i, 2)}`,
+          address: `${ward.properties.name}仮町${i}丁目`,
+          ward: ward.properties.name,
+          ...flags,
+          note,
+        },
+      });
+    }
+  });
+  const usable = (it) => it.properties.flood || it.properties.tide;
+  const ordered = [...items.filter(usable), ...items.filter((it) => !usable(it))];
+  const geojson = collection(ordered.map((it) => feature({ type: 'Point', coordinates: it.coordinates }, it.properties)));
+
+  const counts = (name) => ordered.filter((it) => it.properties.ward === name);
+  const summaries = boundary.features.map((ward) => {
+    const mine = counts(ward.properties.name);
+    return {
+      code: ward.properties.code,
+      name: ward.properties.name,
+      total: mine.length,
+      flood: mine.filter((it) => it.properties.flood).length,
+      tide: mine.filter((it) => it.properties.tide).length,
+      published: mine.length > 0,
+      updated: `2025-0${(Number(ward.properties.code) % 9) + 1}-15`,
+    };
+  });
+  const updated = summaries.map((w) => w.updated).reduce((a, b) => (a > b ? a : b));
+  return { geojson, summary: { updated, total: ordered.length, wards: summaries } };
+}
+
 // ---- 標高 ------------------------------------------------------------------
 
 /** 区の多角形の内側のセルだけに値を入れ、外側は NaN にする（検証スクリプトと同じ判定）。 */
@@ -258,16 +350,17 @@ function makeFacilities(rand) {
 
 /**
  * 全仮データをメモリ上に生成する。
- * @returns {{ geojson: Record<string, object>, elevation: { meta: object, bin: Buffer } }}
+ * @returns {{ geojson: Record<string, object>, shelterSummary: object, elevation: { meta: object, bin: Buffer } }}
  */
 export function generateFixtures() {
   const rand = mulberry32(SEED);
   const boundary = makeBoundary(rand);
-  const population = makePopulation(rand);
+  const population = addElderly(makePopulation(rand), mulberry32(SEED + 1));
   const elevation = makeElevation(rand, createWards(boundary.features));
   const roads = makeRoads(rand);
   const { rail, stations } = makeRail(rand);
   const facilities = makeFacilities(rand);
+  const shelters = makeShelters(mulberry32(SEED + 2), boundary);
   return {
     geojson: {
       'boundary.geojson': boundary,
@@ -276,7 +369,9 @@ export function generateFixtures() {
       'rail.geojson': rail,
       'stations.geojson': stations,
       'facilities.geojson': facilities,
+      'shelters.geojson': shelters.geojson,
     },
+    shelterSummary: shelters.summary,
     elevation,
   };
 }
