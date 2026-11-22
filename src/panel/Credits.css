@@ -34,6 +34,10 @@
   outline: 2px solid #6cb6ff;
   outline-offset: 1px;
 }
+.cr-proto {
+  flex: none;
+  white-space: nowrap;
+}
 .cr-bar-text {
   flex: 1 1 auto;
   min-width: 0;

@@ -3,7 +3,7 @@ import { buildPopulationData } from '../layers/population';
 import type { PopulationCollection, ElevationData } from '../types';
 import type { FloodData } from '../layers/flood/model';
 import { OUTSIDE } from '../layers/flood/classes';
-import { computeExposure, wholeExposure } from './exposure';
+import { approxPeople, computeExposure, wholeExposure } from './exposure';
 
 /** 4×1 セル（50 m）：西から 浸水なし、洪水 0.5〜3m、洪水 3〜5m（高潮は 10〜20m）、23区の外。 */
 const flood: FloodData = {
@@ -87,5 +87,25 @@ describe('computeExposure：メッシュの中心を含むセルのランクで�
   it('wholeExposure は、同じ組なら同じ結果を返す', () => {
     expect(wholeExposure(pop, flood, 'max', elevation)).toBe(wholeExposure(pop, flood, 'max', elevation));
     expect(wholeExposure(pop, flood, 'tide', elevation)).not.toBe(wholeExposure(pop, flood, 'max', elevation));
+  });
+});
+
+describe('approxPeople（大きく見せる数字の概数）', () => {
+  it('100 万人以上・10 万人以上は、万人単位の整数', () => {
+    expect(approxPeople(2415153)).toBe('約242万人');
+    expect(approxPeople(559789)).toBe('約56万人');
+    expect(approxPeople(962288)).toBe('約96万人');
+    expect(approxPeople(5553930)).toBe('約555万人');
+  });
+  it('10 万人未満は小数1桁の万人、1 万人未満は百の位、1,000 人未満はそのまま', () => {
+    expect(approxPeople(94500)).toBe('約9.5万人');
+    expect(approxPeople(12000)).toBe('約1.2万人');
+    expect(approxPeople(4083)).toBe('約4,100人');
+    expect(approxPeople(122)).toBe('122人');
+    expect(approxPeople(0)).toBe('0人');
+  });
+  it('不正な値は —', () => {
+    expect(approxPeople(NaN)).toBe('—');
+    expect(approxPeople(-1)).toBe('—');
   });
 });

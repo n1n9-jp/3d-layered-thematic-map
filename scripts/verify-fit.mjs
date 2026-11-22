@@ -3,13 +3,14 @@
 //   node scripts/verify-fit.mjs [--url http://127.0.0.1:5173/] [--only labels,column]
 // --url がなければ Vite を起動する。確認すること：
 //   column（右の列の23区全体の集計）
-//     2000×1100・1400×1000 の初期表示で、大きな数字・「5 区」のカード・深さの区分ごとの表（合計の行、標高 0m 未満の行まで）が、
-//     スクロールなしで列の表示範囲の中にある（要素の位置と、scrollHeight で確かめる）。主な数字の大きさ、「5 区」の内訳と違い、
-//     「大きいほう」の説明、試作の注意が、読める。1000×700 では、上から順に見え、残りはスクロールで読める
+//     2000×1100・1400×1000 の初期表示で、想定のラベル・大きな数字・深さの区分ごとの表（合計の行、標高 0m 未満の行まで）が、
+//     スクロールなしで列の表示範囲の中にある（要素の位置と、scrollHeight で確かめる）。主な数字の大きさが読める。外した要素
+//     （説明文、カード、「5 区」、列の下の注意と操作の説明）が出ていない。「試作。避難の判断には使えません。」は出典の欄に1回だけ。
+//     折りたたみの注記に、足し合わせでないことと、指定なし・未公開の読み方がある。1000×700 では、収まらなければ、スクロールで最後の行まで読める
 //   labels（避難の段の区名の札）
 //     2000×1100・1400×1000・1000×700 の初期表示と、方位（ro=120・-60）・正面・真上・間隔 0 と 20km で、
 //     札どうし・題・右の列・レイヤー名・ほかの段の区境界線と鉄道に重ならず、引き出し線が札や線と交わらない。
-//     2000×1100・1400×1000 では、5つの札がすべて出る。視点（マウスの移動）では、札の置き場所を決め直さず、間隔を変えたときだけ決め直す
+//     2000×1100・1400×1000 では、8つの札がすべて出る。視点（マウスの移動）では、札の置き場所を決め直さず、間隔を変えたときだけ決め直す
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -173,39 +174,32 @@ async function column(browser, base) {
         scrollH: sc.scrollHeight,
         clientH: sc.clientHeight,
         overflowY: getComputedStyle(sc).overflowY,
+        scen: rect('[data-testid=overall-scenario]'),
         severe: rect('[data-testid=overall-severe]'),
         bignum: parseFloat(getComputedStyle(q('[data-testid=overall-severe]')).fontSize),
-        cards: rect('.ov-pair'),
-        alert: rect('[data-testid=overall-deep]'),
         table: rect('[data-testid=overall-exposure]'),
         total: rect('[data-testid=overall-exposure-total]'),
         below: rect('[data-testid=overall-exposure-below]'),
         notes: rect('[data-testid=overall-notes-toggle]'),
-        foot: rect('[data-testid=disclaimer]'),
-        col: rect('[data-testid=info-column]'),
-        footText: q('[data-testid=disclaimer]').textContent,
-        scenNote: q('.ov-scen-note')?.textContent ?? '',
-        deepNone: q('[data-testid=overall-deep-none]')?.textContent ?? '',
-        deepUnpub: q('[data-testid=overall-deep-unpublished]')?.textContent ?? '',
-        deepText: q('[data-testid=overall-deep]')?.textContent ?? '',
+        gone: ['.ov-scen-note', '.ov-pair', '.ov-card', '[data-testid=overall-flooded]', '[data-testid=overall-deep]', '[data-testid=overall-shelters]', '[data-testid=overall-below]', '[data-testid=disclaimer]', '[data-testid=info-hint]'].filter((s) => q(s)),
+        columnText: q('[data-testid=info-column]').textContent,
+        bodyText: document.body.innerText,
       };
     });
     const inside = (b) => b && b.top >= r.scroll.top - 0.5 && b.bottom <= r.scroll.bottom + 0.5;
-    console.log(`      ${size}：列の表示範囲 ${Math.round(r.scroll.top)}〜${Math.round(r.scroll.bottom)}、合計の行 ${Math.round(r.total.top)}〜${Math.round(r.total.bottom)}、scrollHeight ${r.scrollH} / 表示 ${r.clientH}、主な数字 ${r.bignum.toFixed(1)}px`);
+    console.log(`      ${size}：列の表示範囲 ${Math.round(r.scroll.top)}〜${Math.round(r.scroll.bottom)}、合計の行 ${Math.round(r.total.top)}〜${Math.round(r.total.bottom)}、標高の行 ${Math.round(r.below.top)}〜${Math.round(r.below.bottom)}、scrollHeight ${r.scrollH} / 表示 ${r.clientH}、主な数字 ${r.bignum.toFixed(1)}px`);
     check(r.scrollTop === 0, `${size}：スクロールしていない（scrollTop ${r.scrollTop}）`);
     check(r.overflowY === 'auto', `${size}：収まらないときは、列の中をスクロールできる（overflow-y: ${r.overflowY}）`);
     check(inside(r.severe), `${size}：主な数字（約242万人）が、スクロールなしで見える`);
+    check(r.scen.top < r.severe.top && r.severe.top < r.table.top, `${size}：上から、想定のラベル、大きな数字、表の順`);
+    check(r.gone.length === 0, `${size}：外した要素（説明文・カード・「5 区」・列の下の注意と操作の説明）が出ていない${r.gone.length ? `：${r.gone.join(' ')}` : ''}`);
     if (size !== '1000x700') {
-      check(inside(r.cards), `${size}：標高 0m 未満・避難場所の数のカードが見える`);
-      check(inside(r.alert), `${size}：「5 区」のカードが全部見える`);
       check(inside(r.table), `${size}：深さの区分ごとの表が、見出しから最後の行まで見える`);
       check(inside(r.total), `${size}：表の「合計」の行が、列の表示範囲の中にある（下端まで ${(r.scroll.bottom - r.total.bottom).toFixed(1)}px）`);
-      check(inside(r.below), `${size}：表の「標高 0m 未満の土地」の行も見える`);
+      check(inside(r.below), `${size}：表の「標高 0m 未満の土地」の行（最後の行）も見える`);
       check(inside(r.notes), `${size}：「数え方とデータの注意」の開閉ボタンも見える`);
       check(r.scrollH <= r.clientH + 1, `${size}：スクロールなしで全部が収まる（scrollHeight ${r.scrollH} ≦ 表示 ${r.clientH}）`);
     } else {
-      check(r.scrollH > r.clientH, `${size}：収まりきらない（scrollHeight ${r.scrollH} > 表示 ${r.clientH}）。上から順に見え、残りはスクロールで読める`);
-      check(inside(r.severe) && r.severe.top < r.cards.top && r.cards.top < r.alert.top && r.alert.top < r.table.top, `${size}：上から、主な数字、カード、「5 区」、表の順`);
       await o.page.evaluate(() => {
         const sc = document.querySelector('[data-testid=overall-scroll]');
         sc.scrollTop = sc.scrollHeight;
@@ -213,17 +207,21 @@ async function column(browser, base) {
       await sleep(300);
       const after = await o.page.evaluate(() => {
         const sc = document.querySelector('[data-testid=overall-scroll]').getBoundingClientRect();
-        const t = document.querySelector('[data-testid=overall-exposure-total]').getBoundingClientRect();
+        const t = document.querySelector('[data-testid=overall-exposure-below]').getBoundingClientRect();
         return t.bottom <= sc.bottom + 0.5 && t.top >= sc.top - 0.5;
       });
-      check(after, `${size}：いちばん下までスクロールすると、表の合計の行が見える`);
+      check(after, `${size}：（収まらなければ）いちばん下までスクロールすると、表の最後の行が見える`);
     }
     const minBig = size === '2000x1100' ? 70 : 45;
     check(r.bignum >= minBig, `${size}：主な数字が離れた席から読める大きさ（${r.bignum.toFixed(1)}px ≧ ${minBig}px）`);
-    check(r.foot.top >= r.scroll.bottom - 0.5 && r.foot.bottom <= r.col.bottom + 0.5 && /避難の判断には使えません/.test(r.footText), `${size}：「試作です。避難の判断には使えません」が列の下に見える`);
-    check(/指定がない\s*2\s*区/.test(r.deepNone) && /江戸川区 75%/.test(r.deepNone) && /足立区 60%/.test(r.deepNone) && /0 件/.test(r.deepNone), `${size}：「5 区」の内訳（指定がない 2 区、割合、洪水・高潮用の指定が 0 件）が読める`);
-    check(/データ未公開\s*3\s*区/.test(r.deepUnpub) && /葛飾区 77%/.test(r.deepUnpub) && /墨田区 74%/.test(r.deepUnpub) && /江東区 63%/.test(r.deepUnpub) && /載っていない/.test(r.deepUnpub), `${size}：「5 区」の内訳（データ未公開 3 区、割合、載っていないので分からない）が読める`);
-    check(/足し合わせではなく/.test(r.scenNote), `${size}：「大きいほう」が足し合わせでないことの説明がある（${r.scenNote}）`);
+    const proto = r.bodyText.split('試作。避難の判断には使えません。').length - 1;
+    check(proto === 1, `${size}：「試作。避難の判断には使えません。」が画面に1回だけある（出典の欄。${proto} 回）`);
+    check(!/試作です/.test(r.bodyText), `${size}：「試作です。…」の注意文は、どこにも出ていない`);
+    await o.page.click('[data-testid=overall-notes-toggle]');
+    await sleep(200);
+    const notes = await o.page.textContent('[data-testid=overall-notes-body]');
+    check(/足し合わせません/.test(notes), `${size}：折りたたみの注記に、「大きいほう」が足し合わせでないことの説明がある`);
+    check(/指定なし/.test(notes) && /未公開/.test(notes) && /江戸川区/.test(notes) && /葛飾区/.test(notes), `${size}：折りたたみの注記に、指定なしと未公開の区の読み方がある`);
     check(o.errors.length === 0, `${size}：ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
     await o.ctx.close();
   }
@@ -232,7 +230,7 @@ async function column(browser, base) {
 /* ------------------------------------------------------------------ 避難の段の区名の札 */
 
 const CASES = [
-  // [名前, サイズ, クエリ, 5つとも出ることを求めるか]
+  // [名前, サイズ, クエリ, 8つとも出ることを求めるか]
   ['初期表示', '2000x1100', '', true],
   ['初期表示', '1400x1000', '', true],
   ['初期表示', '1000x700', '', false],
@@ -295,7 +293,7 @@ async function labels(browser, base, vertices) {
     const rects = L.placed.map((p) => p.rect);
     const lens = L.placed.map((p) => Math.round(Math.hypot(p.attach[0] - p.anchor[0], p.attach[1] - p.anchor[1])));
     console.log(`      ${tag}：段階 ${L.level}、${L.placed.map((p) => p.text.replace('\n', '／')).join('、')}${L.omitted.length ? `（出さなかった区：${L.omitted.join('・')}）` : ''}、引き出し線 ${lens.join('/')}px`);
-    if (needAll) check(L.placed.length === 5 && L.omitted.length === 0, `${tag}：5つの札がすべて出る（${L.placed.length} 枚）`);
+    if (needAll) check(L.placed.length === 8 && L.omitted.length === 0, `${tag}：8つの札がすべて出る（${L.placed.length} 枚）`);
     else check(L.placed.length >= 1, `${tag}：札が出る（${L.placed.length} 枚。収まらないときは、小さく・短くし、置けないものは出さない）`);
     const names = new Set(L.placed.map((p) => p.name));
     check(names.size === L.placed.length, `${tag}：同じ区の札が重複しない`);
@@ -350,7 +348,7 @@ async function labels(browser, base, vertices) {
   const n2 = await settled(o.page);
   check(n2 > n1, `間隔を変えると、札の置き場所を決め直す（${n1} 回 → ${n2} 回）`);
   const L2 = await o.page.evaluate(() => ({ n: window.__wardLabels.placed.length, omitted: window.__wardLabels.omitted }));
-  check(L2.n === 5, `間隔 20 km にしても、5つの札が出る（${L2.n} 枚）`);
+  check(L2.n === 8, `間隔 20 km にしても、8つの札が出る（${L2.n} 枚）`);
   check(o.errors.length === 0, `ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
   await o.ctx.close();
 }

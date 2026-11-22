@@ -11,7 +11,7 @@ import { segmentHitsRect, segmentsCross } from './calloutPlacement';
 import type { LayerId } from '../config';
 import { LAYER_IDS } from '../config';
 
-/** 実データで求めた、東部の5区の目印（区の最大の外周の重心。ローカル座標 m）。 */
+/** 実データで求めた、8区の目印（区の最大の外周の重心。ローカル座標 m）。指定なし：江戸川・足立・新宿・文京、未公開：葛飾・墨田・江東・渋谷。 */
 const mk = (name: string, status: string, kind: WardLabel['kind'], x: number, y: number): WardLabel => ({
   position: [x, y],
   text: `${name}\n${status}`,
@@ -20,11 +20,14 @@ const mk = (name: string, status: string, kind: WardLabel['kind'], x: number, y:
   kind,
 });
 const LABELS: WardLabel[] = [
-  mk('足立区', '指定なし', 'deep-none', 4076, 10964),
-  mk('江戸川区', '指定なし', 'deep-none', 11379, 1401),
-  mk('葛飾区', '未公開', 'unpublished-deep', 9557, 8132),
-  mk('墨田区', '未公開', 'unpublished-deep', 5924, 3576),
-  mk('江東区', '未公開', 'unpublished-deep', 6038, -1559),
+  mk('足立区', '指定なし', 'none', 4076, 10964),
+  mk('江戸川区', '指定なし', 'none', 11379, 1401),
+  mk('新宿区', '指定なし', 'none', -3713, 2339),
+  mk('文京区', '指定なし', 'none', -246, 4156),
+  mk('葛飾区', '未公開', 'unpublished', 9557, 8132),
+  mk('墨田区', '未公開', 'unpublished', 5924, 3576),
+  mk('江東区', '未公開', 'unpublished', 6038, -1559),
+  mk('渋谷区', '未公開', 'unpublished', -4864, -1343),
 ];
 
 const rectsOverlap = (a: Rect, b: Rect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -106,7 +109,7 @@ describe('区名の札の置き場所', () => {
           expect(placed.length + layout!.omitted.length).toBe(LABELS.length);
         });
 
-  it('大きい画面の既定の視点では、5つの区名が2行の札で全部出る', () => {
+  it('大きい画面の既定の視点では、8つの区名が2行の札で全部出る', () => {
     for (const [w, h] of [[2000, 1100], [1400, 1000]] as const) {
       const { layout } = scene(w, h, 20, 45, 12000);
       expect(layout!.omitted).toEqual([]);
@@ -116,7 +119,7 @@ describe('区名の札の置き場所', () => {
 
   it('画面の外の区には、札を出さない', () => {
     const { vs, size, columnWidth, tiers, layerNameRects } = scene(1400, 1000, 20, 45, 12000);
-    // 注視点を大きくずらして、5区を画面の外へ
+    // 注視点を大きくずらして、8区を画面の外へ
     const far = { ...vs, target: [vs.target[0] - 400000, vs.target[1], vs.target[2]] as [number, number, number] };
     const layout = layoutWardLabels({ labels: LABELS, viewState: far, size, z: 48000, otherZs: tiers.slice(0, 4).map((t) => t.z), columnWidth, layerNameRects });
     expect(layout).toBeNull();

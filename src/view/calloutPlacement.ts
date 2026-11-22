@@ -63,7 +63,7 @@ const W_LABEL_OVERLAP = 100000;
 const W_ANCHOR_COVER = 100000;
 const W_LINE_ON_LABEL = 50000;
 const W_LINE_CROSS = 30000;
-const W_SOFT = 160;
+const W_SOFT = 260;
 /** 引き出し線が、ほかの段のデータのある範囲の中を通る、1 px あたりの費用。 */
 const W_LEADER_OTHER = 3;
 /** 座標降下の最大の巡回数。 */

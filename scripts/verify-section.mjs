@@ -289,7 +289,7 @@ async function run(browser, base) {
   await settle(page, 1000);
   s = await state(page);
   check(JSON.stringify(s.line) === JSON.stringify(lineKeep), '「地点」へ切り替えても、線は消さずに保持する');
-  check((await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」：右の列は手がかり（探針なし）');
+  check((await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」：右の列は23区全体の集計（探針なし）');
   const [hx, hy] = P3.at(1000, 1000, zTop);
   await page.mouse.move(hx, hy);
   await page.mouse.move(hx + 1, hy + 1);

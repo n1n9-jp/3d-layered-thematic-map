@@ -381,7 +381,7 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
     }
   });
 
-  it('避難：線が通る、データ未公開の区・洪水・高潮用が 0 件の区の区間（gaps）が、区の輪郭を直接引いた判定と一致する', () => {
+  it('避難：線が通る、未公開の区・指定なしの区の区間（gaps）が、区の輪郭を直接引いた判定と一致する', () => {
     type Ring = [number, number][];
     const boundary = json<{ features: { properties: { name: string }; geometry: { type: string; coordinates: unknown } }[] }>('boundary.geojson');
     const summary = json<{ wards: { name: string; published: boolean }[] }>('shelters.json');
@@ -414,18 +414,7 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
         const w = wardAt(x, y);
         const inGap = gaps.filter((g) => g.d0 < d && d < g.d1);
         expect(inGap.length, `${name} d=${d} (${w})`).toBeLessThanOrEqual(1);
-        const want = expectedKind(w);
-        // 洪水・高潮用が 0 件の区は、浸水が深い区と小さい区に分かれる（実データの現状：足立・江戸川が深い、新宿・文京が小さい）
-        // データ未公開の区も同じ基準で分かれる（実データの現状：墨田・江東・葛飾が深い、渋谷が小さい）
-        const deepWards = ['足立区', '江戸川区', '墨田区', '江東区', '葛飾区'];
-        const wantKind =
-          want === 'none'
-            ? deepWards.includes(w!)
-              ? 'deep-none'
-              : 'shallow-none'
-            : want === 'unpublished' && deepWards.includes(w!)
-              ? 'unpublished-deep'
-              : want;
+        const wantKind = expectedKind(w);
         expect(inGap[0]?.kind ?? null, `${name} d=${d} (${w})`).toBe(wantKind);
         if (inGap[0]) {
           expect(inGap[0].label.startsWith(w!)).toBe(true);
@@ -440,8 +429,8 @@ describe.skipIf(!HAS_DATA)('実データでの section（東西・南北の2本�
         expect(g.d1).toBeGreaterThan(g.d0);
       }
     }
-    // 東西の線は江戸川区（洪水・高潮用が 0 件）と渋谷区（未公開）を、南北の線は渋谷区と新宿区などを通る。江東区（未公開で浸水が深い）も通る
-    expect([...seen].sort()).toEqual(['deep-none', 'shallow-none', 'unpublished', 'unpublished-deep']);
+    // 東西の線は江戸川区（指定なし）と渋谷区（未公開）を、南北の線は渋谷区と新宿区などを通る
+    expect([...seen].sort()).toEqual(['none', 'unpublished']);
   });
 
   it('線の向きを逆にすると、鉄道・駅・避難場所で d が「長さ − d」、offset の符号が逆になり、数は同じ。浸水は同じ地点で同じ値', () => {

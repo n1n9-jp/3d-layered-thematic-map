@@ -46,16 +46,6 @@ export function shareText(part: number, whole: number): string {
   return `${p.toFixed(1)}%`;
 }
 
-/**
- * 想定の切り替えと、いま出ている数字の対応を、画面に添える一文。
- * 「大きいほう」は、洪水と高潮を足し合わせたものではない（セルごとに、深いほうを採る）。
- */
-export function scenarioNote(scenario: Exposure['scenario']): string {
-  if (scenario === 'river') return '洪水だけの想定です（高潮は含みません）。';
-  if (scenario === 'tide') return '高潮だけの想定です（洪水は含みません）。';
-  return '足し合わせではなく、地点ごとに深いほうを採ったものです。';
-}
-
 export function exposureTable(e: Exposure): ExposureTable {
   const scheme = floodScheme(e.scenario, 'depth');
   const whole = e.total.people;

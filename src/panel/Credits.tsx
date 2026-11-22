@@ -109,7 +109,7 @@ const ENTRIES: Entry[] = [
     notes: [
       '指定緊急避難場所は、災害の種別ごとに指定されています（洪水で使える場所が、高潮や地震でも使えるとは限りません）。',
       'データが最新でない場合や、未掲載の場合があります。収容人数は含みません。',
-      '墨田区・江東区・渋谷区・葛飾区は、このデータに指定緊急避難場所を公開していません（0 件は「ない」ではなく「データがない」）。公開している区にも、洪水・高潮で使える指定が 0 件の区があります（画面は、その区の浸水の想定で、深い区と小さい区に分けて示します）。「指定がない」ことは、「避難できない」ことではありません。',
+      '墨田区・江東区・渋谷区・葛飾区は、このデータに指定緊急避難場所が載っていません（「未公開」。0 件は「ない」ではなく「データがない」）。公開している区にも、洪水・高潮で使える指定が 0 件の区があります（「指定なし」：江戸川区・足立区・新宿区・文京区）。「指定なし」は、「避難できない」ことではありません。',
     ],
   },
   {
@@ -131,6 +131,9 @@ const TERMS = [
   { label: '国土地理院コンテンツ利用規約', url: 'https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html' },
   { label: '東京都港湾局の高潮浸水想定区域図：クリエイティブ・コモンズ表示 4.0 国際（CC BY 4.0）', url: 'https://creativecommons.org/licenses/by/4.0/deed.ja' },
 ];
+
+/** 試作であること。出典の1行に、出典と同じ控えめな文字で添える（画面のほかの場所には書かない）。 */
+const PROTOTYPE = '試作。避難の判断には使えません。';
 
 const SUMMARY = '出典：国土数値情報（国土交通省）、国土地理院、e-Stat（総務省統計局）、東京都港湾局のデータを加工して作成';
 
@@ -230,6 +233,7 @@ export default function Credits({ style, className, opens = 'up' }: CreditsProps
         aria-controls={open ? detailId : undefined}
         onClick={() => setOpen((v) => !v)}
       >
+        <span className="cr-proto">{PROTOTYPE}</span>
         <span className="cr-bar-text">{SUMMARY}</span>
         <span className="cr-more" aria-hidden="true">
           詳細 {arrowUp ? '▴' : '▾'}

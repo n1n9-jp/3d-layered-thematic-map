@@ -202,7 +202,7 @@ function ModeBar() {
 
 /**
  * 「選んだ地点の情報」の列。全体の地図の右隣（右上のパネルの左）に、中身の有無にかかわらず常に同じ幅で置く。
- * 探針がなければ操作の手がかり、カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表。
+ * 探針がなければ23区全体の集計、カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表。
  */
 export default function InfoColumn({ width }: { width: number }) {
   useEffect(() => installProbeKeys(), []);
@@ -224,23 +224,14 @@ export default function InfoColumn({ width }: { width: number }) {
       {mode === 'section' ? (
         <SectionBody />
       ) : mode === 'empty' || probe === null ? (
-        <>
-          <div className="ic-scroll ic-scroll-solo ic-overall" data-testid="overall-scroll">
-            <Overall />
-          </div>
-          {/* 操作の手がかりは、スクロールする集計の外に置き、列の下端で切れないようにする */}
-          <div className="ic-hint ic-hint-short" data-testid="info-hint">
-            <p>平面にカーソルを置くと各層の値、クリックで固定すると周辺のクローズアップが出ます。「断面」では、線で切って見られます。</p>
-          </div>
-        </>
+        <div className="ic-scroll ic-scroll-solo ic-overall" data-testid="overall-scroll">
+          <Overall />
+        </div>
       ) : mode === 'hover' ? (
         <HoverBody p={probe} />
       ) : (
         <PinnedBody p={probe} />
       )}
-      <footer className="ic-foot" data-testid="disclaimer">
-        試作です。避難の判断には使えません。実際の避難は、各区のハザードマップと避難情報に従ってください。
-      </footer>
     </section>
   );
 }

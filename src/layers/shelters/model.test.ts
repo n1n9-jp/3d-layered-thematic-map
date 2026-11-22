@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { WardExposure } from '../../aggregate/wardExposure';
 import type { BoundaryData, FacilityCollection, ShelterCollection, ShelterSummary } from '../../types';
 import {
   buildShelterData,
+  classifyWard,
   mergeSpans,
   sampleShelters,
   sectionGaps,
@@ -59,12 +59,7 @@ const summary: ShelterSummary = {
     { code: '4', name: 'D区', total: 1, flood: 0, tide: 1, published: true, updated: '2025-01-01' },
   ],
 };
-// 区ごとの浸水の想定（深さ 3m 以上の区域に住む人の割合）：C区は浅い（2%）。D区は洪水・高潮用があるので、分類に使わない
-const wardExposure = new Map<string, WardExposure>([
-  ['A区', { name: 'A区', people: 1000, flooded: 500, severe: 0, floodedShare: 0.5, severeShare: 0 }],
-  ['C区', { name: 'C区', people: 1000, flooded: 300, severe: 20, floodedShare: 0.3, severeShare: 0.02 }],
-]);
-const data = buildShelterData(shelters, summary, facilities, boundary, wardExposure);
+const data = buildShelterData(shelters, summary, facilities, boundary);
 
 describe('buildShelterData', () => {
   it('洪水か高潮で使える避難場所、それ以外の避難場所、病院に分ける。学校は入れない', () => {
@@ -94,73 +89,29 @@ describe('buildShelterData', () => {
       expect(Math.abs(b[0] - a[0])).toBeCloseTo(Math.abs(b[1] - a[1]), -1);
     }
   });
-  it('概況：使える数、未公開の区、洪水・高潮用が 0 件の区', () => {
+  it('概況：使える数、未公開の区、指定なしの区（地震・火事などの数つき）', () => {
     const o = shelterOverview(data);
     expect(o.usable).toBe(3);
     expect(o.unpublished).toEqual(['B区']);
-    expect(o.unpublishedShallow.map((w) => w.name)).toEqual(['B区']); // 浸水の想定を渡していない区は、浸水が小さい側に入れる
-    expect(o.unpublishedDeep).toEqual([]);
-    expect(o.deepWithoutShelter).toEqual([]);
-    expect(o.zeroUsable).toEqual(['C区']);
-    expect(o.deepNone).toEqual([]);
-    expect(o.shallowNone).toEqual([{ name: 'C区', total: 1, severeShare: 0.02, floodedShare: 0.3 }]);
+    expect(o.none).toEqual([{ name: 'C区', total: 1 }]);
   });
-  it('区の種類：未公開、浸水が深いのに指定なし、浸水が小さく指定なし、指定あり（null）、浸水の想定なし（unrated）', () => {
+  it('区の種類は2つ：指定なし（データに載っていて 0 件）、未公開（データに載っていない）。使える場所のある区は null', () => {
     expect(data.wards.map((w) => [w.name, w.gap])).toEqual([
       ['A区', null],
       ['B区', 'unpublished'],
-      ['C区', 'shallow-none'],
+      ['C区', 'none'],
       ['D区', null],
     ]);
-    const deep = buildShelterData(shelters, summary, facilities, boundary, new Map([['C区', { ...wardExposure.get('C区')!, severeShare: 0.6 }]]));
-    expect(deep.wards.find((w) => w.name === 'C区')?.gap).toBe('deep-none');
-    expect(shelterOverview(deep).deepNone.map((w) => w.name)).toEqual(['C区']);
-    expect(deep.deep.polygons).toHaveLength(1);
-    expect(deep.deep.hatch.length).toBeGreaterThan(2);
-    expect(deep.deep.outline.length).toBe(1);
-    expect(deep.deep.labels).toEqual([{ position: [2500, 500], text: 'C区\n指定なし', name: 'C区', status: '指定なし', kind: 'deep-none' }]);
-    expect(deep.shallow).toEqual([]);
-    expect(deep.unpubDeep).toEqual({ polygons: [], outline: [], labels: [] });
-    // 浸水の想定を渡さなければ unrated（深い・小さいとは言わない）
-    expect(buildShelterData(shelters, summary, facilities, boundary).wards.find((w) => w.name === 'C区')?.gap).toBe('unrated');
+    expect(classifyWard({ published: false, usable: 0 })).toBe('unpublished');
+    expect(classifyWard({ published: true, usable: 0 })).toBe('none');
+    expect(classifyWard({ published: true, usable: 3 })).toBeNull();
   });
-  it('データ未公開の区も、同じ基準で、浸水が深い区と小さい区に分かれる。深い区は、灰の網掛けに琥珀の塗り・縁・ラベルが重なる', () => {
-    const ex = (share: number): WardExposure => ({ name: 'B区', people: 1000, flooded: 900, severe: share * 1000, floodedShare: 0.9, severeShare: share });
-    const deep = buildShelterData(shelters, summary, facilities, boundary, new Map([['B区', ex(0.745)]]));
-    expect(deep.wards.find((w) => w.name === 'B区')?.gap).toBe('unpublished-deep');
-    expect(deep.gapPolygons).toHaveLength(1); // 網掛けは、深い・小さいで同じ
-    expect(deep.hatch.length).toBeGreaterThan(2);
-    expect(deep.unpubDeep.polygons).toHaveLength(1);
-    expect(deep.unpubDeep.outline).toHaveLength(1);
-    expect(deep.unpubDeep.labels).toEqual([{ position: [1500, 500], text: 'B区\n未公開', name: 'B区', status: '未公開', kind: 'unpublished-deep' }]);
-    expect(deep.deep.polygons).toEqual([]); // 琥珀の斜線（指定がない区）には入れない
-    const o = shelterOverview(deep);
-    expect(o.unpublishedDeep).toEqual([{ name: 'B区', total: 0, severeShare: 0.745, floodedShare: 0.9 }]);
-    expect(o.unpublishedShallow).toEqual([]);
-    expect(o.unpublished).toEqual(['B区']);
-    expect(o.deepWithoutShelter.map((w) => w.name)).toEqual(['B区']);
-    const shallow = buildShelterData(shelters, summary, facilities, boundary, new Map([['B区', ex(0.0)]]));
-    expect(shallow.wards.find((w) => w.name === 'B区')?.gap).toBe('unpublished');
-    expect(shallow.unpubDeep.polygons).toEqual([]);
-  });
-  it('浸水が深い区の数は、指定がない区とデータ未公開の区を合わせる（浸水の深さの大きい順）', () => {
-    const ex = (name: string, share: number): [string, WardExposure] => [name, { name, people: 1000, flooded: 900, severe: share * 1000, floodedShare: 0.9, severeShare: share }];
-    const d = buildShelterData(shelters, summary, facilities, boundary, new Map([ex('B区', 0.6), ex('C区', 0.75)]));
-    const o = shelterOverview(d);
-    expect(o.deepNone.map((w) => w.name)).toEqual(['C区']);
-    expect(o.unpublishedDeep.map((w) => w.name)).toEqual(['B区']);
-    expect(o.deepWithoutShelter.map((w) => w.name)).toEqual(['C区', 'B区']);
-    // 区の名前は決め打ちにしない：浸水の想定が入れ替わると、区の分類も入れ替わる
-    const swapped = shelterOverview(buildShelterData(shelters, summary, facilities, boundary, new Map([ex('B区', 0.01), ex('C区', 0.01)])));
-    expect(swapped.deepWithoutShelter).toEqual([]);
-    expect(swapped.unpublishedShallow.map((w) => w.name)).toEqual(['B区']);
-    expect(swapped.shallowNone.map((w) => w.name)).toEqual(['C区']);
-  });
-  it('浸水が小さい区は、薄い塗りだけ（斜線・縁・ラベルなし）', () => {
-    expect(data.shallow).toHaveLength(1);
-    expect(data.deep.polygons).toEqual([]);
-    expect(data.deep.hatch).toEqual([]);
-    expect(data.deep.labels).toEqual([]);
+  it('指定なしの区は、輪郭の枠（斜線や塗りはない）。札は2区とも出る（区名／指定なし、区名／未公開）', () => {
+    expect(data.frame).toHaveLength(1);
+    expect(data.labels).toEqual([
+      { position: [1500, 500], text: 'B区\n未公開', name: 'B区', status: '未公開', kind: 'unpublished' },
+      { position: [2500, 500], text: 'C区\n指定なし', name: 'C区', status: '指定なし', kind: 'none' },
+    ]);
   });
 });
 
@@ -175,30 +126,23 @@ describe('sampleShelters（探針）', () => {
     expect(String(v[0].value)).toContain('D小');
     expect(String(v[0].value)).toContain('高潮');
   });
-  it('未公開の区では、その旨を添える。洪水・高潮用が 0 件の区でも、その旨を添える', () => {
+  it('未公開の区では、その旨を添える。指定なしの区でも、その旨を添える', () => {
     const b = sampleShelters(data, 1500, 500);
     expect(b[2].label).toBe('この区のデータ');
     expect(String(b[2].value)).toContain('B区は未公開');
     const c = sampleShelters(data, 2400, 500);
-    expect(String(c[2].value)).toContain('C区は洪水・高潮用の指定が 0 件');
-    expect(String(c[2].value)).toContain('浸水が小さく指定がない');
-    expect(String(c[2].value)).toContain('2.0%');
+    expect(String(c[2].value)).toBe('C区は指定なし（洪水・高潮用の指定が 0 件。地震・火事など 1 件）');
     // 公開していて、使える場所がある区では、添えない
     expect(sampleShelters(data, 600, 500)).toHaveLength(2);
   });
-  it('wardNote：書き分け。「指定がない」と「避難できない」を取り違えない（避難計画の内容は書かない）', () => {
+  it('wardNote：書き分け。「指定なし」と「避難できない」を取り違えない（避難計画の内容は書かない）', () => {
     const w = (over: Partial<(typeof data.wards)[number]>) => ({ ...data.wards[2], ...over });
-    const deep = wardNote(w({ name: 'Z区', gap: 'deep-none', exposure: { name: 'Z区', people: 100, flooded: 99, severe: 60, floodedShare: 0.99, severeShare: 0.603 } }))!;
-    expect(deep).toBe('Z区は洪水・高潮用の指定が 0 件（地震・火事など 1 件）。人口の 60% が深さ 3m 以上の区域に住む：浸水が深いのに指定がない');
-    const shallow = wardNote(w({ name: 'Y区', gap: 'shallow-none', exposure: { name: 'Y区', people: 100, flooded: 30, severe: 1, floodedShare: 0.3, severeShare: 0.007 } }))!;
-    expect(shallow).toBe('Y区は洪水・高潮用の指定が 0 件（地震・火事など 1 件）。深さ 3m 以上の区域に住む人は人口の 0.7%：浸水が小さく指定がない');
-    expect(wardNote(w({ name: 'X区', gap: 'unpublished', published: false, exposure: undefined }))).toBe('X区は未公開（このデータに指定緊急避難場所が載っていない。「ない」とは限らない）');
-    const unpubShallow = wardNote(w({ name: 'X区', gap: 'unpublished', published: false, exposure: { name: 'X区', people: 100, flooded: 20, severe: 0, floodedShare: 0.2, severeShare: 0 } }))!;
-    expect(unpubShallow).toBe('X区は未公開（このデータに指定緊急避難場所が載っていない。「ない」とは限らない）。深さ 3m 以上の区域に住む人は人口の 0%：浸水が小さい');
-    const unpubDeep = wardNote(w({ name: 'S区', gap: 'unpublished-deep', published: false, exposure: { name: 'S区', people: 100, flooded: 100, severe: 75, floodedShare: 1, severeShare: 0.745 } }))!;
-    expect(unpubDeep).toBe('S区は未公開（このデータに指定緊急避難場所が載っていない。「ない」とは限らない）。人口の 75% が深さ 3m 以上の区域に住む：浸水が深い');
+    const none = wardNote(w({ name: 'Z区', gap: 'none' }))!;
+    expect(none).toBe('Z区は指定なし（洪水・高潮用の指定が 0 件。地震・火事など 1 件）');
+    const unpub = wardNote(w({ name: 'X区', gap: 'unpublished', published: false }))!;
+    expect(unpub).toBe('X区は未公開（このデータに指定緊急避難場所が載っていない。「ない」とは限らない）');
     expect(wardNote(w({ gap: null }))).toBeNull();
-    for (const t of [deep, shallow, unpubShallow, unpubDeep]) expect(t).not.toMatch(/避難できない|広域避難|避難計画/);
+    for (const t of [none, unpub]) expect(t).not.toMatch(/避難できない|広域避難|避難計画|浸水/);
   });
   it('usageLabel', () => {
     expect(usageLabel(true, true)).toBe('洪水・高潮');
@@ -215,17 +159,12 @@ describe('subset・summarize（クローズアップ）', () => {
     const wide = summarizeShelters(subsetShelters(data, 2000, 500, 5000));
     expect(wide.slice(0, 3).map((v) => v.value)).toEqual([3, 2, 1]);
   });
-  it('円がかかる、未公開の区と、洪水・高潮用が 0 件の区の名前を添える', () => {
+  it('円がかかる、未公開の区と、指定なしの区の名前を添える', () => {
     const rows = summarizeShelters(subsetShelters(data, 1500, 500, 600));
-    expect(rows.find((r) => r.label === 'データ未公開で浸水が小さい区')?.value).toContain('B区');
+    expect(rows.find((r) => r.label === '未公開の区')?.value).toContain('B区');
     const both = summarizeShelters(subsetShelters(data, 2000, 500, 300));
-    expect(both.find((r) => r.label === 'データ未公開で浸水が小さい区')?.value).toContain('B区');
-    // 浸水が深いデータ未公開の区は、別の行に出る
-    const deepData = buildShelterData(shelters, summary, facilities, boundary, new Map([['B区', { name: 'B区', people: 1000, flooded: 900, severe: 700, floodedShare: 0.9, severeShare: 0.7 }]]));
-    const deepRows = summarizeShelters(subsetShelters(deepData, 1500, 500, 600));
-    expect(deepRows.find((r) => r.label === 'データ未公開で浸水が深い区')?.value).toContain('B区');
-    expect(deepRows.find((r) => r.label === 'データ未公開で浸水が小さい区')).toBeUndefined();
-    expect(both.find((r) => r.label === '浸水が小さく洪水・高潮用の指定がない区')?.value).toContain('C区');
+    expect(both.find((r) => r.label === '未公開の区')?.value).toContain('B区');
+    expect(both.find((r) => r.label === '指定なしの区')?.value).toContain('C区');
     // A 区の中だけの小さな円には、どちらも付かない
     const none = summarizeShelters(subsetShelters(data, 200, 500, 100));
     expect(none).toHaveLength(3);
@@ -237,9 +176,16 @@ describe('subset・summarize（クローズアップ）', () => {
     expect(sampleShelters(s, 100, 100).map((v) => v.value)).toEqual([null, null]);
     expect(s.gapPolygons).toEqual([]);
   });
+  it('切り出しは、指定なしの枠の線と札も、円の中のものだけにする', () => {
+    const s = subsetShelters(data, 2500, 500, 600);
+    expect(s.frame.length).toBeGreaterThan(0);
+    for (const seg of s.frame) for (const [x, y] of seg) expect(Math.hypot(x - 2500, y - 500)).toBeLessThanOrEqual(600.5);
+    expect(s.labels.map((l) => l.name)).toEqual(['C区']);
+    expect(subsetShelters(data, 200, 500, 100).labels).toEqual([]);
+  });
   it('wardsTouching：円の中心が区の中、または区の輪郭が円を通る', () => {
-    expect(wardsTouching(data.wards, { cx: 500, cy: 500, r: 100 })).toEqual({ 'unpublished-deep': [], unpublished: [], 'deep-none': [], 'shallow-none': [], unrated: [] });
-    expect(wardsTouching(data.wards, { cx: 2500, cy: 500, r: 100 })['shallow-none']).toEqual(['C区']);
+    expect(wardsTouching(data.wards, { cx: 500, cy: 500, r: 100 })).toEqual({ none: [], unpublished: [] });
+    expect(wardsTouching(data.wards, { cx: 2500, cy: 500, r: 100 }).none).toEqual(['C区']);
     expect(wardsTouching(data.wards, { cx: 950, cy: 500, r: 100 }).unpublished).toEqual(['B区']);
     expect(wardsTouching(data.wards, { cx: 1500, cy: 500, r: 10 }).unpublished).toEqual(['B区']);
   });
@@ -266,24 +212,15 @@ describe('sectionShelters（断面）', () => {
     const t = sectionShelters(data, { ax: 700, ay: 500, bx: 1600, by: 500 });
     expect(t.marks.map((m) => m.name)).toEqual(['A中', 'B病院']); // A小・A高は足が線の始点より手前、C小・D小は 1 km を超える
   });
-  it('線が通る、未公開の区と、洪水・高潮用が 0 件の区の区間', () => {
+  it('線が通る、未公開の区と、指定なしの区の区間', () => {
     const gaps = sectionGaps(data, line);
     expect(gaps.map((g) => [g.kind, Math.round(g.d0), Math.round(g.d1)])).toEqual([
       ['unpublished', 900, 1900],
-      ['shallow-none', 1900, 2900],
+      ['none', 1900, 2900],
     ]);
-    expect(gaps[0].label).toContain('B区');
-    expect(gaps[0].label).toContain('データ未公開');
-    expect(gaps[1].label).toContain('0 件');
-    expect(gaps[1].label).toContain('浸水が小さく指定がない');
-    expect(gaps[1].label).toContain('2.0%');
-  });
-  it('データ未公開で浸水が深い区間は、unpublished-deep で、割合と「浸水が深い」を添える', () => {
-    const d = buildShelterData(shelters, summary, facilities, boundary, new Map([['B区', { name: 'B区', people: 1000, flooded: 990, severe: 745, floodedShare: 0.99, severeShare: 0.745 }]]));
-    const gaps = sectionGaps(d, line);
-    expect(gaps[0].kind).toBe('unpublished-deep');
-    expect(gaps[0].label).toBe('B区（データ未公開。人口の 75% が深さ 3m 以上の区域に住む：浸水が深い）');
-    expect(sectionShelters(d, line).gaps?.[0].kind).toBe('unpublished-deep');
+    expect(gaps[0].label).toBe('B区（未公開：データに載っていない）');
+    expect(gaps[1].label).toBe('C区（指定なし：洪水・高潮用の指定 0 件）');
+    expect(sectionShelters(data, line).gaps?.map((g) => g.kind)).toEqual(['unpublished', 'none']);
   });
   it('mergeSpans：重なりと接する区間をつなぐ', () => {
     expect(mergeSpans([[5, 8], [0, 3], [2, 4], [8, 9]])).toEqual([[0, 4], [5, 9]]);

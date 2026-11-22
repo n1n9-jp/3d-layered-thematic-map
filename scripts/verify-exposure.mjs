@@ -189,27 +189,24 @@ for (const sc of ['max', 'river', 'tide']) {
   const approx = (n) => (n >= 100000 ? `約${Math.round(n / 10000).toLocaleString('ja-JP')}万人` : n);
   check((await page.textContent('[data-testid=overall-severe]')).trim() === approx(sev), `${sc}：大きな数字（深さ 3m 以上の人口）${approx(sev)}（画面 ${(await page.textContent('[data-testid=overall-severe]')).trim()}）`);
   check((await page.textContent('[data-testid=overall-severe-elderly]')).trim() === approx(sevE), `${sc}：大きな数字（うち65歳以上）${approx(sevE)}（画面 ${(await page.textContent('[data-testid=overall-severe-elderly]')).trim()}）`);
-  check((await page.textContent('[data-testid=overall-below] .ov-num')).trim() === approx(e.below.people), `${sc}：大きな数字（標高 0m 未満）${approx(e.below.people)}`);
-  // 想定の表示が、数字の近くに出ていて、「大きいほう」は足し合わせでないと書いてある
-  const scenText = await page.textContent('[data-testid=overall-scenario]');
-  check(sc === 'max' ? scenText.includes('大きいほう') && scenText.includes('足し合わせではなく') : scenText.includes(sc === 'river' ? '洪水だけ' : '高潮だけ'), `${sc}：想定の表示（${scenText.trim().slice(0, 40)}…）`);
+  // 想定のラベルが、数字の近くに出ている（説明文は出さない。足し合わせでないことは、折りたたみの注記に書く）
+  const scenText = (await page.textContent('[data-testid=overall-scenario]')).trim();
+  check(scenText.startsWith('想定：') && (sc === 'max' ? scenText === '想定：洪水と高潮の大きいほう' : scenText === (sc === 'river' ? '想定：洪水' : '想定：高潮')) && !scenText.includes('足し合わせ'), `${sc}：想定のラベル（${scenText}）`);
 }
-const usable = await page.textContent('[data-testid=overall-usable]');
-check(num(usable) === exp.usable, `洪水・高潮で使える避難場所 ${exp.usable}（画面 ${usable}）`);
-// データ未公開の区は、浸水の想定で「深い」「小さい」に分かれて出る。洪水・高潮用が 0 件の区も同じ（分類そのものは verify-wards.mjs で求め直して照合する）
-const textOf = async (id) => (await page.textContent(`[data-testid=${id}]`).catch(() => '')) ?? '';
-const unpubText = (await textOf('overall-unpublished')) + (await textOf('overall-deep-unpublished'));
-for (const n of exp.unpublished) check(unpubText.includes(n), `データ未公開の区に ${n} が、深い・小さいのどちらかに出ている`);
-const deepText = await textOf('overall-deep-none');
-const shallowText = await textOf('overall-shallow');
-for (const n of exp.zero) check(deepText.includes(n) || shallowText.includes(n), `洪水・高潮用が 0 件の区 ${n} が、深い・小さいのどちらかに出ている`);
-// 折りたたみは、既定では閉じている（注記は読みたい人が開く）。「試作で避難の判断には使えない」は常に見える
+// 折りたたみは、既定では閉じている（注記は読みたい人が開く）。「試作。避難の判断には使えません。」は、出典の欄に1回だけ出る
 check((await page.locator('[data-testid=overall-notes-body]').count()) === 0, '数え方・データの注意は、既定では折りたたまれている');
-check(await page.isVisible('[data-testid=disclaimer]'), '「避難の判断には使えません」の注意が見える');
-check((await page.textContent('[data-testid=disclaimer]')).includes('避難の判断には使えません'), '注意の文に「避難の判断には使えません」');
+const bodyText = await page.evaluate(() => document.body.innerText);
+check(bodyText.split('試作。避難の判断には使えません。').length - 1 === 1, '「試作。避難の判断には使えません。」が、画面に1回だけある（出典の欄）');
+check((await page.locator('.cr-bar-text').count()) === 1 && (await page.textContent('.cr-bar')).includes('試作。避難の判断には使えません。'), 'その1回は、出典の1行（.cr-bar）の中にある');
 await page.click('[data-testid=overall-notes-toggle]');
 const notes = await page.textContent('[data-testid=overall-notes-body]');
-check(notes.includes('按分') && notes.includes('避難できない'), '折りたたみを開くと、数え方（按分なし）と、「指定がない」≠「避難できない」の注意が読める');
+check(notes.includes('按分') && notes.includes('避難できない') && notes.includes('足し合わせません'), '折りたたみを開くと、数え方（按分なし、足し合わせない）と、「指定なし」≠「避難できない」の注意が読める');
+check(notes.includes(`洪水・高潮で使える避難場所 ${exp.usable.toLocaleString('ja-JP')} か所`), `折りたたみの中に、洪水・高潮で使える避難場所 ${exp.usable} か所が出る`);
+// 未公開の区と、洪水・高潮用が 0 件の区（指定なし）が、折りたたみの中で区別して読める（分類そのものは verify-wards.mjs で求め直して照合する）
+const unpubSentence = notes.slice(notes.indexOf('未公開は'));
+const noneSentence = notes.slice(notes.indexOf('指定なしは'), notes.indexOf('未公開は'));
+for (const n of exp.unpublished) check(unpubSentence.includes(n) && !noneSentence.includes(n), `未公開の区 ${n} が、「未公開」の側に出ている`);
+for (const n of exp.zero) check(noneSentence.includes(n) && !unpubSentence.slice(0, 80).includes(n), `指定なしの区 ${n} が、「指定なし」の側に出ている`);
 await browser.close();
 if (failures.length) {
   console.log(`\n不合格 ${failures.length} 件`);

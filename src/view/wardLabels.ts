@@ -1,8 +1,9 @@
 /**
  * 全体の地図の避難の段に出す、区名の札。
  *
- * 浸水が深く、洪水・高潮用の避難場所が確認できない区のうち、東部の5区（足立・葛飾・墨田・江東・江戸川）は隣り合っていて、
- * 全体の地図では小さく映る。区の重心に札を重ねると、札どうしが重なって読めない。そこで、札は区の外へ出し、区の重心と短い線（引き出し線）でつなぐ。
+ * 洪水・高潮用の避難場所が区内に確認できない8区（指定なし：江戸川・足立・新宿・文京、未公開：葛飾・墨田・江東・渋谷）に、「区名／指定なし」「区名／未公開」の札を出す。
+ * 東部の5区（足立・葛飾・墨田・江東・江戸川）は隣り合っていて、全体の地図では小さく映る。区の重心に札を重ねると、札どうしが重なって読めない。
+ * そこで、札は区の外へ出し、区の重心と短い線（引き出し線）でつなぐ。
  *
  * 札の置き場所は、画面（px）の上で決める（`calloutPlacement.ts`）。視点（回転・傾き・拡大・位置）、画面の大きさ、段の高さ（レイヤー間隔）が変わると、
  * 札が占める画面上の位置も、避けるものの位置も変わるので、そのたびに決め直す。計算するのは札の数（高々数枚）の候補だけで、
@@ -17,7 +18,7 @@ import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import type { Layer } from '@deck.gl/core';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { DATA_OUTLINE } from '../config';
-import { DEEP_NONE_COLOR, HATCH_COLOR } from '../layers/shelters/model';
+import { HATCH_COLOR, NONE_COLOR } from '../layers/shelters/model';
 import type { WardLabel } from '../layers/shelters/model';
 import { asModelMatrix, translationMatrix } from '../stack';
 import type { ViewState } from '../store';
@@ -48,17 +49,17 @@ const EDGE = 4;
 /** いちばん大きい札で、引き出し線がどれもこの長さ（px）以下なら、ほかの段階は試さずに、それに決める。 */
 const SHORT_LEADER = 120;
 /** 段階を1つ下げることに払う、引き出し線の長さ（合計 px）相当の費用。 */
-const LEVEL_PENALTY = 40;
+const LEVEL_PENALTY = 200;
 /** 右の列と札の隙間（px）。 */
 const COLUMN_GAP = 8;
 
 const LABEL_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, "WenQuanYi Zen Hei", sans-serif';
 
 type Rgb = readonly [number, number, number];
-/** 「指定なし」（データに載っていて 0 件）は琥珀の文字と太い縁、「未公開」（データに載っていない）は灰の文字と灰の縁。 */
+/** 「指定なし」（データに載っていて 0 件）は明るい青灰の文字と太い縁（輪郭の枠と同じ）、「未公開」（データに載っていない）は灰の文字と細い灰の縁（網掛けと同じ）。 */
 const STYLE: Record<WardLabel['kind'], { text: Rgb; line: Rgb }> = {
-  'deep-none': { text: [255, 190, 70], line: DEEP_NONE_COLOR },
-  'unpublished-deep': { text: [226, 230, 240], line: HATCH_COLOR },
+  none: { text: [236, 240, 250], line: NONE_COLOR },
+  unpublished: { text: [200, 206, 222], line: HATCH_COLOR },
 };
 
 export interface PlacedWardLabel {
@@ -100,8 +101,8 @@ function sizeOf(text: string, level: Level): { w: number; h: number } {
   };
 }
 
-/** 優先して出す順（指定がなく浸水が深い区が先）。置けないものを減らすとき、後ろから外す。 */
-const priority = (l: WardLabel) => (l.kind === 'deep-none' ? 0 : 1);
+/** 優先して出す順（指定なしの区が先）。置けないものを減らすとき、後ろから外す。 */
+const priority = (l: WardLabel) => (l.kind === 'none' ? 0 : 1);
 
 export interface WardLabelInput {
   labels: readonly WardLabel[];
@@ -280,7 +281,7 @@ export function wardLabelLayers(layout: WardLabelLayout): Layer[] {
       backgroundPadding: [PAD_X, PAD_Y],
       backgroundBorderRadius: 3,
       getBorderColor: (r) => color(r, 255),
-      getBorderWidth: (r) => (r.p.label.kind === 'deep-none' ? BORDER : 1.5),
+      getBorderWidth: (r) => (r.p.label.kind === 'none' ? BORDER : 1.5),
       fontFamily: LABEL_FONT,
       characterSet: 'auto',
       fontSettings: { sdf: false, fontSize: 64 },

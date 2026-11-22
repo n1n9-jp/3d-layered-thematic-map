@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-// 区ごとの「浸水が想定される区域に住む人の割合」「深さ 3m 以上の区域に住む人の割合」と、洪水・高潮用の避難場所が確認できない区の分類を、
-// 画面とは別の方法（public/data/ のファイルを Node で直接読む。画面のコードは使わない）で求め直し、画面の値と照合する。
+// 避難の段の区の分類（指定なし・未公開）と、区名の札を、画面とは別の方法で求め直し、画面の値と照合する。
 //   node scripts/verify-wards.mjs [--data public/data] [--no-browser] [--url http://127.0.0.1:5173/]
-// 別の方法：人口の250mメッシュの中心（4隅の平均）を、区の輪郭（偶奇規則の点の内外判定）で区に振り分け、
-//   メッシュの中心を含む浸水想定のセル（50 m。洪水と高潮の大きいほう）のランクで、人口を丸ごと数える。
-//   分類：洪水・高潮用の避難場所が確認できない区（データを公開していて 0 件の区と、データ未公開の区）を、深さ 3m 以上（ランク 3 以上）の区域に住む人が
-//   区の人口の 10% 以上 → 深い、未満 → 小さい、で分ける。deep-none（公開・0 件・深い）、shallow-none（公開・0 件・小さい）、
-//   unpublished-deep（未公開・深い）、unpublished（未公開・小さい）。
-// 画面の値は、Playwright で開いて window.__store の避難のデータ（区ごとの分類と割合）と、右の列の 23区全体の集計の文面から読む。
+// 別の方法：public/data/shelters.json と shelters.geojson を Node で直接読み（画面のコードは使わない）、区ごとに
+//   未公開（データに載っていない。published が false）、指定なし（データに載っていて、洪水・高潮で使える避難場所が 0 件）、指定あり（null）に分ける。
+//   浸水の深さは使わない（浸水の深さは浸水の段が示す）。
+// 画面の値：Playwright で開いて、window.__store の避難のデータ（区ごとの分類、輪郭の枠、網掛け、札）と、いま出している札の配置
+//   （window.__wardLabels）、凡例、折りたたみの注記を読んで照合する。
 // 1つでも食い違えば、内容を表示して終了コード 1 で終わる。--no-browser なら、求め直した値を表示するだけ。
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -27,56 +25,11 @@ const { values } = parseArgs({
 });
 const DIR = resolve(ROOT, values.data);
 const readJson = (n) => JSON.parse(readFileSync(resolve(DIR, n), 'utf8'));
-const readBin = (n) => new Uint8Array(readFileSync(resolve(DIR, n)));
-const THRESHOLD = 0.1;
 
 /* ---------- 求め直し（Node） ---------- */
-const meta = readJson('flood.json');
-const river = readBin(meta.files.riverDepth);
-const tide = readBin(meta.files.tideDepth);
-const pop = readJson('population.geojson');
 const boundary = readJson('boundary.geojson');
 const shelters = readJson('shelters.geojson');
 const summary = readJson('shelters.json');
-
-const inRing = (x, y, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-};
-const inPolygon = (x, y, rings) => inRing(x, y, rings[0]) && !rings.slice(1).some((r) => inRing(x, y, r));
-const partsOf = (g) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates);
-const wardOf = (x, y) => boundary.features.find((f) => partsOf(f.geometry).some((p) => inPolygon(x, y, p)))?.properties.name ?? null;
-
-const acc = new Map(boundary.features.map((f) => [f.properties.name, { people: 0, flooded: 0, severe: 0 }]));
-for (const f of pop.features) {
-  const ring = f.geometry.coordinates[0];
-  let cx = 0;
-  let cy = 0;
-  for (let k = 0; k < ring.length - 1; k++) {
-    cx += ring[k][0];
-    cy += ring[k][1];
-  }
-  cx /= ring.length - 1;
-  cy /= ring.length - 1;
-  const col = Math.floor((cx - meta.minX) / meta.cellSize);
-  const row = Math.floor((meta.maxY - cy) / meta.cellSize);
-  if (col < 0 || col >= meta.width || row < 0 || row >= meta.height) continue;
-  const i = row * meta.width + col;
-  if (river[i] === 255 || tide[i] === 255) continue;
-  const p = Math.max(river[i], tide[i]);
-  const w = wardOf(cx, cy);
-  const a = w === null ? undefined : acc.get(w);
-  if (!a) continue;
-  const n = f.properties.population;
-  a.people += n;
-  if (p >= 1) a.flooded += n;
-  if (p >= 3) a.severe += n;
-}
 const usable = new Map();
 const total = new Map();
 for (const f of shelters.features) {
@@ -86,23 +39,16 @@ for (const f of shelters.features) {
 const published = new Map(summary.wards.map((w) => [w.name, w.published]));
 const rows = boundary.features.map((f) => {
   const name = f.properties.name;
-  const a = acc.get(name);
   const u = usable.get(name) ?? 0;
   const pub = published.get(name) !== false;
-  const severeShare = a.people > 0 ? a.severe / a.people : 0;
-  const deep = severeShare >= THRESHOLD;
-  const cls = !pub ? (deep ? 'unpublished-deep' : 'unpublished') : u > 0 ? null : deep ? 'deep-none' : 'shallow-none';
-  return { name, people: a.people, flooded: a.flooded, severe: a.severe, floodedShare: a.people > 0 ? a.flooded / a.people : 0, severeShare, usable: u, other: (total.get(name) ?? 0) - u, published: pub, cls };
+  const cls = !pub ? 'unpublished' : u > 0 ? null : 'none';
+  return { name, published: pub, usable: u, other: (total.get(name) ?? 0) - u, cls };
 });
-const pct = (v) => `${(100 * v).toFixed(1)}%`;
-console.log('\n[求め直し] 区ごと（想定は洪水と高潮の大きいほう）');
-console.log('区       公開 洪水・高潮用 それ以外  人口    浸水が想定される区域  深さ3m以上   分類');
-for (const r of rows)
-  console.log(`${r.name.padEnd(5, '　')} ${r.published ? 'Y' : 'N'}   ${String(r.usable).padStart(5)} ${String(r.other).padStart(8)}  ${String(r.people).padStart(8)}  ${pct(r.floodedShare).padStart(7)}      ${pct(r.severeShare).padStart(7)}     ${r.cls ?? '—（指定あり）'}`);
+console.log('\n[求め直し] 区ごと');
+console.log('区       公開 洪水・高潮用 それ以外  分類');
+for (const r of rows) console.log(`${r.name.padEnd(5, '　')} ${r.published ? 'Y' : 'N'}   ${String(r.usable).padStart(5)} ${String(r.other).padStart(8)}  ${r.cls ?? '—（指定あり）'}`);
 const names = (c) => rows.filter((r) => r.cls === c).map((r) => r.name);
-console.log(
-  `\nデータ未公開で浸水が深い：${names('unpublished-deep').join('・')}\n浸水が深いのに指定がない：${names('deep-none').join('・')}\nデータ未公開で浸水が小さい：${names('unpublished').join('・')}\n浸水が小さく指定がない：${names('shallow-none').join('・')}`,
-);
+console.log(`\n指定なし：${names('none').join('・')}\n未公開：${names('unpublished').join('・')}`);
 if (values['no-browser']) process.exit(0);
 
 /* ---------- 画面の値（Playwright） ---------- */
@@ -155,51 +101,50 @@ const browser = await chromium.launch(process.env.SHOT_CHROMIUM_ARGS ? { args: p
 const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
 await page.goto(base + (values.data.includes('fixture') ? '?data=fixture' : ''));
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 90000 });
+await sleep(2500);
 console.log('\n[画面の値と照合]');
-const screen = await page.evaluate(() =>
-  window.__store.getState().data.shelters.wards.map((w) => ({ name: w.name, gap: w.gap, published: w.published, usable: w.usable, exposure: w.exposure ? { people: w.exposure.people, flooded: w.exposure.flooded, severe: w.exposure.severe, floodedShare: w.exposure.floodedShare, severeShare: w.exposure.severeShare } : null })),
-);
-check(screen.length === rows.length, `区の数 ${rows.length}（画面 ${screen.length}）`);
+const screen = await page.evaluate(() => {
+  const d = window.__store.getState().data.shelters;
+  return {
+    wards: d.wards.map((w) => ({ name: w.name, gap: w.gap, published: w.published, usable: w.usable })),
+    labels: d.labels.map((l) => ({ name: l.name, text: l.text, kind: l.kind })),
+    frame: d.frame.length,
+    hatch: d.hatch.length,
+    gapPolygons: d.gapPolygons.length,
+    placed: window.__wardLabels ? window.__wardLabels.placed.map((p) => ({ name: p.label.name, kind: p.label.kind })) : null,
+    omitted: window.__wardLabels ? window.__wardLabels.omitted : null,
+  };
+});
+check(screen.wards.length === rows.length, `区の数 ${rows.length}（画面 ${screen.wards.length}）`);
 for (const r of rows) {
-  const s = screen.find((w) => w.name === r.name);
+  const s = screen.wards.find((w) => w.name === r.name);
   if (!s) {
     check(false, `${r.name} が画面にない`);
     continue;
   }
-  const same = s.exposure && s.exposure.people === r.people && s.exposure.flooded === r.flooded && s.exposure.severe === r.severe;
-  check(!!same, `${r.name}：人口 ${r.people}・浸水想定 ${pct(r.floodedShare)}・3m以上 ${pct(r.severeShare)}（画面 ${s.exposure ? `${s.exposure.people}・${pct(s.exposure.floodedShare)}・${pct(s.exposure.severeShare)}` : 'なし'}）`);
-  check(s.gap === r.cls && s.usable === r.usable, `${r.name}：分類 ${r.cls ?? '指定あり'}・洪水高潮用 ${r.usable}（画面 ${s.gap ?? '指定あり'}・${s.usable}）`);
+  check(s.gap === r.cls && s.usable === r.usable && s.published === r.published, `${r.name}：分類 ${r.cls ?? '指定あり'}・洪水高潮用 ${r.usable}（画面 ${s.gap ?? '指定あり'}・${s.usable}）`);
 }
-// 23区全体の集計の文面に、分類の区名が入っていること。主題の枠は、浸水が深く洪水・高潮用の避難場所が確認できない区（指定がない区＋データ未公開の区）。
-const has = async (id) => (await page.textContent(`[data-testid=${id}]`).catch(() => '')) ?? '';
-const deepNone = names('deep-none');
-const unpubDeep = names('unpublished-deep');
-const deepAll = [...deepNone, ...unpubDeep];
-const small = [...names('shallow-none'), ...names('unpublished')];
-const noShelterOk = rows.filter((r) => r.usable > 0).map((r) => r.name);
-const pubShare = (n) => {
-  const r = rows.find((x) => x.name === n);
-  return r.severeShare >= 0.1 ? `${Math.round(r.severeShare * 100)}%` : `${(r.severeShare * 100).toFixed(1)}%`;
-};
-const deepCount = await has('overall-deep-count');
-check(Number(deepCount) === deepAll.length, `主題の枠の区の数 ${deepAll.length}（画面 ${deepCount.trim()}）`);
-const noneText = await has('overall-deep-none');
-const noneCount = await has('overall-deep-none-count');
-const unpubDeepText = await has('overall-deep-unpublished');
-const unpubDeepCount = await has('overall-deep-unpublished-count');
-check(Number(noneCount) === deepNone.length, `内訳「指定がない」の区の数 ${deepNone.length}（画面 ${noneCount.trim()}）`);
-check(Number(unpubDeepCount) === unpubDeep.length, `内訳「データ未公開」の区の数 ${unpubDeep.length}（画面 ${unpubDeepCount.trim()}）`);
-for (const n of deepNone) check(noneText.includes(`${n} ${pubShare(n)}`), `内訳「指定がない」に ${n} と割合 ${pubShare(n)} が出ている`);
-for (const n of unpubDeep) check(unpubDeepText.includes(`${n} ${pubShare(n)}`), `内訳「データ未公開」に ${n} と割合 ${pubShare(n)} が出ている`);
-for (const n of [...unpubDeep, ...small, ...noShelterOk]) check(!noneText.includes(n), `内訳「指定がない」に ${n} は出ていない`);
-for (const n of [...deepNone, ...small, ...noShelterOk]) check(!unpubDeepText.includes(n), `内訳「データ未公開」に ${n} は出ていない`);
-const deepCard = await has('overall-deep');
-for (const n of [...small, ...noShelterOk]) check(!deepCard.includes(n), `主題の枠に ${n} は出ていない`);
-const shallowText = await has('overall-shallow');
-for (const n of names('shallow-none')) check(shallowText.includes(n) && shallowText.includes(pubShare(n)), `「指定がなく浸水が小さい」に ${n} と割合が出ている`);
-const unpubText = await has('overall-unpublished');
-for (const n of names('unpublished')) check(unpubText.includes(n), `「データ未公開で浸水が小さい」に ${n} が出ている`);
-for (const n of [...deepAll, ...names('shallow-none')]) check(!unpubText.includes(n), `「データ未公開で浸水が小さい」に ${n} は出ていない`);
+// 札：指定なしと未公開の全区に、「区名／指定なし」「区名／未公開」
+const expectLabels = rows.filter((r) => r.cls).map((r) => ({ name: r.name, text: `${r.name}\n${r.cls === 'none' ? '指定なし' : '未公開'}`, kind: r.cls }));
+check(screen.labels.length === expectLabels.length && screen.labels.length === 8, `札は ${expectLabels.length} 区すべて（画面 ${screen.labels.length}）`);
+for (const e of expectLabels) {
+  const l = screen.labels.find((x) => x.name === e.name);
+  check(!!l && l.text === e.text && l.kind === e.kind, `${e.name}：札「${e.text.replace('\n', '／')}」（画面 ${l ? l.text.replace('\n', '／') : 'なし'}）`);
+}
+check(screen.placed !== null && screen.placed.length === 8 && screen.omitted.length === 0, `1400×1000 の初期表示で、8枚の札がすべて地図に出ている（${screen.placed?.length} 枚、出さなかった区 ${screen.omitted?.join('・') || 'なし'}）`);
+check(screen.frame > 0 && screen.hatch > 0 && screen.gapPolygons > 0, `指定なしの区の枠（${screen.frame} 本）と、未公開の区の網掛け（${screen.hatch} 本）の両方がある`);
+// 凡例（避難の段）
+const legend = await page.$$eval('[data-testid=legend-shelters] li', (els) => els.map((e) => e.textContent.trim()));
+const want = ['洪水・高潮で使える避難場所', 'それ以外の避難場所', '病院', '指定なし：洪水・高潮用の指定が 0 件の区', '未公開：データに載っていない区（ないとは限らない）'];
+check(legend.length === want.length && want.every((w, i) => legend[i] === w), `凡例は5行（${legend.join(' / ')}）`);
+// 折りたたみの注記：指定なしと未公開が区別して読める
+await page.click('[data-testid=overall-notes-toggle]');
+const notes = await page.textContent('[data-testid=overall-notes-body]');
+const noneSentence = notes.slice(notes.indexOf('指定なしは'), notes.indexOf('未公開は'));
+const unpubSentence = notes.slice(notes.indexOf('未公開は'));
+for (const n of names('none')) check(noneSentence.includes(n) && !unpubSentence.slice(0, 60).includes(n), `注記の「指定なし」に ${n} が出ている`);
+for (const n of names('unpublished')) check(unpubSentence.includes(n) && !noneSentence.includes(n), `注記の「未公開」に ${n} が出ている`);
+check(!/浸水が深い|琥珀/.test(notes + legend.join('')), '注記と凡例に、浸水の深さによる区の書き分けが残っていない');
 await browser.close();
 if (failures.length) {
   console.log(`\n不合格 ${failures.length} 件`);

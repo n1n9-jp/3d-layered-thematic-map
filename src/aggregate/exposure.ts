@@ -121,3 +121,19 @@ export function wholeExposure(pop: PopulationData, flood: FloodData, scenario: F
 
 /** 人数の表示（桁区切り）。 */
 export const peopleText = (n: number): string => Math.round(n).toLocaleString('ja-JP');
+
+/**
+ * 人数の概数。1,000 人未満：そのまま。1 万人未満：約 N,NNN 人（百の位で四捨五入）。1 万人以上 10 万人未満：約 N.N 万人（小数1桁）。
+ * 10 万人以上：約 NNN 万人（万の位で四捨五入。例：2,415,153 → 約242万人）。
+ */
+export function approxPeople(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '—';
+  const r = Math.round(n);
+  if (r < 1000) return `${r.toLocaleString('ja-JP')}人`;
+  if (r < 10000) return `約${(Math.round(r / 100) * 100).toLocaleString('ja-JP')}人`;
+  if (r < 100000) {
+    const m = Math.round(r / 1000) / 10;
+    return `約${m.toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}万人`;
+  }
+  return `約${Math.round(r / 10000).toLocaleString('ja-JP')}万人`;
+}

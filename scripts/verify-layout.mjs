@@ -122,8 +122,8 @@ async function viewConsistency(browser, base, size) {
   console.log(`\n[${size}] 固定前・カーソルを置いた状態・固定後・解除後の視点`);
   const { ctx, page, errors } = await open(browser, base, size);
   const v0 = (await getState(page)).view;
-  check((await mode(page)) === 'empty', `固定前：列は手がかり（mode=empty）。${fmt(v0)}`);
-  check(await page.isVisible('[data-testid=info-hint]'), '固定前：操作の手がかりが見える');
+  check((await mode(page)) === 'empty', `固定前：列は23区全体の集計（mode=empty）。${fmt(v0)}`);
+  check((await page.isVisible('[data-testid=overall]')) && (await page.locator('[data-testid=info-hint]').count()) === 0, '固定前：23区全体の集計が見え、操作の説明文は出ていない');
 
   const [hx, hy] = await topPlanePoint(page);
   await page.mouse.move(hx, hy);
@@ -160,7 +160,7 @@ async function viewConsistency(browser, base, size) {
   await settle(page, 1500);
   const s3 = await getState(page);
   check(sameView(v0, s3.view), `解除後の視点が固定前と一致。${fmt(s3.view)}`);
-  check(s3.probe === null && (await mode(page)) === 'empty', '解除後：探針が消え、列は手がかりに戻る');
+  check(s3.probe === null && (await mode(page)) === 'empty', '解除後：探針が消え、列は23区全体の集計に戻る');
   check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
   await ctx.close();
 
@@ -189,7 +189,7 @@ async function viewConsistency(browser, base, size) {
   await o.page.getByTestId('mode-point').click();
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), '「地点」へ切り替えても、視点は同じ');
-  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は手がかり（探針なし）');
+  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は23区全体の集計（探針なし）');
   await o.page.getByTestId('mode-section').click();
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), '「断面」へ戻しても、視点は同じ');

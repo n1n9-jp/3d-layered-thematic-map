@@ -175,17 +175,12 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
   const mid = PAD_Y + ph / 2;
   const yOf = (offset: number) => mid - (offset / R) * (ph / 2 - 5);
   const patternId = `sc-hatch-${id}`;
-  const deepPatternId = `sc-hatch-deep-${id}`;
-  const AMBER = '255,170,30';
   return (
     <>
       {gaps.length > 0 && (
         <defs>
           <pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <line x1={0} y1={0} x2={0} y2={6} stroke="rgba(176,182,204,0.7)" strokeWidth={1.6} />
-          </pattern>
-          <pattern id={deepPatternId} width={5} height={5} patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-            <line x1={0} y1={0} x2={0} y2={5} stroke={`rgba(${AMBER},0.85)`} strokeWidth={1.8} />
           </pattern>
         </defs>
       )}
@@ -195,75 +190,26 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
         const cx = fix(x0 + w / 2);
         const cy = PAD_Y + ph / 2;
         if (g.kind === 'unpublished')
+          // 未公開の区間：灰の網掛け（0 件ではなく、データがない）
           return (
             <g key={`g${i}`} data-testid="section-gap" data-kind="unpublished">
               <title>{g.label}</title>
               <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${patternId})`} stroke="rgba(176,182,204,0.6)" strokeWidth={0.8} />
               {w > 44 && (
                 <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label">
-                  データ未公開
+                  未公開
                 </text>
               )}
             </g>
           );
-        if (g.kind === 'unpublished-deep')
-          // データ未公開で、浸水が深い区間：灰の斜線（データがない）に、琥珀の薄い塗りと縁（浸水が深い）を重ねる。斜線が灰なので、琥珀の斜線の「指定なし」とは見分けられる
-          return (
-            <g key={`g${i}`} data-testid="section-gap" data-kind="unpublished-deep">
-              <title>{g.label}</title>
-              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`rgba(${AMBER},0.12)`} />
-              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${patternId})`} stroke={`rgba(${AMBER},0.95)`} strokeWidth={1.4} />
-              {w > 58 ? (
-                <>
-                  <text x={cx} y={cy - 2} textAnchor="middle" className="sc-gap-label sc-gap-unpub-deep">
-                    {w > 90 ? 'データ未公開' : '未公開'}
-                  </text>
-                  <text x={cx} y={cy + 11} textAnchor="middle" className="sc-gap-label sc-gap-unpub-deep">
-                    浸水が深い
-                  </text>
-                </>
-              ) : (
-                w > 44 && (
-                  <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-unpub-deep">
-                    未公開
-                  </text>
-                )
-              )}
-            </g>
-          );
-        if (g.kind === 'deep-none')
-          // 浸水が深いのに、洪水・高潮用の指定がない区間：この地図の主題。琥珀色の斜線・塗り・縁と太い文字で、見落とされないようにする
-          return (
-            <g key={`g${i}`} data-testid="section-gap" data-kind="deep-none">
-              <title>{g.label}</title>
-              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`rgba(${AMBER},0.16)`} />
-              <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill={`url(#${deepPatternId})`} stroke={`rgba(${AMBER},0.95)`} strokeWidth={1.6} />
-              {w > 90 ? (
-                <>
-                  <text x={cx} y={cy - 2} textAnchor="middle" className="sc-gap-label sc-gap-deep">
-                    浸水が深いのに
-                  </text>
-                  <text x={cx} y={cy + 11} textAnchor="middle" className="sc-gap-label sc-gap-deep">
-                    指定なし
-                  </text>
-                </>
-              ) : (
-                w > 44 && (
-                  <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-deep">
-                    指定なし
-                  </text>
-                )
-              )}
-            </g>
-          );
-        // 浸水が小さく指定がない区間（目立たせない：薄い点線の枠と、小さな文字）と、浸水の想定を求められなかった区間
+        // 指定なしの区間：枠だけ（塗りも網掛けもしない）。未公開の網掛けとは、枠と文字で見分ける
         return (
-          <g key={`g${i}`} data-testid="section-gap" data-kind={g.kind}>
+          <g key={`g${i}`} data-testid="section-gap" data-kind="none">
             <title>{g.label}</title>
-            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill="rgba(255,255,255,0.04)" stroke="rgba(176,182,204,0.4)" strokeWidth={0.8} strokeDasharray="3 2" />
+            <rect x={fix(x0)} y={PAD_Y} width={fix(w)} height={ph} fill="none" stroke="rgba(214,224,244,0.9)" strokeWidth={1.6} />
             {w > 44 && (
-              <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-faint">
-                {g.kind === 'shallow-none' && w > 84 ? '指定なし（浸水小）' : '指定なし'}
+              <text x={cx} y={cy + 3} textAnchor="middle" className="sc-gap-label sc-gap-none">
+                指定なし
               </text>
             )}
           </g>
