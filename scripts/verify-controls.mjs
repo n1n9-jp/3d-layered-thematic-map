@@ -155,6 +155,7 @@ const openTable = async (page) => {
   console.log('\n[4] 断面の例の線');
   await press(page, 'mode-section');
   check((await page.locator('[data-testid=section-example]').count()) === 3, '線がないとき、例の線のボタンが3つ出る');
+  check((await page.locator('[data-testid=section-example-notes]').count()) === 0, '例の線の説明文は、畳んだ見出しの中（初期状態では出ない）');
   await page.locator('[data-testid=section-example]').first().click();
   await sleep(2500);
   const line = await page.evaluate(() => window.__store.getState().section);

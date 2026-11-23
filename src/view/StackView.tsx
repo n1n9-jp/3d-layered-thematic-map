@@ -100,8 +100,9 @@ export default function StackView({ columnWidth }: Props) {
   const state = useMapStore();
   const { order, visible, solo, spacing, data, status, viewState, closeupRadius, options } = state;
   const sectionMode = state.mode === 'section';
-  // 範囲の円は「地点」のときだけ。「断面」のあいだは、固定した探針は残っているが、描かない。
-  const closeup = !sectionMode && state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
+  // 範囲の円は「地点」のときだけ。「断面」のあいだは、固定した探針は残っているが、描かない。「全体」は探針がない。
+  const pointMode = state.mode === 'point';
+  const closeup = pointMode && state.probePinned && state.probe ? { ...state.probe, r: closeupRadius } : null;
   const { line: sectionLine, tracks: sectionTracks } = useSectionTracks();
   const { sectionStart, sectionCursor, sectionHover } = state;
   // 右のチャートにカーソルがあるとき、その段を残して、ほかの段を暗くする。
@@ -465,7 +466,9 @@ export default function StackView({ columnWidth }: Props) {
         ...(sectionLine ? sectionPoleLayers(sectionLine, zsShown) : []),
         ...(sectionLine && sectionHover !== null ? sectionCursorLayers(sectionLine, sectionHover, zsShown) : []),
       ]
-    : probeLayers(state as MapState);
+    : pointMode
+      ? probeLayers(state as MapState)
+      : [];
 
   return (
     // 右上のパネルの左までを描画領域にする。情報の列は、この右端に重なる。
@@ -480,8 +483,8 @@ export default function StackView({ columnWidth }: Props) {
           controller={CONTROLLER}
           parameters={DECK_PARAMETERS}
           layers={[...stackLayers, ...labelLayers, ...overlayLayers]}
-          onHover={sectionMode ? onSectionHover : onHover}
-          onClick={sectionMode ? onSectionClick : onClick}
+          onHover={sectionMode ? onSectionHover : pointMode ? onHover : undefined}
+          onClick={sectionMode ? onSectionClick : pointMode ? onClick : undefined}
           style={{ background: '#000' }}
         />
       )}

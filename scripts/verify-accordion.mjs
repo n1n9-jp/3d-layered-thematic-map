@@ -184,7 +184,7 @@ async function tabTo(page, selector, n = 60) {
   check((await page.locator('[data-testid=info-area-title]').count()) === 1 && (await page.locator('[data-testid=closeup-exposure-row]').count()) === 7, '開くと、半径内の集計と、浸水が想定される区域に住む人の表が出る');
   await page.click('[data-testid=info-row-toggle-population]');
   check((await rowOpen()).join() === 'population', '別の行（人口）を押すと、浸水は閉じる（同時に1つ）');
-  check(await page.isVisible('[data-testid=closeup]') && (await page.getByRole('button', { name: '消す', exact: true }).count()) === 1 && (await page.getByRole('button', { name: '5 km', exact: true }).count()) === 1, 'クローズアップ、半径のボタン、「消す」は、開閉にかかわらず見えている');
+  check(await page.isVisible('[data-testid=closeup]') && (await page.getByTestId('mode-overview').count()) === 1 && (await page.getByRole('button', { name: '5 km', exact: true }).count()) === 1, 'クローズアップ、半径のボタン、読み方の切り替え（「全体」）は、開閉にかかわらず見えている');
   await page.focus('[data-testid=info-row-toggle-transit]');
   await page.keyboard.press('Enter');
   check((await rowOpen()).join() === 'transit', 'キーボード（フォーカス＋Enter）でも開閉できる');
@@ -200,6 +200,23 @@ async function tabTo(page, selector, n = 60) {
   await page.focus('[data-testid=section-summary-acc-toggle]');
   await page.keyboard.press('Enter');
   check((await page.locator('[data-testid=section-headline]').count()) === 1, 'Enter で開くと、集計が出る');
+  await ctx.close();
+}
+
+/* 8. 断面で線を引く前の説明 */
+{
+  const { ctx, page } = await open('');
+  console.log('\n[8] 断面で線を引く前の説明');
+  await page.getByTestId('mode-section').click();
+  check((await page.getAttribute('[data-testid=section-guide-toggle]', 'aria-expanded')) === 'false' && (await page.locator('[data-testid=section-guide-body]').count()) === 0, '線の引き方と例の説明は、初期状態では閉じている');
+  const hint = (await page.textContent('[data-testid=section-hint] > p')).trim();
+  check(hint === '地図の上で2点をクリックして線を引く', `見えている手がかりは1行（${hint}）`);
+  const names = await page.$$eval('[data-testid=section-example]', (els) => els.map((e) => e.textContent.trim()));
+  check(names.length === 3 && names.every((n) => n.length > 0 && !n.includes('東西 ') && !n.includes('南北 ')), `例の線のボタンは3つで、名前だけ（${names.join(' / ')}）`);
+  check((await page.locator('[data-testid=section-example-notes]').count()) === 0, '例の線の説明文は、閉じているあいだ出ない');
+  await page.focus('[data-testid=section-guide-toggle]');
+  await page.keyboard.press('Enter');
+  check((await page.locator('[data-testid=section-guide-body]').count()) === 1 && (await page.locator('[data-testid=section-example-notes] dd').count()) === 3, 'Enter で開くと、説明の段落と例の線の説明文が出る');
   await ctx.close();
 }
 

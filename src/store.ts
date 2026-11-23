@@ -26,8 +26,11 @@ export interface ViewState {
   zoom: number;
 }
 
-/** 全体の地図と右の列の操作：「地点」（探針とクローズアップ）か、「断面」（2点の線に沿った変化）。 */
-export type UiMode = 'point' | 'section';
+/**
+ * 全体の地図と右の列の読み方。
+ * 「全体」：23区全体のまとめ。探針も断面の線もない。「地点」：探針とクローズアップ。「断面」：2点の線に沿った変化。
+ */
+export type UiMode = 'overview' | 'point' | 'section';
 
 /** 畳める見出し（アコーディオン）の開閉。初期状態はすべて閉じる。 */
 export interface OpenState {
@@ -41,9 +44,11 @@ export interface OpenState {
   row: LayerId | null;
   /** 断面の「線に沿った集計」 */
   section: boolean;
+  /** 断面で線を引く前の「線の引き方と例の説明」 */
+  guide: boolean;
 }
 
-export const CLOSED: OpenState = { layer: null, table: false, notes: false, row: null, section: false };
+export const CLOSED: OpenState = { layer: null, table: false, notes: false, row: null, section: false, guide: false };
 
 export interface SectionFocus {
   id: LayerId;
@@ -103,7 +108,7 @@ export interface MapState {
   setSectionFocus(f: SectionFocus | null): void;
   /** 見出しを開閉する。layer と row は同時に1つだけ開く（開いている見出しをもう一度押すと閉じる）。 */
   toggleOpen(key: 'layer' | 'row', id: LayerId): void;
-  toggleOpen(key: 'table' | 'notes' | 'section'): void;
+  toggleOpen(key: 'table' | 'notes' | 'section' | 'guide'): void;
 }
 
 declare global {
@@ -177,14 +182,14 @@ export function optionsQuery(search: string): LayerOptions {
 
 /**
  * URL クエリの `open`（検査や撮影のために、開いた状態で始める）。カンマ区切りで、次のどれか。
- * レイヤーID = レイヤー一覧のその行、`table` / `notes` = 23区全体の表・注記、`row:<レイヤーID>` = 地点の表のその行、`section` = 断面の集計。
+ * レイヤーID = レイヤー一覧のその行、`table` / `notes` = 23区全体の表・注記、`row:<レイヤーID>` = 地点の表のその行、`section` = 断面の集計、`guide` = 断面で線を引く前の説明。
  * 合わないものは無視する。レイヤー一覧の行、地点の表の行は、複数書いても最初の1つだけ。
  */
 export function openQuery(search: string): OpenState {
   const out: OpenState = { ...CLOSED };
   for (const raw of (new URLSearchParams(search).get('open') ?? '').split(',')) {
     const t = raw.trim();
-    if (t === 'table' || t === 'notes' || t === 'section') out[t] = true;
+    if (t === 'table' || t === 'notes' || t === 'section' || t === 'guide') out[t] = true;
     else if (isLayerId(t)) out.layer ??= t;
     else if (t.startsWith('row:') && isLayerId(t.slice(4))) out.row ??= t.slice(4) as LayerId;
   }
@@ -204,7 +209,7 @@ function ids(v: string | null): LayerId[] {
  * `rx=<rotationX>`, `ro=<rotationOrbit>`, `zoom=<zoom>`, `radius=<m>`（1000 / 2000 / 5000）,
  * `section=<ax>,<ay>,<bx>,<by>`（断面の線。あれば「断面」に切り替わった状態で開く）,
  * `flood=max|river|tide`（浸水の想定）, `floodview=depth|duration`（浸水で見るもの）, `pop=total|elderly`（人口で見るもの）,
- * `open=<layerId|table|notes|row:<layerId>|section>,...`（開いた状態で始める）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
+ * `open=<layerId|table|notes|row:<layerId>|section|guide>,...`（開いた状態で始める）。不正な値は無視して既定値を使い、範囲のあるものは上下限に収める。
  */
 export function initialStateFromQuery(search: string): InitialState {
   const q = new URLSearchParams(search);
@@ -249,7 +254,7 @@ export function initialStateFromQuery(search: string): InitialState {
     probe,
     probePinned: probe !== null,
     closeupRadius: radiusQuery(search),
-    mode: section ? 'section' : 'point',
+    mode: section ? 'section' : probe ? 'point' : 'overview',
     section,
     options: optionsQuery(search),
     open: openQuery(search),
@@ -289,7 +294,11 @@ export const useMapStore = create<MapState>()((set) => ({
   setMode: (m) =>
     set((s) => {
       if (m === s.mode) return {};
-      // 切り替えのたびに、カーソルに付いてくる一時的な表示は消す。固定した探針と、断面の線は残す。
+      // 「全体」へ戻るときは、固定した探針も、断面の線と置きかけの始点も消す。
+      if (m === 'overview') {
+        return { mode: m, probe: null, probePinned: false, section: null, sectionStart: null, sectionCursor: null, sectionHover: null, sectionFocus: null };
+      }
+      // 「地点」と「断面」の行き来では、カーソルに付いてくる一時的な表示は消す。固定した探針と、断面の線は残す。
       return { mode: m, sectionCursor: null, sectionHover: null, sectionFocus: null, ...(m === 'section' && !s.probePinned ? { probe: null } : {}) };
     }),
   setSection: (line) => set({ section: line }),

@@ -52,15 +52,6 @@
   color: #ffb000;
 }
 
-.ic-release {
-  flex: none;
-  margin-left: auto;
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  font-size: 11px;
-}
-
 .ic-coords {
   font-size: 11px;
   color: #8a9;

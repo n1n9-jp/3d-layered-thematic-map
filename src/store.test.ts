@@ -44,18 +44,19 @@ describe('initialStateFromQuery', () => {
 });
 
 describe('section クエリ', () => {
-  it('線があれば「断面」で開く。なければ「地点」', () => {
+  it('線があれば「断面」で開く。probe だけなら「地点」、どちらもなければ「全体」', () => {
     const s = initialStateFromQuery('?section=-15000,-2000,14000,-2000');
     expect(s.mode).toBe('section');
     expect(s.section).toEqual({ ax: -15000, ay: -2000, bx: 14000, by: -2000 });
     const d = initialStateFromQuery('');
-    expect(d.mode).toBe('point');
+    expect(d.mode).toBe('overview');
     expect(d.section).toBeNull();
+    expect(initialStateFromQuery('?probe=100,200').mode).toBe('point');
   });
-  it('不正な値は無視して「地点」', () => {
+  it('不正な値は無視して「全体」', () => {
     for (const q of ['?section=1,2,3', '?section=a,b,c,d', '?section=0,0,10,10']) {
       const s = initialStateFromQuery(q);
-      expect(s.mode).toBe('point');
+      expect(s.mode).toBe('overview');
       expect(s.section).toBeNull();
     }
   });
@@ -69,6 +70,20 @@ describe('section クエリ', () => {
 });
 
 describe('モードの切り替え', () => {
+  it('「全体」を選ぶと、固定した探針も断面の線も置きかけの始点も消える', () => {
+    const st = useMapStore;
+    st.setState({ mode: 'section', section: { ax: 0, ay: 0, bx: 1000, by: 0 }, sectionStart: { x: 5, y: 6 }, probe: { x: 1, y: 2 }, probePinned: true, sectionHover: 500, sectionCursor: { x: 3, y: 4 } });
+    st.getState().setMode('overview');
+    expect(st.getState()).toMatchObject({ mode: 'overview', probe: null, probePinned: false, section: null, sectionStart: null, sectionHover: null, sectionCursor: null });
+  });
+  it('「全体」から「地点」「断面」へ切り替えても、何も固定されていない', () => {
+    const st = useMapStore;
+    st.setState({ ...initialStateFromQuery('') });
+    st.getState().setMode('point');
+    expect(st.getState()).toMatchObject({ mode: 'point', probe: null, probePinned: false });
+    st.getState().setMode('section');
+    expect(st.getState()).toMatchObject({ mode: 'section', section: null });
+  });
   it('切り替えても、線と固定した探針は消えない。カーソルに付いてくる表示は消える', () => {
     const st = useMapStore;
     st.setState({ mode: 'point', section: { ax: 0, ay: 0, bx: 1000, by: 0 }, probe: { x: 1, y: 2 }, probePinned: true, sectionHover: 500, sectionCursor: { x: 3, y: 4 } });
@@ -157,11 +172,12 @@ describe('radiusQuery', () => {
 describe('開閉（アコーディオン）', () => {
   it('既定はすべて閉じている', () => {
     expect(initialStateFromQuery('').open).toEqual(CLOSED);
-    expect(CLOSED).toEqual({ layer: null, table: false, notes: false, row: null, section: false });
+    expect(CLOSED).toEqual({ layer: null, table: false, notes: false, row: null, section: false, guide: false });
   });
-  it('open クエリ：レイヤーID、table、notes、row:<ID>、section。合わないものは無視する', () => {
+  it('open クエリ：レイヤーID、table、notes、row:<ID>、section、guide。合わないものは無視する', () => {
     expect(openQuery('?open=shelters')).toEqual({ ...CLOSED, layer: 'shelters' });
-    expect(openQuery('?open=table,notes,section')).toEqual({ ...CLOSED, table: true, notes: true, section: true });
+    expect(openQuery('?open=table,notes,section')).toEqual({ ...CLOSED, table: true, notes: true, section: true, guide: false });
+    expect(openQuery('?open=guide')).toEqual({ ...CLOSED, guide: true });
     expect(openQuery('?open=row:transit')).toEqual({ ...CLOSED, row: 'transit' });
     expect(openQuery('?open=flood,shelters')).toEqual({ ...CLOSED, layer: 'flood' });
     expect(openQuery('?open=row:nope,nope,')).toEqual(CLOSED);

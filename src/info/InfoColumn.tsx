@@ -5,13 +5,12 @@ import { CloseupStack, RadiusButtons, useCloseupCut } from '../closeup/Closeup';
 import type { CloseupCircle } from '../closeup/closeupModel';
 import type { CloseupCut } from '../closeup/cut';
 import { registry } from '../layers';
-import { installProbeKeys, releaseProbe } from '../probe/controller';
-import { releaseSection } from '../section/controller';
-import { installSectionKeys } from '../section/controller';
+import { installProbeKeys } from '../probe/controller';
 import SectionBody from '../section/SectionPanel';
 import { cachedDistrictLookup } from '../probe/district';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
+import type { UiMode } from '../store';
 import type { BoundaryData, ProbeValue } from '../types';
 import { RIGHT_PANEL_W } from '../view/layout';
 import { useElementSize } from '../view/useElementSize';
@@ -209,49 +208,45 @@ function PinnedBody({ p }: { p: Point }) {
   );
 }
 
-/** 「地点」（探針とクローズアップ）と「断面」（2点の線に沿った変化）の切り替え。どちらの状態も、切り替えても消さずに保持する。 */
+const MODES: { id: UiMode; label: string }[] = [
+  { id: 'overview', label: '全体' },
+  { id: 'point', label: '地点' },
+  { id: 'section', label: '断面' },
+];
+
+/**
+ * 「全体」（23区全体のまとめ）、「地点」（探針とクローズアップ）、「断面」（2点の線に沿った変化）の切り替え。
+ * 「地点」と「断面」の行き来では、固定した地点も引いた線も保持する。「全体」を選ぶと、どちらも消える。
+ */
 function ModeBar() {
   const mode = useMapStore((s) => s.mode);
   const setMode = useMapStore((s) => s.setMode);
-  const pinned = useMapStore((s) => s.probePinned);
-  const hasSection = useMapStore((s) => s.section !== null || s.sectionStart !== null);
-  // いまの読み方で選んでいるもの（固定した地点、引いた線）を消す。読み方の切り替えと同じ並びの右端に置く。
-  const clear = mode === 'section' ? (hasSection ? releaseSection : null) : pinned ? releaseProbe : null;
   return (
     <div className="ic-modes" data-testid="mode-bar">
       <span className="ic-modes-label">読み方</span>
       <div className="ic-seg" role="group" aria-label="読み方">
-        <button type="button" aria-pressed={mode === 'point'} data-testid="mode-point" onClick={() => setMode('point')}>
-          地点
-        </button>
-        <button type="button" aria-pressed={mode === 'section'} data-testid="mode-section" onClick={() => setMode('section')}>
-          断面
-        </button>
-      </div>
-      {clear && (
-        <span className="ic-release">
-          <span className="ic-dim">Esc か</span>
-          <button type="button" className="ic-btn" onClick={clear} data-testid={mode === 'section' ? 'section-clear' : 'probe-clear'}>
-            消す
+        {MODES.map((m) => (
+          <button key={m.id} type="button" aria-pressed={mode === m.id} data-testid={`mode-${m.id}`} onClick={() => setMode(m.id)}>
+            {m.label}
           </button>
-        </span>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
 
 /**
  * 「選んだ地点の情報」の列。全体の地図の右隣（右上のパネルの左）に、中身の有無にかかわらず常に同じ幅で置く。
- * 探針がなければ23区全体の集計、カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表。
+ * 「全体」は23区全体の集計。「地点」は、地点がなければ手がかりの1行、カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表。
+ * 「断面」は線を引く手がかり、または線に沿ったグラフ。
  */
 export default function InfoColumn({ width }: { width: number }) {
   useEffect(() => installProbeKeys(), []);
-  useEffect(() => installSectionKeys(), []);
   const uiMode = useMapStore((s) => s.mode);
   const probe = useMapStore((s) => s.probe);
   const pinned = useMapStore((s) => s.probePinned);
-  // 「断面」のあいだは、探針（固定を含む）は列に出さない（保持はしている）。
-  const mode = uiMode === 'section' ? 'section' : columnMode(probe, pinned);
+  // 列の中身。「全体」「断面」のときは、探針（固定を含む）の有無にかかわらずそれぞれの中身を出す。
+  const mode = uiMode === 'point' ? columnMode(probe, pinned) : uiMode;
   return (
     <section
       className="ic"
@@ -263,9 +258,13 @@ export default function InfoColumn({ width }: { width: number }) {
       <ModeBar />
       {mode === 'section' ? (
         <SectionBody />
-      ) : mode === 'empty' || probe === null ? (
+      ) : mode === 'overview' ? (
         <div className="ic-scroll ic-scroll-solo ic-overall" data-testid="overall-scroll">
           <Overall />
+        </div>
+      ) : mode === 'empty' || probe === null ? (
+        <div className="ic-hint" data-testid="point-hint">
+          地図をクリックして地点を選ぶ
         </div>
       ) : mode === 'hover' ? (
         <HoverBody p={probe} />

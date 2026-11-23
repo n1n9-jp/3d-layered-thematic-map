@@ -70,11 +70,11 @@ export function onClick(info: PickingInfo): void {
   }
 }
 
-/** Esc キーで固定を解除する（「地点」のときだけ。「断面」の Esc は線を消す操作で、保持している固定は残す）。解除関数を返す。 */
+/** Esc キーで「全体」へ戻る（固定した探針や断面の線も消える）。解除関数を返す。 */
 export function installProbeKeys(target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): () => void {
   const handler = (e: Event) => {
     const s = useMapStore.getState();
-    if ((e as KeyboardEvent).key === 'Escape' && s.mode === 'point' && s.probePinned) releaseProbe();
+    if ((e as KeyboardEvent).key === 'Escape' && s.mode !== 'overview') s.setMode('overview');
   };
   target.addEventListener('keydown', handler);
   return () => target.removeEventListener('keydown', handler);

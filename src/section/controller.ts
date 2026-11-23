@@ -103,14 +103,3 @@ export function releaseSection(): void {
   s.setSectionHover(null);
   s.setSectionFocus(null);
 }
-
-/** 「断面」のとき、Esc で線を消す。解除関数を返す。 */
-export function installSectionKeys(target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): () => void {
-  const handler = (e: Event) => {
-    if ((e as KeyboardEvent).key !== 'Escape') return;
-    const s = useMapStore.getState();
-    if (s.mode === 'section' && (s.section || s.sectionStart)) releaseSection();
-  };
-  target.addEventListener('keydown', handler);
-  return () => target.removeEventListener('keydown', handler);
-}

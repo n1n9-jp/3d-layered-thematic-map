@@ -490,6 +490,8 @@ export default function SectionBody() {
   const spacing = useMapStore((s) => s.spacing);
   const status = useMapStore((s) => s.status);
   const focus = useMapStore((s) => s.sectionFocus);
+  const guideOpen = useMapStore((s) => s.open.guide);
+  const toggleOpen = useMapStore((s) => s.toggleOpen);
   const [stageRef, stage] = useElementBox<HTMLDivElement>();
   const width = stage.width;
   const ts = useTierScreen();
@@ -516,18 +518,27 @@ export default function SectionBody() {
           </>
         ) : (
           <>
-            <p>全体の地図の平面を1回クリックすると始点（A）、もう1回クリックすると終点（B）が決まります。</p>
-            <p>2点を結ぶ線で全レイヤーを縦に切り、線に沿った変化を、地図の中に立てたグラフと、ここの平らなグラフで見比べられます。</p>
-            <p>線を引いたあとは、両端の印か線をドラッグして動かせます。端点の外をクリックすると引き直し、Esc で消します。</p>
+            <p>地図の上で2点をクリックして線を引く</p>
             <div className="sc-examples" data-testid="section-examples">
-              <p className="sc-examples-title">まず、例の線をクリックして見る</p>
               {EXAMPLE_LINES.map((e) => (
                 <button key={e.id} type="button" className="sc-example" data-testid="section-example" data-example={e.id} onClick={() => placeSection(e.line)}>
-                  <b>{e.title}</b>
-                  <span>{e.note}</span>
+                  {e.title}
                 </button>
               ))}
             </div>
+            <Disclosure id="section-guide" testId="section-guide" open={guideOpen} onToggle={() => toggleOpen('guide')} title="線の引き方と、例の線について">
+              <p>全体の地図の平面を1回クリックすると始点（A）、もう1回クリックすると終点（B）が決まります。</p>
+              <p>2点を結ぶ線で全レイヤーを縦に切り、線に沿った変化を、地図の中に立てたグラフと、ここの平らなグラフで見比べられます。</p>
+              <p>線を引いたあとは、両端の印か線をドラッグして動かせます。端点の外をクリックすると引き直せます。右の「全体」を選ぶか Esc を押すと、線が消えて全体に戻ります。</p>
+              <dl className="sc-example-notes" data-testid="section-example-notes">
+                {EXAMPLE_LINES.map((e) => (
+                  <div key={e.id}>
+                    <dt>{e.title}</dt>
+                    <dd>{e.note}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Disclosure>
           </>
         )}
       </div>

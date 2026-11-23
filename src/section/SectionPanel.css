@@ -141,7 +141,7 @@
   display: block;
 }
 
-/* 「地点」「断面」の切り替え。 */
+/* 「全体」「地点」「断面」の切り替え。 */
 .ic-modes {
   flex: none;
   display: flex;
@@ -215,20 +215,13 @@
   color: #fff;
 }
 
-/* 例の線のボタン（線を引く操作がわからない人のための入口）。 */
+/* 例の線のボタン（線を引く操作がわからない人のための入口）。名前だけ。説明は、開閉する見出しの中。 */
 .sc-examples {
-  margin-top: 10px;
+  margin: 4px 0 10px;
   display: grid;
   gap: 6px;
 }
-.sc-examples-title {
-  margin: 0 !important;
-  font-weight: 600;
-  color: #cfe3f5;
-}
 .sc-example {
-  display: grid;
-  gap: 2px;
   text-align: left;
   padding: 6px 8px;
   font: 12px/1.4 sans-serif;
@@ -245,10 +238,17 @@
   outline: 2px solid #5ab4ff;
   outline-offset: 1px;
 }
-.sc-example b {
-  color: #ffd27a;
+.sc-example-notes {
+  margin: 0;
+  display: grid;
+  gap: 6px;
 }
-.sc-example span {
+.sc-example-notes dt {
+  color: #ffd27a;
+  font-weight: 600;
+}
+.sc-example-notes dd {
+  margin: 0;
   color: #aab;
   font-size: 11px;
 }

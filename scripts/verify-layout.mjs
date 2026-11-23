@@ -3,8 +3,8 @@
 //   node scripts/verify-layout.mjs [--url http://127.0.0.1:5173/] [--sizes 1400x1000,2000x1100,1000x700]
 // --url がなければ Vite を起動する。確認すること：
 //   1. 固定前・カーソルを置いた状態・固定後・解除後で、viewState の zoom と target が一致する（URL で固定して開いた場合も同じ）
-//   2. 右の列の中身が状態に応じて変わる（手がかり／区名と「この地点」／クローズアップと3列の表）
-//   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「消す」ボタンでの解除が動く
+//   2. 右の列の中身が状態に応じて変わる（23区全体のまとめ／手がかり／区名と「この地点」／クローズアップと3列の表）
+//   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「全体」の選択での解除が動く
 //   4. 「断面」（URL の section= で開く）でも、全体の地図の大きさと位置が変わらない。線を消す・「地点」へ戻す・「断面」へ戻すでも同じ
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。描画が遅い環境（1フレーム約2秒）を見込んで、待ちは長めにとる。
 import { createRequire } from 'node:module';
@@ -122,8 +122,26 @@ async function viewConsistency(browser, base, size) {
   console.log(`\n[${size}] 固定前・カーソルを置いた状態・固定後・解除後の視点`);
   const { ctx, page, errors } = await open(browser, base, size);
   const v0 = (await getState(page)).view;
-  check((await mode(page)) === 'empty', `固定前：列は23区全体の集計（mode=empty）。${fmt(v0)}`);
-  check((await page.isVisible('[data-testid=overall]')) && (await page.locator('[data-testid=info-hint]').count()) === 0, '固定前：23区全体の集計が見え、操作の説明文は出ていない');
+  check((await mode(page)) === 'overview' && (await page.getAttribute('[data-testid=mode-overview]', 'aria-pressed')) === 'true', `開いた直後：「全体」が選ばれ、列は23区全体のまとめ（mode=overview）。${fmt(v0)}`);
+  check((await page.isVisible('[data-testid=overall]')) && (await page.locator('[data-testid=info-hint]').count()) === 0, '開いた直後：23区全体の集計が見え、操作の説明文は出ていない');
+
+  // 「全体」では、カーソルを置いても探針は出ず、クリックしても固定されない
+  const [ox, oy] = await topPlanePoint(page);
+  await page.mouse.move(ox, oy);
+  await page.mouse.move(ox + 1, oy + 1);
+  await page.mouse.move(ox, oy);
+  await settle(page, 800);
+  await page.mouse.click(ox, oy);
+  await settle(page, 800);
+  const so = await getState(page);
+  check(so.probe === null && !so.pinned && (await mode(page)) === 'overview', '「全体」：カーソルを置いても探針は出ず、クリックしても固定されない');
+  check(sameView(v0, so.view), '「全体」で操作しても、視点は変わらない');
+
+  // 「地点」を選ぶと、手がかりの1行だけが出る
+  await page.getByTestId('mode-point').click();
+  await settle(page, 800);
+  check((await mode(page)) === 'empty' && (await page.textContent('[data-testid=point-hint]')) === '地図をクリックして地点を選ぶ', '「地点」を選んだ直後：列は手がかりの1行だけ（23区全体のまとめは出ない）');
+  check((await page.locator('[data-testid=overall]').count()) === 0, '「地点」を選んだ直後：23区全体のまとめは出ていない');
 
   const [hx, hy] = await topPlanePoint(page);
   await page.mouse.move(hx, hy);
@@ -169,7 +187,7 @@ async function viewConsistency(browser, base, size) {
   await settle(page, 1500);
   const s3 = await getState(page);
   check(sameView(v0, s3.view), `解除後の視点が固定前と一致。${fmt(s3.view)}`);
-  check(s3.probe === null && (await mode(page)) === 'empty', '解除後：探針が消え、列は23区全体の集計に戻る');
+  check(s3.probe === null && (await mode(page)) === 'overview' && (await page.isVisible('[data-testid=overall]')), '解除後：探針が消え、「全体」に戻って、列は23区全体の集計に戻る');
   check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
   await ctx.close();
 
@@ -198,7 +216,7 @@ async function viewConsistency(browser, base, size) {
   await o.page.getByTestId('mode-point').click();
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), '「地点」へ切り替えても、視点は同じ');
-  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は23区全体の集計（探針なし）');
+  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は手がかりの1行（探針なし）');
   await o.page.getByTestId('mode-section').click();
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), '「断面」へ戻しても、視点は同じ');
@@ -206,6 +224,7 @@ async function viewConsistency(browser, base, size) {
   await waitFor(o.page, () => window.__store.getState().section === null);
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), 'Esc で線を消しても、視点は同じ');
+  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'overview', 'Esc で、「全体」に戻る');
   check(o.errors.length === 0, `断面：ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
   const widths = [rect.w];
   check(widths[0] === (await o.page.evaluate(() => document.querySelector('[data-testid=info-column]').getBoundingClientRect().width)), '右の列の幅は、モードによらず一定');
@@ -278,9 +297,10 @@ async function interactions(browser, base, size) {
   await waitFor(page, () => !window.__store.getState().probePinned);
   await settle(page, 1500);
   const s4 = await getState(page);
-  check(s4.probe === null && (await mode(page)) === 'empty', 'Esc で解除できる');
+  check(s4.probe === null && (await mode(page)) === 'overview', 'Esc で解除でき、「全体」に戻る');
 
-  // 5. 「消す」ボタンで解除（もう一度固定してから）
+  // 5. 「全体」を選んで解除（「地点」を選んで、もう一度固定してから）
+  await page.getByTestId('mode-point').click();
   const [px, py] = await topPlanePoint(page);
   await page.mouse.move(px, py);
   await page.mouse.move(px + 1, py + 1);
@@ -290,11 +310,12 @@ async function interactions(browser, base, size) {
   await waitFor(page, () => window.__store.getState().probePinned);
   await settle(page, 2500);
   check((await mode(page)) === 'pinned', '再び固定できる');
-  await page.getByRole('button', { name: '消す', exact: true }).click();
+  check((await page.getByRole('button', { name: '消す', exact: true }).count()) === 0, '「消す」ボタンはない');
+  await page.getByTestId('mode-overview').click();
   await waitFor(page, () => !window.__store.getState().probePinned);
   await settle(page, 1000);
   const s5 = await getState(page);
-  check(s5.probe === null && (await mode(page)) === 'empty', '「消す」ボタンで解除できる');
+  check(s5.probe === null && (await mode(page)) === 'overview', '「全体」を選ぶと、固定が消えて「全体」に戻る');
   check(sameView(s0.view, s5.view), '解除後も視点は変わらない');
 
   // 6. 配置：列と右上のパネルが重ならず、列は画面の高さいっぱい

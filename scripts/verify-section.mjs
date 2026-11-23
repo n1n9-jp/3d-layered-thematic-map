@@ -7,7 +7,7 @@
 //   3. 線の外からのドラッグは視点の回転（線は変わらない）
 //   4. 右の列のグラフにカーソルを置くと、全体の地図の、線の上の対応する地点に、水色の垂直線が出る（画面の画素の色で突き合わせる）。
 //      逆に、全体の地図の線の上にカーソルを置くと、右のグラフの同じ位置に縦線が出る
-//   5. Esc で線が消える。「地点」へ切り替えても線と固定した探針は保持され、探針とクローズアップはこれまでどおり動く。URL の section= で開ける
+//   5. Esc で線が消えて「全体」に戻る。「地点」へ切り替えても線と固定した探針は保持され、探針とクローズアップはこれまでどおり動く。「全体」を選ぶと両方が消える。URL の section= で開ける
 //   6. 全体の地図の大きさと位置（viewState の zoom と target）が、断面の有無・モードで変わらない
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。
 import { createRequire } from 'node:module';
@@ -127,7 +127,7 @@ async function run(browser, base) {
   const P = await projector(page);
   const zTop = 4 * P.spacing;
   const zMid = 2 * P.spacing;
-  check((await state(page)).mode === 'point', '開いたときは「地点」');
+  check((await state(page)).mode === 'overview' && (await page.getByTestId('mode-overview').getAttribute('aria-pressed')) === 'true', '開いたときは「全体」');
   await page.getByTestId('mode-section').click();
   await waitFor(page, () => window.__store.getState().mode === 'section');
   check(await page.isVisible('[data-testid=section-hint]'), '「断面」に切り替えると、操作の手がかりが出る');
@@ -270,10 +270,13 @@ async function run(browser, base) {
   await page.keyboard.press('Escape');
   await waitFor(page, () => window.__store.getState().section === null);
   await settle(page, 800);
-  check(await page.isVisible('[data-testid=section-hint]'), 'Esc で線が消え、手がかりに戻る');
+  s = await state(page);
+  check(s.mode === 'overview' && s.line === null && (await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'overview', 'Esc で線が消え、「全体」に戻る');
   check((await chartCount(page)) === 0, 'グラフも消える');
 
-  // もう一度、線を引き、固定した探針を置いてから往復する。
+  // 「断面」を選び直し、もう一度、線を引き、固定した探針を置いてから往復する。
+  await page.getByTestId('mode-section').click();
+  await waitFor(page, () => window.__store.getState().mode === 'section');
   const P3 = await projector(page);
   const [cx1, cy1] = P3.at(-6000, 2000, zTop);
   const [cx2, cy2] = P3.at(5000, -2000, zTop);
@@ -289,7 +292,7 @@ async function run(browser, base) {
   await settle(page, 1000);
   s = await state(page);
   check(JSON.stringify(s.line) === JSON.stringify(lineKeep), '「地点」へ切り替えても、線は消さずに保持する');
-  check((await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」：右の列は23区全体の集計（探針なし）');
+  check((await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」：右の列は手がかりの1行（探針なし。23区全体のまとめは出ない）');
   const [hx, hy] = P3.at(1000, 1000, zTop);
   await page.mouse.move(hx, hy);
   await page.mouse.move(hx + 1, hy + 1);
@@ -307,15 +310,19 @@ async function run(browser, base) {
   s = await state(page);
   check(JSON.stringify(s.line) === JSON.stringify(lineKeep) && (await chartCount(page)) === 5, '「断面」へ戻すと、線とグラフが再び出る');
   check(s.pinned && JSON.stringify(s.probe) === JSON.stringify(pinned), '地点の固定は、「断面」のあいだも保持している');
-  // 「断面」の Esc は線を消す操作。保持している固定した探針は、解除しない。
-  await page.keyboard.press('Escape');
-  await waitFor(page, () => window.__store.getState().section === null);
-  s = await state(page);
-  check(s.pinned && s.probe !== null, '「断面」で Esc を押しても、保持している固定した探針は解除されない');
   await page.getByTestId('mode-point').click();
   await waitFor(page, () => window.__store.getState().mode === 'point');
   await settle(page, 1500);
   check((await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'pinned', '「地点」へ戻すと、固定した探針とクローズアップが残っている');
+  // 「全体」を選ぶと、固定した探針も、引いた線も消える。
+  await page.getByTestId('mode-overview').click();
+  await waitFor(page, () => window.__store.getState().mode === 'overview');
+  await settle(page, 800);
+  s = await state(page);
+  check(s.line === null && s.probe === null && !s.pinned && (await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'overview', '「全体」を選ぶと、線も固定した探針も消えて、23区全体のまとめに戻る');
+  await page.getByTestId('mode-section').click();
+  await waitFor(page, () => window.__store.getState().mode === 'section');
+  check((await chartCount(page)) === 0 && (await page.isVisible('[data-testid=section-hint]')), '「全体」へ戻したあとの「断面」は、線がなく、手がかりが出る');
   check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
   await ctx.close();
 
@@ -333,7 +340,7 @@ async function run(browser, base) {
   await o.ctx.close();
 
   const bad = await open(browser, base, '?data=fixture&section=1,2,3');
-  check((await state(bad.page)).mode === 'point', '不正な section= は無視して「地点」で開く');
+  check((await state(bad.page)).mode === 'overview', '不正な section= は無視して「全体」で開く');
   await bad.ctx.close();
 }
 
