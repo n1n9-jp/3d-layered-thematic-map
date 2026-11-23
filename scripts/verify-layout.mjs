@@ -134,7 +134,8 @@ async function viewConsistency(browser, base, size) {
   const s1 = await getState(page);
   check((await mode(page)) === 'hover' && !s1.pinned, 'カーソルを置いた：列は区名と「この地点」（mode=hover）');
   check(sameView(v0, s1.view), `カーソルを置いた状態の視点が固定前と一致。${fmt(s1.view)}`);
-  check((await page.locator('[data-testid=info-table] thead th').count()) === 2, 'カーソルを置いた：表は2列（レイヤー・この地点）');
+  check((await page.locator('[data-testid=info-row]').count()) === 5 && (await page.getAttribute('[data-testid=info-table]', 'data-columns')) === '1', 'カーソルを置いた：5レイヤーの行（この地点の値だけ）');
+  check((await page.locator('[data-testid=info-row-body]').count()) === 0, 'カーソルを置いた：行は、初期状態ではすべて閉じている');
   const c1 = await page.textContent('[data-testid=info-column] .ic-coords');
 
   await page.mouse.move(hx + 30, hy + 20);
@@ -149,11 +150,19 @@ async function viewConsistency(browser, base, size) {
   const s2 = await getState(page);
   check((await mode(page)) === 'pinned', '固定後：列はクローズアップと表（mode=pinned）');
   check(sameView(v0, s2.view), `固定後の視点が固定前と一致。${fmt(s2.view)}`);
-  check((await page.locator('[data-testid=info-table] thead th').count()) === 3, '固定後：表は3列（レイヤー・この地点・半径 ○ km 内）');
-  check((await page.textContent('[data-testid=info-area-title]')) === '半径 2 km 内', '固定後：表の見出しが「半径 2 km 内」');
+  check((await page.getAttribute('[data-testid=info-table]', 'data-columns')) === '2', '固定後：行を開くと、この地点の値と、半径 ○ km 内の集計が出る（data-columns=2）');
+  check((await page.locator('[data-testid=info-row-body]').count()) === 0, '固定後：行は、初期状態ではすべて閉じている');
   check(await page.isVisible('[data-testid=closeup]'), '固定後：クローズアップが見える');
-  const rows = await page.locator('[data-testid=info-table] tbody tr').count();
-  check(rows === 5, `固定後：表に5レイヤーの行がある（${rows}）`);
+  const rows = await page.locator('[data-testid=info-row]').count();
+  check(rows === 5, `固定後：5レイヤーの行がある（${rows}）`);
+  const mains = await page.$$eval('[data-testid=info-row-main]', (els) => els.map((e) => e.textContent.trim()));
+  check(mains.length === 5 && mains.every((t) => t.length > 0), `固定後：閉じた行に、この地点の主な値が1つずつ出る（${mains.join(' / ')}）`);
+  await page.click('[data-testid=info-row-toggle-population]');
+  check((await page.textContent('[data-testid=info-area-title]')) === '半径 2 km 内', '人口の行を開くと、「半径 2 km 内」の集計が出る');
+  await page.click('[data-testid=info-row-toggle-transit]');
+  check((await page.locator('[data-testid=info-row-body]').count()) === 1 && (await page.getAttribute('[data-testid=info-row-toggle-population]', 'aria-expanded')) === 'false', '別の行を開くと、開いていた行は閉じる（同時に開けるのは1つ）');
+  await page.click('[data-testid=info-row-toggle-transit]');
+  check((await page.locator('[data-testid=info-row-body]').count()) === 0, '開いている行をもう一度押すと閉じる');
 
   await page.keyboard.press('Escape');
   await waitFor(page, () => !window.__store.getState().probePinned);
@@ -252,6 +261,7 @@ async function interactions(browser, base, size) {
   check(sameView(s0.view, s2.view), 'クリック後も全体の地図の視点は変わらない');
 
   // 3. 半径の切り替え
+  await page.click('[data-testid=info-row-toggle-population]');
   const area = () => page.textContent('[data-testid=info-area-title]');
   await page.getByRole('button', { name: '5 km', exact: true }).click();
   await waitFor(page, () => window.__store.getState().closeupRadius === 5000);

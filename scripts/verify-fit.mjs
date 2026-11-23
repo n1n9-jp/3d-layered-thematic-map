@@ -156,10 +156,8 @@ function segHitsRect(a, b, r) {
 
 async function column(browser, base) {
   console.log('\n[column] 右の列：23区全体の集計');
-  for (const size of ['2000x1100', '1400x1000', '1000x700']) {
-    const o = await open(browser, base, '', size);
-    await sleep(1500);
-    const r = await o.page.evaluate(() => {
+  const measure = (page) =>
+    page.evaluate(() => {
       const q = (s) => document.querySelector(s);
       const rect = (s) => {
         const e = q(s);
@@ -177,28 +175,47 @@ async function column(browser, base) {
         scen: rect('[data-testid=overall-scenario]'),
         severe: rect('[data-testid=overall-severe]'),
         bignum: parseFloat(getComputedStyle(q('[data-testid=overall-severe]')).fontSize),
+        tableToggle: rect('[data-testid=overall-table-toggle]'),
         table: rect('[data-testid=overall-exposure]'),
         total: rect('[data-testid=overall-exposure-total]'),
         below: rect('[data-testid=overall-exposure-below]'),
         notes: rect('[data-testid=overall-notes-toggle]'),
         gone: ['.ov-scen-note', '.ov-pair', '.ov-card', '[data-testid=overall-flooded]', '[data-testid=overall-deep]', '[data-testid=overall-shelters]', '[data-testid=overall-below]', '[data-testid=disclaimer]', '[data-testid=info-hint]'].filter((s) => q(s)),
-        columnText: q('[data-testid=info-column]').textContent,
         bodyText: document.body.innerText,
       };
     });
+  for (const size of ['2000x1100', '1400x1000', '1000x700']) {
+    const o = await open(browser, base, '', size);
+    await sleep(1500);
+    // 初期状態（すべて閉じている）：見出し、想定のラベル、大きな数字と、表・注記の見出し（閉じたまま）だけ
+    let r = await measure(o.page);
     const inside = (b) => b && b.top >= r.scroll.top - 0.5 && b.bottom <= r.scroll.bottom + 0.5;
-    console.log(`      ${size}：列の表示範囲 ${Math.round(r.scroll.top)}〜${Math.round(r.scroll.bottom)}、合計の行 ${Math.round(r.total.top)}〜${Math.round(r.total.bottom)}、標高の行 ${Math.round(r.below.top)}〜${Math.round(r.below.bottom)}、scrollHeight ${r.scrollH} / 表示 ${r.clientH}、主な数字 ${r.bignum.toFixed(1)}px`);
+    console.log(`      ${size}（閉じた状態）：列の表示範囲 ${Math.round(r.scroll.top)}〜${Math.round(r.scroll.bottom)}、scrollHeight ${r.scrollH} / 表示 ${r.clientH}、主な数字 ${r.bignum.toFixed(1)}px`);
     check(r.scrollTop === 0, `${size}：スクロールしていない（scrollTop ${r.scrollTop}）`);
     check(r.overflowY === 'auto', `${size}：収まらないときは、列の中をスクロールできる（overflow-y: ${r.overflowY}）`);
     check(inside(r.severe), `${size}：主な数字（約242万人）が、スクロールなしで見える`);
-    check(r.scen.top < r.severe.top && r.severe.top < r.table.top, `${size}：上から、想定のラベル、大きな数字、表の順`);
+    check(r.table === null && r.total === null, `${size}：深さの区分ごとの人口の表は、既定では閉じていて、DOM にない`);
+    check(r.tableToggle !== null && r.notes !== null && r.tableToggle.top < r.notes.top, `${size}：表の見出しと、数え方の見出しが、この順で並ぶ`);
+    check(inside(r.tableToggle) && inside(r.notes), `${size}：2つの見出し（閉じたまま）が、スクロールなしで見える`);
+    check(r.scen.top < r.severe.top && r.severe.top < r.tableToggle.top, `${size}：上から、想定のラベル、大きな数字、表の見出しの順`);
+    check(r.scrollH <= r.clientH + 1, `${size}：閉じた状態は、スクロールなしで全部が収まる（scrollHeight ${r.scrollH} ≦ 表示 ${r.clientH}）`);
     check(r.gone.length === 0, `${size}：外した要素（説明文・カード・「5 区」・列の下の注意と操作の説明）が出ていない${r.gone.length ? `：${r.gone.join(' ')}` : ''}`);
+    const minBig = size === '2000x1100' ? 70 : 45;
+    check(r.bignum >= minBig, `${size}：主な数字が離れた席から読める大きさ（${r.bignum.toFixed(1)}px ≧ ${minBig}px）`);
+    const proto = r.bodyText.split('試作。避難の判断には使えません。').length - 1;
+    check(proto === 1, `${size}：「試作。避難の判断には使えません。」が画面に1回だけある（出典の欄。${proto} 回）`);
+    check(!/試作です/.test(r.bodyText), `${size}：「試作です。…」の注意文は、どこにも出ていない`);
+    // 表の見出しを押すと、表が開く（合計と標高 0m 未満の行まで）
+    await o.page.click('[data-testid=overall-table-toggle]');
+    await sleep(300);
+    r = await measure(o.page);
+    check(r.table !== null && r.total !== null && r.below !== null, `${size}：表の見出しを押すと、表（合計・標高 0m 未満の行まで）が開く`);
     if (size !== '1000x700') {
-      check(inside(r.table), `${size}：深さの区分ごとの表が、見出しから最後の行まで見える`);
+      check(inside(r.table), `${size}：開いた表が、見出しから最後の行まで見える`);
       check(inside(r.total), `${size}：表の「合計」の行が、列の表示範囲の中にある（下端まで ${(r.scroll.bottom - r.total.bottom).toFixed(1)}px）`);
       check(inside(r.below), `${size}：表の「標高 0m 未満の土地」の行（最後の行）も見える`);
       check(inside(r.notes), `${size}：「数え方とデータの注意」の開閉ボタンも見える`);
-      check(r.scrollH <= r.clientH + 1, `${size}：スクロールなしで全部が収まる（scrollHeight ${r.scrollH} ≦ 表示 ${r.clientH}）`);
+      check(r.scrollH <= r.clientH + 1, `${size}：表を開いても、スクロールなしで全部が収まる（scrollHeight ${r.scrollH} ≦ 表示 ${r.clientH}）`);
     } else {
       await o.page.evaluate(() => {
         const sc = document.querySelector('[data-testid=overall-scroll]');
@@ -212,11 +229,6 @@ async function column(browser, base) {
       });
       check(after, `${size}：（収まらなければ）いちばん下までスクロールすると、表の最後の行が見える`);
     }
-    const minBig = size === '2000x1100' ? 70 : 45;
-    check(r.bignum >= minBig, `${size}：主な数字が離れた席から読める大きさ（${r.bignum.toFixed(1)}px ≧ ${minBig}px）`);
-    const proto = r.bodyText.split('試作。避難の判断には使えません。').length - 1;
-    check(proto === 1, `${size}：「試作。避難の判断には使えません。」が画面に1回だけある（出典の欄。${proto} 回）`);
-    check(!/試作です/.test(r.bodyText), `${size}：「試作です。…」の注意文は、どこにも出ていない`);
     await o.page.click('[data-testid=overall-notes-toggle]');
     await sleep(200);
     const notes = await o.page.textContent('[data-testid=overall-notes-body]');
@@ -254,7 +266,8 @@ async function labels(browser, base, vertices) {
   for (const [name, size, query, needAll] of CASES) {
     if (only && !only.includes(`${size}:${name}`)) continue;
     const tag = `${size}・${name}`;
-    const o = await open(browser, base, query, size);
+    // 札は、避難の行を開いているあいだだけ出る
+    const o = await open(browser, base, [query, 'open=shelters'].filter(Boolean).join('&'), size);
     await settled(o.page);
     const info = await o.page.evaluate(() => {
       const s = window.__store.getState();
@@ -332,7 +345,7 @@ async function labels(browser, base, vertices) {
 
   // マウスの移動では置き場所を決め直さない。間隔を変えると決め直す
   console.log('\n      マウスの移動と間隔の変更');
-  const o = await open(browser, base, '', '1400x1000');
+  const o = await open(browser, base, 'open=shelters', '1400x1000');
   const n0 = await settled(o.page);
   const before = await o.page.evaluate(() => window.__wardLabels.placed.map((p) => [p.label.name, Math.round(p.rect.left), Math.round(p.rect.top)].join()).join('|'));
   for (const [x, y] of [[200, 300], [300, 420], [150, 600], [400, 500], [250, 200], [350, 700]]) {

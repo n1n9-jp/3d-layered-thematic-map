@@ -118,11 +118,11 @@ export interface SplitCell {
   rest: ProbeValue[];
 }
 
-/** 最後の「（…）」の中の、最後の「・」より後ろ。避難場所の「名前（区・洪水・距離）」から、「名前（距離）」を作る。 */
+/** 最後の「（…）」の中の、最後の「、」「・」より後ろ。避難場所の「名前（区・洪水・距離）」、最寄り駅の「駅名（路線、距離）」から、「名前（距離）」を作る。 */
 export function shorten(text: string): string | null {
   const m = /^(.*)（([^（）]*)）$/s.exec(text);
   if (!m) return null;
-  const last = m[2].split('・').at(-1);
+  const last = m[2].split('、').at(-1)?.split('・').at(-1);
   return last ? `${m[1]}（${last}）` : null;
 }
 
@@ -135,7 +135,7 @@ function depthRankOf(v: ProbeValue | undefined): number {
 
 /**
  * 「この地点」のマスから、閉じた行に出す主な値1つを選ぶ。
- * 標高＝標高、浸水＝深さ（想定が「大きいほう」なら、深いほう）、人口＝人口、公共交通＝最寄り駅、避難＝最寄りの避難場所の名前と距離。
+ * 標高＝標高、浸水＝深さ（想定が「大きいほう」なら、深いほう）、人口＝人口、公共交通＝最寄り駅、避難＝最寄りの避難場所の名前と距離、公共交通＝最寄り駅の名前と距離。
  */
 export function splitCell(id: LayerId, values: readonly ProbeValue[], layerLabel: string, floodScenario: LayerOptions['floodScenario']): SplitCell {
   if (values.length === 0) return { primary: null, rest: [] };
@@ -151,7 +151,7 @@ export function splitCell(id: LayerId, values: readonly ProbeValue[], layerLabel
   const v = values[index];
   let text = valueText(v);
   let complete = true;
-  if (id === 'shelters' && typeof v.value === 'string') {
+  if ((id === 'shelters' || id === 'transit') && typeof v.value === 'string') {
     const short = shorten(v.value);
     if (short) {
       text = short;

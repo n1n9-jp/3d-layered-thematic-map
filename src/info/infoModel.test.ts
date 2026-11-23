@@ -130,14 +130,14 @@ describe('表示用の文字列', () => {
 
 describe('splitCell（閉じた行の主な値）', () => {
   const v = (label: string, value: string | number | null, unit?: string) => ({ label, value, unit });
-  it('標高・人口・公共交通は、先頭の値が主な値で、残りは開いたときに出る', () => {
+  it('標高・人口・公共交通は、先頭の値が主な値で、残りは開いたときに出る（公共交通は駅名と距離。路線は開いたときに）', () => {
     expect(splitCell('elevation', [v('標高', 3.2, 'm')], '標高', 'max')).toEqual({ primary: { title: null, text: '3.2 m' }, rest: [] });
     const pop = splitCell('population', [v('人口', 1200, '人'), v('65歳以上', 300, '人'), v('人口密度', 9000, '人/km²')], '人口', 'max');
     expect(pop.primary).toEqual({ title: null, text: '1,200 人' });
     expect(pop.rest.map((x) => x.label)).toEqual(['65歳以上', '人口密度']);
     const tr = splitCell('transit', [v('最寄り駅', '東京駅（JR、120 m）'), v('通る路線', '山手線')], '公共交通', 'max');
-    expect(tr.primary).toEqual({ title: '最寄り駅', text: '東京駅（JR、120 m）' });
-    expect(tr.rest.map((x) => x.label)).toEqual(['通る路線']);
+    expect(tr.primary).toEqual({ title: '最寄り駅', text: '東京駅（120 m）' });
+    expect(tr.rest.map((x) => x.label)).toEqual(['最寄り駅', '通る路線']);
   });
   it('避難は、最寄りの避難場所の名前と距離。区・種別は開いたときに出す', () => {
     const c = splitCell('shelters', [v('最寄りの避難場所', '東京都庁（新宿区・洪水・高潮・350 m）'), v('最寄りの病院', '〇〇病院（1.2 km）')], '避難', 'max');

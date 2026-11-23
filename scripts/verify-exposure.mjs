@@ -160,6 +160,11 @@ const page = await (await browser.newContext({ viewport: { width: 1400, height: 
 const q = values.data.includes('fixture') ? '?data=fixture' : '';
 await page.goto(base + q);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 90000 });
+// 区分ごとの人口の表は、既定では閉じている。見出しを押すと開く（aria-expanded が変わる）
+check((await page.locator('[data-testid=overall-exposure]').count()) === 0, '区分ごとの人口の表は、既定では折りたたまれている');
+check((await page.getAttribute('[data-testid=overall-table-toggle]', 'aria-expanded')) === 'false', '表の見出しは aria-expanded=false');
+await page.click('[data-testid=overall-table-toggle]');
+check((await page.getAttribute('[data-testid=overall-table-toggle]', 'aria-expanded')) === 'true' && (await page.locator('[data-testid=overall-exposure]').count()) === 1, '表の見出しを押すと、表が開く');
 console.log('\n[画面の値と照合]');
 for (const sc of ['max', 'river', 'tide']) {
   await page.evaluate((s) => window.__store.getState().setOption('floodScenario', s), sc);

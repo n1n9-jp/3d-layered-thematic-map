@@ -77,10 +77,23 @@ async function open(query) {
   return { ctx, page };
 }
 const opts = (page) => page.evaluate(() => window.__store.getState().options);
-const legend = (page, id) => page.$$eval(`[data-testid=legend-${id}] li`, (els) => els.map((e) => e.textContent.trim()));
+// レイヤー一覧の行は、初期状態では閉じている。凡例と切り替えは、行の名前を押して開いてから読む・押す。
+const ensureOpen = async (page, id) => {
+  const toggle = page.locator(`[data-testid=layer-toggle-${id}]`);
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+};
+const legend = async (page, id) => {
+  await ensureOpen(page, id);
+  return page.$$eval(`[data-testid=legend-${id}] li`, (els) => els.map((e) => e.textContent.trim()));
+};
 const press = async (page, testid) => {
+  const m = /^opt-(floodScenario|floodView|populationView)-/.exec(testid);
+  if (m) await ensureOpen(page, m[1] === 'populationView' ? 'population' : 'flood');
   await page.click(`[data-testid="${testid}"]`);
   await sleep(400);
+};
+const openTable = async (page) => {
+  if ((await page.getAttribute('[data-testid=overall-table-toggle]', 'aria-expanded')) !== 'true') await page.click('[data-testid=overall-table-toggle]');
 };
 
 /* 1〜3. 切り替え */
@@ -89,6 +102,7 @@ const press = async (page, testid) => {
   console.log('\n[1] 浸水の想定と見るもの');
   check(JSON.stringify(await opts(page)) === JSON.stringify({ floodScenario: 'max', floodView: 'depth', populationView: 'total' }), '既定：大きいほう・深さ・総人口');
   check((await legend(page, 'flood')).length === 7, `深さの凡例：6段 + 浸水なし（${(await legend(page, 'flood')).length}）`);
+  await openTable(page);
   check((await page.getAttribute('[data-testid=overall-exposure]', 'data-scenario')) === 'max', '23区全体の表：想定は大きいほう');
   await press(page, 'opt-floodScenario-river');
   check((await opts(page)).floodScenario === 'river', '「洪水」で、store の想定が river');
@@ -124,10 +138,11 @@ const press = async (page, testid) => {
 
 /* 探針：切り替えにかかわらず4つの値 */
 {
-  const { ctx, page } = await open('probe=10706,2969&flood=river&floodview=duration');
-  console.log('\n[probe] 江戸川区役所（洪水・継続時間で開いても、4つの値が読める）');
+  const { ctx, page } = await open('probe=10706,2969&flood=river&floodview=duration&open=row:flood');
+  console.log('\n[probe] 江戸川区役所（洪水・継続時間で開いても、4つの値が読める。行を開くと残りの値が出る）');
   const text = await page.textContent('[data-layer=flood]');
   for (const [k, v] of [['洪水の深さ', '3〜5m'], ['高潮の深さ', '3〜5m'], ['洪水の継続', '2週間〜4週間'], ['高潮の継続', '1週間以上（上限なし）']]) check(text.includes(k) && text.includes(v), `${k}：${v}`);
+  await page.click('[data-testid=info-row-toggle-shelters]');
   const sh = await page.textContent('[data-layer=shelters]');
   check(sh.includes('最寄りの避難場所') && sh.includes('最寄りの病院'), '避難：最寄りの避難場所と病院が出る');
   check(sh.includes('江戸川区は指定なし') && sh.includes('洪水・高潮用の指定が 0 件') && !sh.includes('浸水が深い'), '避難：江戸川区は指定なし（洪水・高潮用が 0 件）と出て、浸水の深さには触れない');
@@ -146,6 +161,8 @@ const press = async (page, testid) => {
   check(line && line.ax === -4471 && line.ay === 1066 && line.bx === 10706 && line.by === 2969, `1つ目のボタンで線が引かれる（${JSON.stringify(line)}）`);
   check((await page.locator('[data-testid=section-chart]').count()) === 5, '右の列にグラフが5つ');
   check((await page.locator('[data-testid=section-examples]').count()) === 0, '線を引いたあとは、例の線のボタンは出ない');
+  check((await page.locator('[data-testid=section-headline]').count()) === 0, '線に沿った集計は、既定では折りたたまれている');
+  await page.click('[data-testid=section-summary-acc-toggle]');
   const head = await page.getAttribute('[data-testid=section-headline]', 'data-severe-m');
   check(Number(head) > 4500 && Number(head) < 6500, `浸水 3m 以上の区間の長さが出る（${head} m）`);
   const gaps = await page.locator('[data-testid=section-gap][data-kind=unpublished]').count();
@@ -166,9 +183,11 @@ const press = async (page, testid) => {
   const { ctx, page } = await open('probe=5811,1810&radius=2000');
   console.log('\n[5] 錦糸町（墨田区）のクローズアップ');
   check((await page.textContent('[data-testid=info-district]')) === '墨田区', '区名は墨田区');
+  await page.click('[data-testid=info-row-toggle-shelters]');
   const t = await page.textContent('[data-testid=info-table]');
   check(t.includes('未公開の区') && t.includes('墨田区'), '表に、未公開の区が出る');
   check(t.includes('この区のデータ') && t.includes('墨田区は未公開') && !t.includes('浸水が深い'), '「この地点」に、この区が未公開であることが出る（浸水の深さには触れない）');
+  await page.click('[data-testid=info-row-toggle-flood]');
   const ex = await page.locator('[data-testid=closeup-exposure-row]').count();
   check(ex === 7, `円の中の「浸水が想定される区域に住む人」の表が出る（${ex} 行）`);
   await ctx.close();

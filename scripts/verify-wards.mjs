@@ -111,10 +111,18 @@ const screen = await page.evaluate(() => {
     frame: d.frame.length,
     hatch: d.hatch.length,
     gapPolygons: d.gapPolygons.length,
-    placed: window.__wardLabels ? window.__wardLabels.placed.map((p) => ({ name: p.label.name, kind: p.label.kind })) : null,
-    omitted: window.__wardLabels ? window.__wardLabels.omitted : null,
   };
 });
+// 札は、初期状態（レイヤー一覧の行がすべて閉じている）では出さない。避難の行を開いているあいだだけ出す。区の枠と網掛けは、データとして常にある
+check((await page.evaluate(() => window.__wardLabels ?? null)) === null, '初期表示（すべて閉じた状態）では、区名の札を出さない');
+await page.click('[data-testid=layer-toggle-shelters]');
+await sleep(1200);
+const placedNow = () =>
+  page.evaluate(() => ({
+    placed: window.__wardLabels ? window.__wardLabels.placed.map((p) => ({ name: p.label.name, kind: p.label.kind })) : null,
+    omitted: window.__wardLabels ? window.__wardLabels.omitted : null,
+  }));
+Object.assign(screen, await placedNow());
 check(screen.wards.length === rows.length, `区の数 ${rows.length}（画面 ${screen.wards.length}）`);
 for (const r of rows) {
   const s = screen.wards.find((w) => w.name === r.name);
@@ -131,12 +139,16 @@ for (const e of expectLabels) {
   const l = screen.labels.find((x) => x.name === e.name);
   check(!!l && l.text === e.text && l.kind === e.kind, `${e.name}：札「${e.text.replace('\n', '／')}」（画面 ${l ? l.text.replace('\n', '／') : 'なし'}）`);
 }
-check(screen.placed !== null && screen.placed.length === 8 && screen.omitted.length === 0, `1400×1000 の初期表示で、8枚の札がすべて地図に出ている（${screen.placed?.length} 枚、出さなかった区 ${screen.omitted?.join('・') || 'なし'}）`);
+check(screen.placed !== null && screen.placed.length === 8 && screen.omitted.length === 0, `1400×1000 で避難の行を開くと、8枚の札がすべて地図に出ている（${screen.placed?.length} 枚、出さなかった区 ${screen.omitted?.join('・') || 'なし'}）`);
 check(screen.frame > 0 && screen.hatch > 0 && screen.gapPolygons > 0, `指定なしの区の枠（${screen.frame} 本）と、未公開の区の網掛け（${screen.hatch} 本）の両方がある`);
 // 凡例（避難の段）
 const legend = await page.$$eval('[data-testid=legend-shelters] li', (els) => els.map((e) => e.textContent.trim()));
 const want = ['洪水・高潮で使える避難場所', 'それ以外の避難場所', '病院', '指定なし：洪水・高潮用の指定が 0 件の区', '未公開：データに載っていない区（ないとは限らない）'];
 check(legend.length === want.length && want.every((w, i) => legend[i] === w), `凡例は5行（${legend.join(' / ')}）`);
+// 別の行を開くと、避難の行は閉じ、札も消える
+await page.click('[data-testid=layer-toggle-flood]');
+await sleep(800);
+check((await page.getAttribute('[data-testid=layer-toggle-shelters]', 'aria-expanded')) === 'false' && (await placedNow()).placed === null, '別のレイヤーの行を開くと、避難の行が閉じて、札が消える');
 // 折りたたみの注記：指定なしと未公開が区別して読める
 await page.click('[data-testid=overall-notes-toggle]');
 const notes = await page.textContent('[data-testid=overall-notes-body]');
