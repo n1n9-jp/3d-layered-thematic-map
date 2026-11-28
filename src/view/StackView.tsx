@@ -27,6 +27,9 @@ import type { Size } from './camera';
 import { circleLayer } from '../closeup/closeupLayers';
 import { stackLabelLayers, stackLabelRects } from './labelLayers';
 import { layoutWardLabels, wardLabelLayers } from './wardLabels';
+import { layoutRiverLabels, riverLabelLayers } from './riverLabels';
+import { RIVER_TIERS, riverLayers } from '../layers/rivers';
+import type { RiverData } from '../layers/rivers';
 import { wardLabelsOf } from '../layers/shelters/model';
 import type { ShelterData } from '../layers/shelters/model';
 import { topOf, withHeight } from './layerHeights';
@@ -389,6 +392,32 @@ export default function StackView({ columnWidth }: Props) {
     window.__wardLabels = wardLayout;
   }, [wardLayout]);
 
+  // 川の名前の札（幹となる川）。レイヤー一覧で「標高」か「浸水」の行を開いているあいだだけ、その段に出す。置き場所は、同じく視点・画面の大きさ・段の高さが変わったときだけ決め直す。
+  const riverData = status.rivers === 'ready' ? (data.rivers as RiverData) : null;
+  const openLayer = useMapStore((s) => s.open.layer);
+  const riverLabelTier = openLayer !== null && RIVER_TIERS.includes(openLayer) ? openLayer : null;
+  const riverLabelZ = visibleIds.find((t) => t.id === riverLabelTier)?.z ?? null;
+  const riverLayout = useMemo(() => {
+    if (!riverData || riverLabelTier === null || riverLabelZ === null || !size) return null;
+    const tiers = tiersKey.split(',').map((s) => {
+      const [id, z] = s.split(':');
+      return { id: id as LayerId, z: Number(z) };
+    });
+    return layoutRiverLabels({
+      anchors: riverData.anchors.filter((a) => a.trunk),
+      viewState,
+      size,
+      z: riverLabelZ,
+      otherZs: tiers.filter((t) => t.id !== riverLabelTier).map((t) => t.z),
+      columnWidth,
+      layerNameRects: stackLabelRects({ tiers, viewState, size }),
+    });
+  }, [riverData, riverLabelTier, riverLabelZ, size, tiersKey, viewState, columnWidth]);
+  const riverLabelLayerList = useMemo(() => (riverLayout ? riverLabelLayers(riverLayout) : []), [riverLayout]);
+  useEffect(() => {
+    window.__riverLabels = riverLayout;
+  }, [riverLayout]);
+
   for (const [k, { id, z }] of visibleIds.entries()) {
     // この段のレイヤー（平面、データ、区境界線、立てるグラフ、切り口の線）。別の段が目立たせられているときは、まとめて暗くする。
     const group: Layer[] = [];
@@ -425,6 +454,12 @@ export default function StackView({ columnWidth }: Props) {
     const next = visibleIds[k + 1];
     const topOfGroup = !(next && Math.abs(next.z - z) <= 1);
     if (paths && topOfGroup) group.push(boundaryLayer(paths, id, z));
+    // 川：標高と浸水の段に重ねる（区境界線より上）。同じ高さに重なる段のうち、いちばん上の川の段にだけ描く。
+    if (riverData && RIVER_TIERS.includes(id)) {
+      const upperRiver = visibleIds.slice(k + 1).some((t) => Math.abs(t.z - z) <= 1 && RIVER_TIERS.includes(t.id));
+      if (!upperRiver) group.push(...riverLayers(riverData, id, z));
+      if (id === riverLabelTier) group.push(...riverLabelLayerList);
+    }
     if (id === 'shelters') group.push(...wardLabelLayerList);
     // 断面：その段の平面の後、1つ上の段の平面の前に、立てるグラフ、切り口の線と端点を描く。
     if (sectionMode) {

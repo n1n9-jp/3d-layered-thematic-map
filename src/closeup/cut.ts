@@ -8,6 +8,8 @@ import type { ElevationData } from '../types';
 import { registry } from '../layers';
 import type { DataKey, LayerStatus } from '../store';
 import type { BoundaryData, ProbeValue } from '../types';
+import { clipRivers } from '../layers/rivers';
+import type { RiverData, RiverShapes } from '../layers/rivers';
 import { cachedBoundaryPaths, clipBoundaryPaths } from '../view/boundaryLines';
 import type { BoundaryPath } from '../view/boundaryLines';
 import type { CloseupCircle } from './closeupModel';
@@ -21,6 +23,8 @@ export interface CloseupCut {
   summaries: Partial<Record<LayerId, ProbeValue[]>>;
   /** 円で切った区境界線。区境界が読み込めていなければ null。 */
   boundary: BoundaryPath[] | null;
+  /** 円で切った川（標高と浸水の段に重ねる）。川が読み込めていなければ null。 */
+  rivers: RiverShapes | null;
   /** 円の中の、浸水が想定される区域に住む人（人口と浸水想定の両方が読み込めたときだけ）。想定は options に従う */
   exposure: Exposure | null;
 }
@@ -56,6 +60,14 @@ export function cutCloseup(
     status.boundary === 'ready' && data.boundary
       ? clipBoundaryPaths(cachedBoundaryPaths(data.boundary as BoundaryData), circle.x, circle.y, circle.r)
       : null;
+  let rivers: RiverShapes | null = null;
+  if (status.rivers === 'ready' && data.rivers) {
+    try {
+      rivers = clipRivers(data.rivers as RiverData, circle.x, circle.y, circle.r);
+    } catch (e) {
+      console.error('[closeup] rivers', e);
+    }
+  }
   let exposure: Exposure | null = null;
   const pop = subsets.population as PopulationData | undefined;
   if (pop && status.flood === 'ready' && data.flood) {
@@ -66,5 +78,5 @@ export function cutCloseup(
       console.error('[closeup] exposure', e);
     }
   }
-  return { circle, subsets, summaries, boundary, exposure };
+  return { circle, subsets, summaries, boundary, rivers, exposure };
 }

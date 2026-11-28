@@ -4,7 +4,10 @@ import type { LayerId, LayerOptions } from '../config';
 import { registry } from '../layers';
 import { useMapStore } from '../store';
 import type { LayerStatus } from '../store';
+import { RIVER_TIERS } from '../layers/rivers';
+import type { RiverData } from '../layers/rivers';
 import type { LayerModule, SectionLine, SectionTrack } from '../types';
+import { computeRiverCrossings } from './riverCrossings';
 
 export type SectionTracks = Partial<Record<LayerId, SectionTrack[]>>;
 
@@ -27,6 +30,18 @@ export function computeSectionTracks(
       out[id] = modules[id].section(data[id], line, options);
     } catch (e) {
       onError?.(id, e);
+    }
+  }
+  // 川を横切る位置は、標高と浸水のグラフ（系列）に添える。川が読み込めていなければ付けない。
+  if (status.rivers === 'ready' && data.rivers) {
+    try {
+      const rivers = computeRiverCrossings(data.rivers as RiverData, line);
+      for (const id of RIVER_TIERS) {
+        const tracks = out[id];
+        if (tracks) out[id] = tracks.map((t) => (t.kind === 'series' ? { ...t, rivers } : t));
+      }
+    } catch (e) {
+      console.error('[section] rivers', e);
     }
   }
   return out;

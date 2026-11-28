@@ -6,6 +6,7 @@ import path from 'node:path';
 import { EXTENT } from './projection.mjs';
 import { createWards } from './wards.mjs';
 import { DEPTH_RANKS, DURATION_RANKS, FLOOD_FILES, OUTSIDE, TIDE_DURATION_RANKS } from './flood.mjs';
+import { distanceToRings, polygonArea } from './rivers.mjs';
 
 /** ファイルサイズの上限（1MB = 1024*1024 byte として扱う）。 */
 export const SIZE_LIMITS = {
@@ -163,7 +164,22 @@ export const GEOJSON_SPECS = {
   },
 };
 
+// 川（水域の面）。属性は持たない（名前は river-labels.json）。面は外周と穴のリングで、外周の面積が 0 でないこと。
+GEOJSON_SPECS['rivers.geojson'] = {
+  geometry: ['Polygon'],
+  properties: {},
+  extra: (geom) => (polygonArea(geom.coordinates.slice(0, 1)) >= 1 ? null : '外周の面積が 0（1 m² 未満）'),
+  summarize: (features) => {
+    let area = 0;
+    for (const f of features) if (f?.geometry?.type === 'Polygon' && Array.isArray(f.geometry.coordinates)) area += polygonArea(f.geometry.coordinates);
+    return [`水域の面積の合計: ${(area / 1e6).toFixed(2)} km²`];
+  },
+};
+
 export const GEOJSON_FILES = Object.keys(GEOJSON_SPECS);
+export const RIVER_LABEL_FILE = 'river-labels.json';
+/** 名前の標本・札の根元が、水域の面の上（この距離 m 以内）にあること。標本は水のセル（10 m）の中心。 */
+export const RIVER_SAMPLE_TOLERANCE = 25;
 export const ELEVATION_FILES = ['elevation.json', 'elevation.bin'];
 
 // ---- 座標・geometry の検査 -------------------------------------------------
@@ -711,6 +727,100 @@ export function validateShelterSummary(json, { geojson = null, boundaryWards = n
   return finish(summary, v);
 }
 
+// ---- 川の名前 ---------------------------------------------------------------
+
+/**
+ * river-labels.json（パース済み）を検査する。
+ *  - { names, trunk, anchors: [{ name, trunk, x, y }], samples: [[x, y, 名前の番号]] }
+ *  - names は川の名前（実データは scripts/lib/river-names.mjs の RIVER_NAMES、仮データは仮の名前）、trunk はその一部（幹となる川）。
+ *    anchors は names の川ごとに 1 点以内で、trunk の川は必ず 1 点（札の根元）。
+ *  - samples の名前の番号は -1（対象外の川）か names の添字。座標は整数（1 m 単位）で EXTENT の内側。
+ *  - rivers（rivers.geojson のパース済み）を渡すと、anchors と samples が水域の面の上（RIVER_SAMPLE_TOLERANCE 以内）にあることを求める。
+ */
+export function validateRiverLabels(json, { rivers = null } = {}) {
+  const v = new Violations();
+  const summary = [];
+  const W = RIVER_LABEL_FILE;
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) {
+    v.add(W, 'JSON がオブジェクトでない');
+    return finish(summary, v);
+  }
+  const names = Array.isArray(json.names) ? json.names : [];
+  if (!Array.isArray(json.names) || names.length === 0 || !names.every(isNonEmptyString) || new Set(names).size !== names.length) {
+    v.add(`${W}.names`, `値 ${show(json.names)} が不正（期待: 空でない文字列の配列で、重複しない）`);
+  }
+  const trunk = Array.isArray(json.trunk) ? json.trunk : [];
+  if (!Array.isArray(json.trunk) || !trunk.every((n) => names.includes(n))) v.add(`${W}.trunk`, `値 ${show(json.trunk)} が不正（期待: names の中の名前の配列）`);
+  const inExtent = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= EXTENT.minX && x <= EXTENT.maxX && y >= EXTENT.minY && y <= EXTENT.maxY;
+  const polygons = rivers && Array.isArray(rivers.features) ? rivers.features.map((f) => f?.geometry?.coordinates).filter(Array.isArray) : null;
+  const boxes = polygons
+    ? polygons.map((rings) => {
+        const b = [Infinity, Infinity, -Infinity, -Infinity];
+        for (const [x, y] of rings[0] ?? []) {
+          b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y);
+        }
+        return b;
+      })
+    : null;
+  /** 点が、いずれかの面の縁の上か内側か（外周の内側、または縁から tolerance 以内）。 */
+  const onWater = (x, y) => {
+    const tol = RIVER_SAMPLE_TOLERANCE;
+    for (let i = 0; i < polygons.length; i++) {
+      const b = boxes[i];
+      if (x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol) continue;
+      const rings = polygons[i];
+      // 外周の内側（偶奇則）か、縁に近い
+      let inside = false;
+      const ring = rings[0];
+      for (let a = 0, c = ring.length - 2; a < ring.length - 1; c = a++) {
+        const [xa, ya] = ring[a];
+        const [xc, yc] = ring[c];
+        if (ya > y !== yc > y && x < ((xc - xa) * (y - ya)) / (yc - ya) + xa) inside = !inside;
+      }
+      if (inside || distanceToRings([x, y], rings) <= tol) return true;
+    }
+    return false;
+  };
+
+  if (!Array.isArray(json.anchors)) v.add(`${W}.anchors`, 'anchors が配列でない');
+  else {
+    const seen = new Set();
+    json.anchors.forEach((a, i) => {
+      const where = `${W}.anchors[${i}]`;
+      if (!a || !names.includes(a.name)) return v.add(where, `name ${show(a?.name)} が names にない`);
+      if (seen.has(a.name)) v.add(where, `name ${show(a.name)} が重複している`);
+      seen.add(a.name);
+      if (a.trunk !== trunk.includes(a.name)) v.add(where, `trunk ${show(a.trunk)} が trunk の一覧と合わない`);
+      if (!inExtent(a.x, a.y)) v.add(where, `座標 (${show(a.x)}, ${show(a.y)}) が整数でない、または EXTENT 外`);
+      else if (polygons && !onWater(a.x, a.y)) v.add(where, `座標 (${a.x}, ${a.y}) が水域の面の上にない`);
+    });
+    const missing = trunk.filter((n) => !seen.has(n));
+    if (missing.length > 0) v.add(`${W}.anchors`, `幹となる川の札の根元がない: ${missing.join('、')}`);
+    summary.push(`札の根元: ${json.anchors.map((a) => a?.name).join('、')}`);
+  }
+  if (!Array.isArray(json.samples)) v.add(`${W}.samples`, 'samples が配列でない');
+  else {
+    const counts = new Map();
+    let off = 0;
+    json.samples.forEach((s, i) => {
+      const where = `${W}.samples[${i}]`;
+      if (!Array.isArray(s) || s.length !== 3) return v.add(where, `[x, y, 名前の番号] でない: ${show(s)}`);
+      const [x, y, k] = s;
+      if (!inExtent(x, y)) return v.add(where, `座標 (${show(x)}, ${show(y)}) が整数でない、または EXTENT 外`);
+      if (!Number.isInteger(k) || k < -1 || k >= names.length) return v.add(where, `名前の番号 ${show(k)} が不正（-1 か 0〜${names.length - 1}）`);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+      if (polygons && off < 1e9 && !onWater(x, y)) {
+        off += 1;
+        if (off <= 5) v.add(where, `座標 (${x}, ${y}) が水域の面の上にない`);
+      }
+    });
+    if (off > 5) v.add(`${W}.samples`, `水域の面の上にない標本が合計 ${off} 点`);
+    for (let k = 0; k < names.length; k++) if (!counts.get(k)) v.add(`${W}.samples`, `${names[k]} の標本がない`);
+    summary.push(`標本: ${json.samples.length} 点（対象外の川 ${counts.get(-1) ?? 0}）`);
+  }
+  return finish(summary, v);
+}
+
 // ---- ファイルサイズ ---------------------------------------------------------
 
 /** @param {{name:string,size:number}[]} files */
@@ -838,6 +948,25 @@ export async function validateDirectory(dir, { requireAll = false } = {}) {
         boundaryWards: boundaryJson ? boundaryJson.features.map((f) => ({ code: f.properties.code, name: f.properties.name })) : null,
       });
       entries.push({ name: summaryName, ...withStatus(result) });
+    }
+  }
+
+  // 川の名前（rivers.geojson と対）。rivers.geojson が仕様どおりのときは、標本と札の根元が水域の面の上にあることも検査する
+  {
+    const name = RIVER_LABEL_FILE;
+    const buf = await readIfExists(path.join(dir, name));
+    if (buf === null) {
+      entries.push({ name, ...missingResult(name, requireAll) });
+    } else {
+      const parsed = parseJson(buf, name);
+      if (parsed.error) entries.push({ name, status: 'ng', summary: [], violations: [parsed.error], violationCount: 1 });
+      else {
+        const riversEntry = geojsonEntry('rivers.geojson');
+        const rivers = riversEntry?.violationCount === 0 ? parsedJson.get('rivers.geojson') : null;
+        const result = validateRiverLabels(parsed.value, { rivers });
+        if (!rivers) result.summary.push('水域の面の上か: rivers.geojson がないか違反があるため検査していない');
+        entries.push({ name, ...withStatus(result) });
+      }
     }
   }
 

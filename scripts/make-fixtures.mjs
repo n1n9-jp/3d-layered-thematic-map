@@ -9,7 +9,7 @@ import { ROOT_DIR } from './lib/paths.mjs';
 // 実行したディレクトリではなく、リポジトリのルート基準で書き出す。
 const OUT_DIR = path.join(ROOT_DIR, 'public', 'data-fixture');
 
-const { geojson, shelterSummary, elevation, flood } = generateFixtures();
+const { geojson, riverLabels, shelterSummary, elevation, flood } = generateFixtures();
 await mkdir(OUT_DIR, { recursive: true });
 
 const written = [];
@@ -18,6 +18,9 @@ for (const [name, fc] of Object.entries(geojson)) {
   await writeFile(path.join(OUT_DIR, name), body);
   written.push([name, Buffer.byteLength(body), fc.features.length]);
 }
+const riverLabelBody = JSON.stringify(riverLabels);
+await writeFile(path.join(OUT_DIR, 'river-labels.json'), riverLabelBody);
+written.push(['river-labels.json', Buffer.byteLength(riverLabelBody), null]);
 const summaryBody = JSON.stringify(shelterSummary);
 await writeFile(path.join(OUT_DIR, 'shelters.json'), summaryBody);
 written.push(['shelters.json', Buffer.byteLength(summaryBody), null]);

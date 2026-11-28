@@ -5,6 +5,7 @@ import { fetchBuffer, fetchJson } from '../lib/fetch';
 import { asModelMatrix } from '../stack';
 import type { LayerModule } from '../types';
 import { schemeLegend } from './flood/classes';
+import { RIVER_COLOR } from './rivers';
 import { buildFloodData, floodImage, sampleFlood, schemeOf, sectionFlood, subsetFlood, summarizeFlood } from './flood/model';
 import type { FloodData, FloodMeta } from './flood/model';
 
@@ -54,7 +55,7 @@ const flood: LayerModule<FloodData> = {
   subset: subsetFlood,
   summarize: summarizeFlood,
   section: (data, line, options) => [sectionFlood(data, line, options)],
-  legend: (options) => schemeLegend(schemeOf(options)),
+  legend: (options) => [...schemeLegend(schemeOf(options)), { color: RIVER_COLOR, label: '川' }],
   controls: [
     {
       key: 'floodScenario',

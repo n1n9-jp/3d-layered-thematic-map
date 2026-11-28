@@ -9,12 +9,14 @@ import { generateFixtures } from './fixtures.mjs';
 import { generateFloodFixture } from './flood-fixture.mjs';
 import { FLOOD_FILES } from './flood.mjs';
 import { DATA_DIR, ROOT_DIR } from './paths.mjs';
+import { EXTENT } from './projection.mjs';
 import { createWards } from './wards.mjs';
 import {
   ELEVATION_SPEC,
   GEOJSON_FILES,
   formatReport,
   validateDirectory,
+  validateRiverLabels,
   validateElevation,
   validateFileSizes,
   validateFlood,
@@ -646,6 +648,7 @@ describe('validateDirectory', () => {
       if (!skip.includes(name)) await writeFile(path.join(dir, name), JSON.stringify(fc));
     }
     if (!skip.includes('shelters.json')) await writeFile(path.join(dir, 'shelters.json'), JSON.stringify(fixtures.shelterSummary));
+    if (!skip.includes('river-labels.json')) await writeFile(path.join(dir, 'river-labels.json'), JSON.stringify(fixtures.riverLabels));
     if (!skip.includes('elevation.json')) await writeFile(path.join(dir, 'elevation.json'), JSON.stringify(fixtures.elevation.meta));
     if (!skip.includes('elevation.bin')) await writeFile(path.join(dir, 'elevation.bin'), fixtures.elevation.bin);
     const flood = { [FLOOD_FILES.meta]: JSON.stringify(floodFixture.meta) + '\n', [FLOOD_FILES.riverDepth]: floodFixture.bins.riverDepth, [FLOOD_FILES.tideDepth]: floodFixture.bins.tideDepth, [FLOOD_FILES.riverDuration]: floodFixture.bins.riverDuration, [FLOOD_FILES.tideDuration]: floodFixture.bins.tideDuration };
@@ -866,4 +869,81 @@ describe('スクリプトの出力先・既定のディレクトリはリポジ�
       // 生成は決定的なので、コミット済みの仮データと一致する（再生成を忘れていれば、ここで気づく）
       expect(await read()).toEqual(before);
     }), 30_000);
+});
+
+describe('川（rivers.geojson と river-labels.json）', () => {
+  const rivers = fixtures.geojson['rivers.geojson'];
+
+  it('仮データの川は、仕様を満たす', () => {
+    const r = validateGeoJson('rivers.geojson', rivers);
+    expect(r.violations).toEqual([]);
+    expect(r.summary.join('\n')).toContain('水域の面積の合計');
+    const l = validateRiverLabels(fixtures.riverLabels, { rivers });
+    expect(l.violations).toEqual([]);
+  });
+
+  it('rivers.geojson は Polygon だけで、外周の面積が 0 の面と、閉じていないリングは違反', () => {
+    const bad = clone(rivers);
+    bad.features[0].geometry = { type: 'LineString', coordinates: [[0, 0], [1, 1]] };
+    expect(validateGeoJson('rivers.geojson', bad).violationCount).toBeGreaterThan(0);
+    const flat = clone(rivers);
+    flat.features[0].geometry.coordinates = [[[0, 0], [10, 0], [20, 0], [0, 0]]];
+    expect(validateGeoJson('rivers.geojson', flat).violations.map((v) => v.message).join()).toContain('面積が 0');
+    const open = clone(rivers);
+    open.features[0].geometry.coordinates[0].pop();
+    expect(validateGeoJson('rivers.geojson', open).violationCount).toBeGreaterThan(0);
+  });
+
+  it('rivers.geojson の座標が EXTENT の外、または整数でなければ違反', () => {
+    const out = clone(rivers);
+    out.features[0].geometry.coordinates[0][0] = [EXTENT.maxX + 1, 0];
+    expect(validateGeoJson('rivers.geojson', out).violationCount).toBeGreaterThan(0);
+    const frac = clone(rivers);
+    frac.features[0].geometry.coordinates[0][1] = [0.5, 0];
+    expect(validateGeoJson('rivers.geojson', frac).violationCount).toBeGreaterThan(0);
+  });
+
+  it('river-labels.json：名前の番号、trunk の札の根元、座標の範囲を検査する', () => {
+    const labels = clone(fixtures.riverLabels);
+    labels.samples[0][2] = 9;
+    expect(validateRiverLabels(labels).violations.map((v) => v.message).join()).toContain('名前の番号');
+    const noAnchor = clone(fixtures.riverLabels);
+    noAnchor.anchors = noAnchor.anchors.filter((a) => !a.trunk);
+    expect(validateRiverLabels(noAnchor).violations.map((v) => v.message).join()).toContain('幹となる川の札の根元がない');
+    const far = clone(fixtures.riverLabels);
+    far.samples[0] = [EXTENT.maxX + 10, 0, 0];
+    expect(validateRiverLabels(far).violationCount).toBeGreaterThan(0);
+    const dup = clone(fixtures.riverLabels);
+    dup.names = ['同じ', '同じ'];
+    expect(validateRiverLabels(dup).violationCount).toBeGreaterThan(0);
+  });
+
+  it('river-labels.json：rivers を渡すと、標本と札の根元が水域の面の上にあることを求める', () => {
+    const labels = clone(fixtures.riverLabels);
+    labels.samples[3] = [-18000, 15000, 0]; // 川から遠い
+    labels.anchors[0] = { ...labels.anchors[0], x: -18000, y: 15000 };
+    const r = validateRiverLabels(labels, { rivers });
+    const text = r.violations.map((v) => v.message).join('\n');
+    expect(text).toContain('水域の面の上にない');
+    expect(r.violations.some((v) => v.where.includes('anchors'))).toBe(true);
+    expect(validateRiverLabels(labels).violationCount).toBe(0); // rivers がなければ、面の上かは検査しない
+  });
+
+  it('validateDirectory：river-labels.json がなければ、--require-all で違反、なければ未作成', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'validate-rivers-'));
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, 'river-labels.json'), JSON.stringify(fixtures.riverLabels));
+      await writeFile(path.join(dir, 'rivers.geojson'), JSON.stringify(rivers));
+      const report = await validateDirectory(dir);
+      expect(report.entries.find((e) => e.name === 'river-labels.json').status).toBe('ok');
+      expect(report.entries.find((e) => e.name === 'rivers.geojson').status).toBe('ok');
+      await rm(path.join(dir, 'river-labels.json'));
+      const lenient = await validateDirectory(dir);
+      expect(lenient.entries.find((e) => e.name === 'river-labels.json').status).toBe('missing');
+      expect((await validateDirectory(dir, { requireAll: true })).entries.find((e) => e.name === 'river-labels.json').status).toBe('ng');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

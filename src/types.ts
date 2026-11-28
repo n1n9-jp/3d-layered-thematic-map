@@ -128,6 +128,16 @@ export interface SectionLine {
   by: number;
 }
 
+/** 断面の線が川を横切る区間。名前は、近くに名前の標本がなければ null。 */
+export interface RiverCrossing {
+  /** 線に沿った距離（m）の、川の中の区間 */
+  d0: number;
+  d1: number;
+  name: string | null;
+  /** 幹となる川か（名前が込み合うとき、優先する） */
+  trunk: boolean;
+}
+
 /** 線に沿った連続した値（標高、人口密度）。 */
 export interface SectionSeries {
   kind: 'series';
@@ -144,6 +154,8 @@ export interface SectionSeries {
    * 指定があると、縦軸は数値ではなくこのラベルで読む（浸水の深さ・継続時間）。
    */
   ranks?: { value: number; short: string; label: string }[];
+  /** 線が川を横切る位置（標高と浸水のグラフに、細い縦線と川の名前で出す）。川が読み込めていなければ省く。 */
+  rivers?: RiverCrossing[];
 }
 
 /** 線に沿った出来事（道路や鉄道との交差、近くの駅や施設）。 */

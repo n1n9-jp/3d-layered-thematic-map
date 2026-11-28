@@ -17,7 +17,7 @@ import { sectionFromQuery } from './section/interaction';
 import type { SectionLine } from './types';
 
 export type LayerStatus = 'idle' | 'loading' | 'ready' | 'error';
-export type DataKey = LayerId | 'boundary';
+export type DataKey = LayerId | 'boundary' | 'rivers';
 
 export interface ViewState {
   target: [number, number, number];
@@ -114,7 +114,7 @@ export interface MapState {
 declare global {
   interface Window {
     __store: typeof useMapStore;
-    /** 全レイヤーと区境界の読み込みが成功か失敗に落ち着いたら true */
+    /** 全レイヤー・区境界・川の読み込みが成功か失敗に落ち着いたら true */
     __ready: boolean;
   }
 }
@@ -261,7 +261,7 @@ export function initialStateFromQuery(search: string): InitialState {
   };
 }
 
-const DATA_KEYS: DataKey[] = ['boundary', ...LAYER_IDS];
+const DATA_KEYS: DataKey[] = ['boundary', 'rivers', ...LAYER_IDS];
 
 export const useMapStore = create<MapState>()((set) => ({
   ...initialStateFromQuery(typeof location === 'undefined' ? '' : location.search),

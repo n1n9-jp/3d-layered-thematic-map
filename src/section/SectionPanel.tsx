@@ -9,7 +9,9 @@ import { cachedDistrictLookup } from '../probe/district';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
 import type { LayerStatus } from '../store';
-import type { BoundaryData, SectionLine, SectionMarks, SectionSeries, SectionTrack } from '../types';
+import type { BoundaryData, RiverCrossing, SectionLine, SectionMarks, SectionSeries, SectionTrack } from '../types';
+import { RIVER_COLOR } from '../layers/rivers';
+import { placeRiverNames } from './riverNames';
 import { SUMMARY_H, placeCharts, stackedPlacement } from './alignment';
 import type { AlignMode, Placement, Tier } from './alignment';
 import { placeSection, releaseSection } from './controller';
@@ -127,6 +129,32 @@ function nearRadius(tracks: readonly SectionMarks[]): number {
 /** 縦軸の段のラベルは、この間隔（px）より詰まるとき、間引く（上の段を残す）。 */
 const RANK_LABEL_GAP = 10;
 
+/** 川を横切る位置：川の幅の薄い帯と、真ん中の細い縦線。名前は、込み合うときは幹となる川を優先して、重ならないように出す。 */
+function RiverMarks({ rivers, sc, ph }: { rivers: readonly RiverCrossing[]; sc: XScale; ph: number }) {
+  const names = useMemo(() => placeRiverNames(rivers, (d) => dToX(sc, d), sc.left + sc.width), [rivers, sc]);
+  const color = rgb(RIVER_COLOR);
+  return (
+    <g data-testid="section-rivers" pointerEvents="none">
+      {rivers.map((r, i) => {
+        const x0 = dToX(sc, r.d0);
+        const x1 = dToX(sc, r.d1);
+        const cx = (x0 + x1) / 2;
+        return (
+          <g key={i} data-testid="section-river" data-name={r.name ?? ''} data-d0={Math.round(r.d0)} data-d1={Math.round(r.d1)}>
+            {x1 - x0 > 1.5 && <rect x={fix(x0)} y={PAD_Y} width={fix(x1 - x0)} height={ph} fill={color} fillOpacity={0.2} />}
+            <line x1={fix(cx)} x2={fix(cx)} y1={PAD_Y} y2={PAD_Y + ph} stroke={color} strokeWidth={1} strokeOpacity={0.95} />
+          </g>
+        );
+      })}
+      {names.map((n) => (
+        <text key={n.index} x={fix(n.x)} y={PAD_Y + 10} textAnchor={n.anchor} className="sc-river-name" data-testid="section-river-name">
+          {n.name}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 function SeriesContent({ series, sc, ph }: { series: SectionSeries; sc: XScale; ph: number }) {
   const y = (t: number) => PAD_Y + (1 - t) * ph;
   const base = y(0);
@@ -163,6 +191,7 @@ function SeriesContent({ series, sc, ph }: { series: SectionSeries; sc: XScale; 
         flush();
         return out;
       })}
+      {series.rivers && series.rivers.length > 0 && <RiverMarks rivers={series.rivers} sc={sc} ph={ph} />}
     </>
   );
 }

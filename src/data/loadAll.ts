@@ -1,6 +1,7 @@
 import { DATA_BASE, LAYER_IDS } from '../config';
 import { loadBoundary } from '../layers/boundary';
 import { registry } from '../layers';
+import { loadRivers } from '../layers/rivers';
 import { useMapStore } from '../store';
 import type { DataKey } from '../store';
 
@@ -18,10 +19,11 @@ async function loadOne(key: DataKey, load: () => Promise<unknown>): Promise<void
   }
 }
 
-/** 区境界と全レイヤーを読み込む。全部が成功か失敗に落ち着いたら window.__ready を true にする。2回目以降の呼び出しは同じ Promise を返す。 */
+/** 区境界・川と全レイヤーを読み込む。全部が成功か失敗に落ち着いたら window.__ready を true にする。2回目以降の呼び出しは同じ Promise を返す。 */
 export function loadAll(): Promise<void> {
   started ??= Promise.all([
     loadOne('boundary', () => loadBoundary(DATA_BASE)),
+    loadOne('rivers', () => loadRivers(DATA_BASE)),
     ...LAYER_IDS.map((id) => loadOne(id, () => registry[id].load(DATA_BASE))),
   ]).then(() => {
     window.__ready = true;

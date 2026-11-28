@@ -349,9 +349,58 @@ function makeFacilities(rand) {
   return collection(features);
 }
 
+// ---- 川 --------------------------------------------------------------------
+
+const FIXTURE_RIVER_NAMES = ['仮大川', '仮小川'];
+
+/** 中心線（[x, y] の並び）を、幅 width（m）の帯の多角形にする。中心線の左右に、進行方向の法線で振り分ける。 */
+function bandPolygon(center, width) {
+  const half = width / 2;
+  const left = [];
+  const right = [];
+  center.forEach((p, i) => {
+    const a = center[Math.max(0, i - 1)];
+    const b = center[Math.min(center.length - 1, i + 1)];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const nx = -(b[1] - a[1]) / len;
+    const ny = (b[0] - a[0]) / len;
+    left.push([Math.round(p[0] + nx * half), Math.round(p[1] + ny * half)]);
+    right.push([Math.round(p[0] - nx * half), Math.round(p[1] - ny * half)]);
+  });
+  const ring = dedupe([...left, ...right.reverse()]);
+  return [dedupe([...ring, ring[0]])];
+}
+
+/**
+ * 仮の川（本流1本と支流1本）と、その名前の標本。乱数は使わない（ほかの仮データの乱数の並びを変えない）。
+ * 本流は西から東へ、仮の都市を横切る幅 500 m の川。支流は北から本流へ合流する幅 160 m の川。
+ */
+function makeRivers() {
+  const mainY = (x) => Math.round(-1800 + 1400 * Math.sin(x / 2600));
+  const main = [];
+  for (let x = -15500; x <= 15500; x += 250) main.push([x, mainY(x)]);
+  const trib = [];
+  const joinX = -6000;
+  for (let y = 12500; y >= mainY(joinX); y -= 250) trib.push([joinX + Math.round(500 * Math.sin(y / 1800)), y]);
+  trib.push([joinX, mainY(joinX)]);
+  const rivers = collection([
+    feature({ type: 'Polygon', coordinates: bandPolygon(main, 500) }, {}),
+    feature({ type: 'Polygon', coordinates: bandPolygon(trib, 160) }, {}),
+  ]);
+  const samples = [...main.map(([x, y]) => [x, y, 0]), ...trib.map(([x, y]) => [x, y, 1])];
+  const anchorOf = (center, k, at) => ({ name: FIXTURE_RIVER_NAMES[k], trunk: k === 0, x: center[at][0], y: center[at][1] });
+  const labels = {
+    names: FIXTURE_RIVER_NAMES,
+    trunk: [FIXTURE_RIVER_NAMES[0]],
+    anchors: [anchorOf(main, 0, 52), anchorOf(trib, 1, 14)],
+    samples,
+  };
+  return { rivers, labels };
+}
+
 /**
  * 全仮データをメモリ上に生成する。
- * @returns {{ geojson: Record<string, object>, shelterSummary: object, elevation: { meta: object, bin: Buffer }, flood: { meta: object, bins: Record<string, Buffer> } }}
+ * @returns {{ geojson: Record<string, object>, riverLabels: object, shelterSummary: object, elevation: { meta: object, bin: Buffer }, flood: { meta: object, bins: Record<string, Buffer> } }}
  */
 export function generateFixtures() {
   const rand = mulberry32(SEED);
@@ -365,6 +414,7 @@ export function generateFixtures() {
   const { rail, stations } = makeRail(rand);
   const facilities = makeFacilities(rand);
   const shelters = makeShelters(mulberry32(SEED + 2), boundary);
+  const { rivers, labels: riverLabels } = makeRivers();
   return {
     geojson: {
       'boundary.geojson': boundary,
@@ -374,7 +424,9 @@ export function generateFixtures() {
       'stations.geojson': stations,
       'facilities.geojson': facilities,
       'shelters.geojson': shelters.geojson,
+      'rivers.geojson': rivers,
     },
+    riverLabels,
     shelterSummary: shelters.summary,
     elevation,
     flood,
