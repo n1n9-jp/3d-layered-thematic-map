@@ -41,13 +41,14 @@ function useRows(p: Point, summaries: CloseupCut['summaries'] | null): InfoRow[]
   const spacing = useMapStore((s) => s.spacing);
   const data = useMapStore((s) => s.data);
   const status = useMapStore((s) => s.status);
+  const options = useMapStore((s) => s.options);
   const stack = { order, visible, solo, spacing };
   const ids = [...order].reverse().filter((id) => layerZ(stack, id) !== null);
   return buildRows({
     ids,
     labels: LABELS,
     status,
-    sample: (id) => registry[id].sample(data[id], p.x, p.y),
+    sample: (id) => registry[id].sample(data[id], p.x, p.y, options),
     summaries,
     onError: (id, e) => console.error(`[probe] ${id}.sample`, e),
   });

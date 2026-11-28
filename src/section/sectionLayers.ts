@@ -199,9 +199,10 @@ export function sectionStandLayers(id: LayerId, line: SectionLine, tracks: reado
           filled: true,
           lineWidthUnits: 'pixels',
           getRadius: 4,
-          getLineWidth: 1,
-          getLineColor: [0, 0, 0, 200],
-          getFillColor: (p: (typeof near)[number]) => [...p.mark.color, 255] as RGBA,
+          // 洪水・高潮で使える避難場所のうち、浸水が想定される区域の中は、同じ色の輪郭だけ（塗りを透明にして、輪郭を色にする）
+          getLineWidth: (p: (typeof near)[number]) => (p.mark.inside ? 2 : 1),
+          getLineColor: (p: (typeof near)[number]) => (p.mark.inside ? [...p.mark.color, 255] : [0, 0, 0, 200]) as RGBA,
+          getFillColor: (p: (typeof near)[number]) => [...p.mark.color, p.mark.inside ? 0 : 255] as RGBA,
         }),
       );
   }

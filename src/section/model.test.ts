@@ -293,4 +293,13 @@ describe('要約', () => {
     expect(summaryLine('shelters', [sh])).toBe('避難場所 洪水・高潮用 2・それ以外 1・病院 1');
     expect(summaryLine('shelters', [mt([])])).toBe('避難場所 洪水・高潮用 0・それ以外 0・病院 0');
   });
+  it('避難：洪水・高潮用の避難場所に、浸水が想定される区域の外・中の判定があるときは、その内訳を添える', () => {
+    const sh = mt([
+      mark({ category: 'shelter-usable', inside: false }),
+      mark({ category: 'shelter-usable', inside: true }),
+      mark({ category: 'shelter-usable', inside: true }),
+      mark({ category: 'shelter-other' }),
+    ]);
+    expect(summaryLine('shelters', [sh])).toBe('避難場所 洪水・高潮用 3（区域の外 1・中 2）・それ以外 1・病院 0');
+  });
 });

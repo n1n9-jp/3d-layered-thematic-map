@@ -114,9 +114,10 @@ describe('sectionTransit', () => {
       for (const m of got) expect(m.offset).toBeCloseTo(byName.get(m.name!)!, 6);
     }
   });
-  it('トラックを返すレイヤー：色は凡例（地図の配色）と同じ', () => {
+  it('トラックを返すレイヤー：浸水の格子がない（区域を判定できない）ときの色は、凡例の「それ以外」（地図の配色）と同じ', () => {
     const tracks = transit.section(data, line, DEFAULT_OPTIONS) as SectionMarks[];
-    expect(tracks[0].marks[0].color).toEqual(transit.legend(DEFAULT_OPTIONS)[0].color);
-    expect(tracks[1].marks[0].color).toEqual(transit.legend(DEFAULT_OPTIONS)[1].color);
+    const other = transit.legend(DEFAULT_OPTIONS)[1].color;
+    expect(tracks[0].marks[0].color).toEqual(other);
+    expect(tracks[1].marks[0].color).not.toEqual(transit.legend(DEFAULT_OPTIONS)[0].color);
   });
 });
