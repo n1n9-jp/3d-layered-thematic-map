@@ -80,6 +80,12 @@ export interface TransitExposure {
   /** 区域内・区域外の駅の位置 */
   exposedStations: Position[];
   otherStations: Position[];
+  /** 描画用：全区間（区域外を先、区域内を後）と、区間ごとの区域内かどうか（1 = 区域内）。1つの PathLayer に渡す */
+  drawPaths: Position[][];
+  drawPathExposed: Uint8Array;
+  /** 描画用：全駅（区域外を先、区域内を後）と、駅ごとの区域内かどうか */
+  drawStations: Position[];
+  drawStationExposed: Uint8Array;
 }
 
 /**
@@ -180,7 +186,18 @@ export function transitExposure(data: TransitData, scenario: FloodScenario): Tra
         exposedStations.push(p);
       } else otherStations.push(p);
     });
-    out = { stationExposed, exposedPaths, otherPaths, exposedStations, otherStations };
+    const flags = (a: number, b: number) => new Uint8Array(a + b).fill(1, a);
+    out = {
+      stationExposed,
+      exposedPaths,
+      otherPaths,
+      exposedStations,
+      otherStations,
+      drawPaths: [...otherPaths, ...exposedPaths],
+      drawPathExposed: flags(otherPaths.length, exposedPaths.length),
+      drawStations: [...otherStations, ...exposedStations],
+      drawStationExposed: flags(otherStations.length, exposedStations.length),
+    };
     byScenario.set(scenario, out);
   }
   return out;

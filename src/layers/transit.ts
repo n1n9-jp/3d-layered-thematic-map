@@ -42,17 +42,20 @@ const transit: LayerModule<TransitData> = {
       opacity: ctx.opacity,
       pickable: false,
     };
-    // 浸水の格子がないときは、すべて「それ以外」の色で描く
+    // 浸水の格子がないときは、すべて「それ以外」の色で描く。区域外を先、区域内を後に並べるので、区域内の区間・駅が上に重なる
     const e = transitExposure(data, ctx.options.floodScenario);
-    const rail = { exposed: e?.exposedPaths ?? [], other: e?.otherPaths ?? data.railPaths };
-    const stations = { exposed: e?.exposedStations ?? [], other: e?.otherStations ?? data.stationPoints };
-    const railLayer = (id: string, paths: Position[][], color: [number, number, number]) =>
+    const paths = e?.drawPaths ?? data.railPaths;
+    const pathExposed = e?.drawPathExposed;
+    const points = e?.drawStations ?? data.stationPoints;
+    const pointExposed = e?.drawStationExposed;
+    const exposedAt = (flags: Uint8Array | undefined, i: number) => flags?.[i] === 1;
+    return [
       new PathLayer<Position[]>({
         ...common,
-        id,
+        id: 'transit-rail',
         data: paths,
         getPath,
-        getColor: color,
+        getColor: (_d: Position[], { index }: { index: number }) => (exposedAt(pathExposed, index) ? C.railExposed : C.railOther),
         getWidth: 30,
         widthUnits: 'meters',
         widthMinPixels: 2.2,
@@ -60,30 +63,25 @@ const transit: LayerModule<TransitData> = {
         billboard: true,
         capRounded: true,
         jointRounded: true,
-      });
-    const stationLayer = (id: string, points: Position[], fill: [number, number, number], line: [number, number, number], lineWidth: number) =>
+        updateTriggers: { getColor: [pathExposed] },
+      }),
       new ScatterplotLayer<Position>({
         ...common,
-        id,
+        id: 'transit-stations',
         data: points,
         getPosition,
-        getFillColor: fill,
-        getLineColor: line,
+        getFillColor: (_d: Position, { index }: { index: number }) => (exposedAt(pointExposed, index) ? C.stationExposed : C.stationOther),
+        getLineColor: (_d: Position, { index }: { index: number }) => (exposedAt(pointExposed, index) ? C.stationExposedOutline : C.stationOtherOutline),
         getRadius: 160,
         radiusUnits: 'meters',
         radiusMinPixels: 3.5,
         radiusMaxPixels: 10,
         stroked: true,
         lineWidthUnits: 'pixels',
-        getLineWidth: lineWidth,
+        getLineWidth: (_d: Position, { index }: { index: number }) => (exposedAt(pointExposed, index) ? 1.6 : 1),
         billboard: false,
-      });
-    // 描く順：落とした色を先に、区域のものを上に重ねる
-    return [
-      railLayer('transit-rail-other', rail.other, C.railOther),
-      railLayer('transit-rail-exposed', rail.exposed, C.railExposed),
-      stationLayer('transit-stations-other', stations.other, C.stationOther, C.stationOtherOutline, 1),
-      stationLayer('transit-stations-exposed', stations.exposed, C.stationExposed, C.stationExposedOutline, 1.6),
+        updateTriggers: { getFillColor: [pointExposed], getLineColor: [pointExposed], getLineWidth: [pointExposed] },
+      }),
     ];
   },
   sample: sampleTransit,

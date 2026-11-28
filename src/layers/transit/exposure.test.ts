@@ -231,25 +231,30 @@ describe('公共交通の凡例と色', () => {
     for (const c of [TRANSIT_COLORS.railExposed, TRANSIT_COLORS.railOther, TRANSIT_COLORS.stationExposed, TRANSIT_COLORS.stationOther])
       for (const f of floodColors) expect(Math.hypot(c[0] - f[0], c[1] - f[1], c[2] - f[2])).toBeGreaterThan(40);
   });
-  it('描画：区域の区間・駅と、それ以外が別のレイヤー（データは判定の結果と同じ）', () => {
+  /** 描画の結果を、「区間・駅ごとの色」にして読む（先頭から区域外、続けて区域内の並び） */
+  const drawn = (data: ReturnType<typeof transitWith>, options: LayerOptions) => {
+    const ctx = { z: 0, modelMatrix: [], opacity: 1, solo: false, boundary: null, options };
+    const [railLayer, stationLayer] = transit.render(data, ctx);
+    const colorsOf = (l: typeof railLayer, accessor: 'getColor' | 'getFillColor') => {
+      const items = l.props.data as unknown[];
+      const fn = (l.props as unknown as Record<string, (d: unknown, i: { index: number }) => number[]>)[accessor];
+      return items.map((d, index) => fn(d, { index }));
+    };
+    return { ids: [railLayer.id, stationLayer.id], rails: colorsOf(railLayer, 'getColor'), stations: colorsOf(stationLayer, 'getFillColor') };
+  };
+  it('描画：路線と駅の2レイヤー。区間・駅ごとの色は、判定の結果と同じ（区域外が先、区域内が後）', () => {
     const data = transitWith(grid());
-    const ctx = { z: 0, modelMatrix: [], opacity: 1, solo: false, boundary: null, options: opt('max') };
-    const layers = transit.render(data, ctx);
-    const byId = Object.fromEntries(layers.map((l) => [l.id, l.props.data as unknown[]]));
-    expect(Object.keys(byId)).toEqual(['transit-rail-other', 'transit-rail-exposed', 'transit-stations-other', 'transit-stations-exposed']);
-    expect(byId['transit-stations-exposed']).toHaveLength(3);
-    expect(byId['transit-stations-other']).toHaveLength(2);
-    expect(byId['transit-rail-exposed']).toHaveLength(2);
-    // 想定を替えると、描き分けも変わる
-    const tide = transit.render(data, { ...ctx, options: opt('tide') });
-    expect(tide.find((l) => l.id === 'transit-stations-exposed')!.props.data).toHaveLength(2);
+    const max = drawn(data, opt('max'));
+    expect(max.ids).toEqual(['transit-rail', 'transit-stations']);
+    expect(max.stations).toEqual([...Array(2).fill(TRANSIT_COLORS.stationOther), ...Array(3).fill(TRANSIT_COLORS.stationExposed)]);
+    expect(max.rails).toEqual([...Array(2).fill(TRANSIT_COLORS.railOther), ...Array(2).fill(TRANSIT_COLORS.railExposed)]);
+    // 想定を替えると、描き分けも変わる（高潮では、区域内の駅は 2）
+    const tide = drawn(data, opt('tide'));
+    expect(tide.stations.filter((c) => c === TRANSIT_COLORS.stationExposed)).toHaveLength(2);
   });
   it('描画：「見るもの」を替えても、描き分けは変わらない', () => {
     const data = transitWith(grid());
-    const ctx = { z: 0, modelMatrix: [], opacity: 1, solo: false, boundary: null };
-    const depth = transit.render(data, { ...ctx, options: opt('max', 'depth') });
-    const duration = transit.render(data, { ...ctx, options: opt('max', 'duration') });
-    expect(duration.map((l) => l.props.data)).toEqual(depth.map((l) => l.props.data));
+    expect(drawn(data, opt('max', 'duration'))).toEqual(drawn(data, opt('max', 'depth')));
   });
   it('描画：同じ想定なら、描画のたびに同じデータの配列を渡す（視点の操作で作り直さない）', () => {
     const data = transitWith(grid());
@@ -259,11 +264,9 @@ describe('公共交通の凡例と色', () => {
     a.forEach((l, i) => expect(l.props.data).toBe(b[i].props.data));
   });
   it('描画：浸水の格子がないときは、すべて「それ以外」で描く', () => {
-    const data = transitWith(null);
-    const layers = transit.render(data, { z: 0, modelMatrix: [], opacity: 1, solo: false, boundary: null, options: opt('max') });
-    expect(layers.find((l) => l.id === 'transit-stations-exposed')!.props.data).toHaveLength(0);
-    expect(layers.find((l) => l.id === 'transit-stations-other')!.props.data).toHaveLength(5);
-    expect(layers.find((l) => l.id === 'transit-rail-exposed')!.props.data).toHaveLength(0);
+    const d = drawn(transitWith(null), opt('max'));
+    expect(d.stations).toEqual(Array(5).fill(TRANSIT_COLORS.stationOther));
+    expect(d.rails.every((c) => c === TRANSIT_COLORS.railOther)).toBe(true);
   });
 });
 
