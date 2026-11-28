@@ -155,6 +155,16 @@
   fill: #dbe4f6;
 }
 
+/* 断面が川を横切る位置の、川の名前（標高と浸水のグラフ）。水色の縦線のそばに、暗い縁取りつきで出す。 */
+.sc-river-name {
+  font: 700 10px sans-serif;
+  fill: #aee9ff;
+  paint-order: stroke;
+  stroke: #0b0f16;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
 /* 線に沿った集計（浸水 3m 以上の区間の長さと、その近くの避難場所の数）。 */
 .sc-headline {
   margin-top: 4px;

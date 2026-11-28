@@ -8,6 +8,7 @@ import { registry } from '../layers';
 import { probeMarkLayers } from '../probe/controller';
 import { translationMatrix } from '../stack';
 import { useMapStore } from '../store';
+import { RIVER_TIERS, riverLayers } from '../layers/rivers';
 import { boundaryLayer } from '../view/boundaryLines';
 import { VIEW } from '../view/camera';
 import type { Size } from '../view/camera';
@@ -82,6 +83,9 @@ export function CloseupStack({ cut, size }: { cut: CloseupCut; size: Size }) {
     layers.push(...rendered[id].map((l) => withHeight(l, targets[id] as number, z)));
     const next = tiers[k + 1];
     if (cut.boundary && !(next && Math.abs(next.z - z) <= 1)) layers.push(boundaryLayer(cut.boundary, `closeup-${id}`, z));
+    // 川：全体の地図と同じく、標高と浸水の段に重ねる（同じ高さに重なる段のうち、いちばん上の川の段にだけ）
+    if (cut.rivers && RIVER_TIERS.includes(id) && !tiers.slice(k + 1).some((t) => Math.abs(t.z - z) <= 1 && RIVER_TIERS.includes(t.id)))
+      layers.push(...riverLayers(cut.rivers, `closeup-${id}`, z));
   }
   layers.push(...stackLabelLayers({ tiers, viewState: view, size, box: closeupBox(circle), prefix: 'closeup' }));
   layers.push(...probeMarkLayers(circle, true, tiers.map((t) => t.z)));

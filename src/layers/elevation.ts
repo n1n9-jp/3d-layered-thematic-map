@@ -9,6 +9,7 @@ import { asModelMatrix } from '../stack';
 import type { ElevationData, ElevationMeta, LayerModule } from '../types';
 import { LEGEND_STOPS, elevationColor, elevationPixels } from './elevation/color';
 import { sectionElevation } from './elevation/section';
+import { RIVER_COLOR } from './rivers';
 
 /** 標高格子に、色に変換済みの画像を添えたもの。画像は load で1回だけ作る。 */
 export interface ElevationLayerData extends ElevationData {
@@ -74,12 +75,14 @@ const elevation: LayerModule<ElevationLayerData> = {
         : { label: '標高', value: roundTo1(v), unit: 'm' },
     ];
   },
-  legend: () =>
-    LEGEND_STOPS.map(({ value, label }) => ({
+  legend: () => [
+    ...LEGEND_STOPS.map(({ value, label }) => ({
       color: elevationColor(value).slice(0, 3) as [number, number, number],
       label,
     })),
-  notes: () => ['青い所（0m 未満）は、海面より低い土地です。'],
+    { color: RIVER_COLOR, label: '川' },
+  ],
+  notes: () => ['紫の所（0m 未満）は、海面より低い土地です。'],
 };
 
 const boundsCache = new WeakMap<ElevationData, [number, number, number, number]>();

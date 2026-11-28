@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RIVER_COLOR } from '../rivers';
 import { LEGEND_STOPS, elevationColor, elevationPixels } from './color';
 
 const hue = ([r, g, b]: number[]) => {
@@ -19,13 +20,21 @@ describe('elevationColor', () => {
   it('有効値は不透明', () => {
     for (const v of [-10, -5, -0.1, 0, 12, 50, 80]) expect(elevationColor(v)[3]).toBe(255);
   });
-  it('負の値は青系で、0m 以上とは色相が大きく違う', () => {
+  it('負の値は紫系で、0m 以上とは色相が大きく違う', () => {
     const neg = elevationColor(-2);
     const zero = elevationColor(0);
-    expect(neg[2]).toBeGreaterThan(neg[0]);
+    // 紫：赤と青が緑より大きい
+    expect(neg[0]).toBeGreaterThan(neg[1]);
     expect(neg[2]).toBeGreaterThan(neg[1]);
     const dh = Math.abs(hue(neg) - hue(zero));
     expect(Math.min(dh, 360 - dh)).toBeGreaterThan(60);
+  });
+  it('負の値のどの色も、川の水色と色相が 50 度以上離れている（水面に見えない）', () => {
+    const river = hue([...RIVER_COLOR]);
+    for (const v of [-5, -4, -3, -2, -1, -0.1]) {
+      const dh = Math.abs(hue(elevationColor(v)) - river);
+      expect(Math.min(dh, 360 - dh)).toBeGreaterThanOrEqual(50);
+    }
   });
   it('0m 以上は連続的で、明るさが単調に増える', () => {
     let prev = luma(elevationColor(0));
@@ -50,7 +59,7 @@ describe('elevationColor', () => {
   it('既知の区切りの色', () => {
     expect(elevationColor(0)).toEqual([52, 120, 72, 255]);
     expect(elevationColor(20)).toEqual([220, 208, 104, 255]);
-    expect(elevationColor(-5)).toEqual([44, 84, 214, 255]);
+    expect(elevationColor(-5)).toEqual([112, 44, 170, 255]);
   });
   it('凡例は 5〜6 段で値が昇順', () => {
     expect(LEGEND_STOPS.length).toBeGreaterThanOrEqual(5);
@@ -63,6 +72,6 @@ describe('elevationColor', () => {
 describe('elevationPixels', () => {
   it('RGBA を値の順に並べ、NaN は透明', () => {
     const px = elevationPixels(new Float32Array([0, NaN, -5]));
-    expect(Array.from(px)).toEqual([52, 120, 72, 255, 0, 0, 0, 0, 44, 84, 214, 255]);
+    expect(Array.from(px)).toEqual([52, 120, 72, 255, 0, 0, 0, 0, 112, 44, 170, 255]);
   });
 });
