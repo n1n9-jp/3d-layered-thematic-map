@@ -209,8 +209,8 @@ async function tabTo(page, selector, n = 60) {
   console.log('\n[8] 断面で線を引く前の説明');
   await page.getByTestId('mode-section').click();
   check((await page.getAttribute('[data-testid=section-guide-toggle]', 'aria-expanded')) === 'false' && (await page.locator('[data-testid=section-guide-body]').count()) === 0, '線の引き方と例の説明は、初期状態では閉じている');
-  const hint = (await page.textContent('[data-testid=section-hint] > p')).trim();
-  check(hint === '地図の上で2点をクリックして線を引く', `見えている手がかりは1行（${hint}）`);
+  const hint = (await page.textContent('[data-testid=mode-hint]')).trim();
+  check(hint === '地図の上で2点をクリックして線を引く' && (await page.locator('[data-testid=info-column] [data-testid=mode-hint]').count()) === 0, `手がかりの1行は、情報の列ではなく帯の切り替えの右に出る（${hint}）`);
   const names = await page.$$eval('[data-testid=section-example]', (els) => els.map((e) => e.textContent.trim()));
   check(names.length === 3 && names.every((n) => n.length > 0 && !n.includes('東西 ') && !n.includes('南北 ')), `例の線のボタンは3つで、名前だけ（${names.join(' / ')}）`);
   check((await page.locator('[data-testid=section-example-notes]').count()) === 0, '例の線の説明文は、閉じているあいだ出ない');

@@ -10,7 +10,6 @@ import SectionBody from '../section/SectionPanel';
 import { cachedDistrictLookup } from '../probe/district';
 import { layerZ } from '../stack';
 import { useMapStore } from '../store';
-import type { UiMode } from '../store';
 import type { BoundaryData, ProbeValue } from '../types';
 import { RIGHT_PANEL_W } from '../view/layout';
 import { useElementSize } from '../view/useElementSize';
@@ -208,39 +207,13 @@ function PinnedBody({ p }: { p: Point }) {
   );
 }
 
-const MODES: { id: UiMode; label: string }[] = [
-  { id: 'overview', label: '全体' },
-  { id: 'point', label: '地点' },
-  { id: 'section', label: '断面' },
-];
-
-/**
- * 「全体」（23区全体のまとめ）、「地点」（探針とクローズアップ）、「断面」（2点の線に沿った変化）の切り替え。
- * 「地点」と「断面」の行き来では、固定した地点も引いた線も保持する。「全体」を選ぶと、どちらも消える。
- */
-function ModeBar() {
-  const mode = useMapStore((s) => s.mode);
-  const setMode = useMapStore((s) => s.setMode);
-  return (
-    <div className="ic-modes" data-testid="mode-bar">
-      <span className="ic-modes-label">読み方</span>
-      <div className="ic-seg" role="group" aria-label="読み方">
-        {MODES.map((m) => (
-          <button key={m.id} type="button" aria-pressed={mode === m.id} data-testid={`mode-${m.id}`} onClick={() => setMode(m.id)}>
-            {m.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /**
  * 「選んだ地点の情報」の列。全体の地図の右隣（右上のパネルの左）に、中身の有無にかかわらず常に同じ幅で置く。
- * 「全体」は23区全体の集計。「地点」は、地点がなければ手がかりの1行、カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表。
- * 「断面」は線を引く手がかり、または線に沿ったグラフ。
+ * 「全体」「地点」「断面」の切り替え（と、地図での最初の操作の手がかり）は、画面上端の帯（`ModeBand`）にあり、列の上はその高さ（top）だけ空ける。
+ * 「全体」は23区全体の集計。「地点」は、地点がなければ空（カーソルを置いただけなら区名と「この地点」の値、固定していればクローズアップと表）。
+ * 「断面」は線を引く前の例の線のボタンと説明、または線に沿ったグラフ。
  */
-export default function InfoColumn({ width }: { width: number }) {
+export default function InfoColumn({ width, top }: { width: number; top: number }) {
   useEffect(() => installProbeKeys(), []);
   const uiMode = useMapStore((s) => s.mode);
   const probe = useMapStore((s) => s.probe);
@@ -253,20 +226,15 @@ export default function InfoColumn({ width }: { width: number }) {
       data-testid="info-column"
       data-mode={mode}
       aria-label="選んだ地点の情報"
-      style={{ right: RIGHT_PANEL_W, width, paddingBottom: BOTTOM_RESERVE }}
+      style={{ right: RIGHT_PANEL_W, width, paddingTop: top, paddingBottom: BOTTOM_RESERVE }}
     >
-      <ModeBar />
       {mode === 'section' ? (
         <SectionBody />
       ) : mode === 'overview' ? (
         <div className="ic-scroll ic-scroll-solo ic-overall" data-testid="overall-scroll">
           <Overall />
         </div>
-      ) : mode === 'empty' || probe === null ? (
-        <div className="ic-hint" data-testid="point-hint">
-          地図をクリックして地点を選ぶ
-        </div>
-      ) : mode === 'hover' ? (
+      ) : mode === 'empty' || probe === null ? null : mode === 'hover' ? (
         <HoverBody p={probe} />
       ) : (
         <PinnedBody p={probe} />

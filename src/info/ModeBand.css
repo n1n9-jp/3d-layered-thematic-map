@@ -1,0 +1,94 @@
+/* 画面上端の帯。地図と情報の列の上にまたがる。帯そのものは何も隠さず（背景なし）、題・切り替え・手がかりが、それぞれ暗い下地を持つ。 */
+.mb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  pointer-events: none;
+  font: 14px sans-serif;
+  color: #fff;
+}
+
+.mb-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  min-width: 0;
+}
+
+.mb-title {
+  flex: none;
+  box-sizing: border-box;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: rgba(0, 0, 0, 0.78);
+  border-radius: 6px;
+}
+
+.mb-title h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* 「全体」「地点」「断面」の切り替え。選択中は琥珀色。 */
+.mb-seg {
+  flex: none;
+  display: inline-flex;
+  pointer-events: auto;
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.mb-seg button {
+  font: 12.5px sans-serif;
+  color: #d7dde8;
+  background: transparent;
+  border: 0;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.mb-seg button + button {
+  border-left: 1px solid rgba(255, 255, 255, 0.26);
+}
+
+.mb-seg button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mb-seg button:focus-visible {
+  outline: 2px solid #5ab4ff;
+  outline-offset: -2px;
+}
+
+.mb-seg button[aria-pressed='true'] {
+  color: #1a1200;
+  background: #ffb000;
+  font-weight: 600;
+}
+
+/* 切り替えのすぐ右の、手がかりの1行。本文に近い明るさ。 */
+.mb-hint {
+  flex: none;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e8e8e8;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.78);
+  border-radius: 6px;
+}

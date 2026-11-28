@@ -518,7 +518,6 @@ export default function SectionBody() {
           </>
         ) : (
           <>
-            <p>地図の上で2点をクリックして線を引く</p>
             <div className="sc-examples" data-testid="section-examples">
               {EXAMPLE_LINES.map((e) => (
                 <button key={e.id} type="button" className="sc-example" data-testid="section-example" data-example={e.id} onClick={() => placeSection(e.line)}>

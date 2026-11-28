@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import InfoColumn from './info/InfoColumn';
+import ModeBand from './info/ModeBand';
 import Credits from './panel/Credits';
 import LayerPanel from './panel/LayerPanel';
 import SpacingSlider from './panel/SpacingSlider';
 import ViewButtons from './panel/ViewButtons';
 import StackView from './view/StackView';
-import { PANEL, infoColumnWidth } from './view/layout';
+import { PANEL, bandHeight, infoColumnWidth, RIGHT_PANEL_W } from './view/layout';
 
 const panelStyle = {
   position: 'absolute',
@@ -35,14 +36,14 @@ export default function App() {
   // 全体の地図の右に、「選んだ地点の情報」の列を常に置く（幅は中身によらず一定）。地図の大きさと位置も、探針の有無や固定で変わらない。
   const windowWidth = useWindowWidth();
   const cw = infoColumnWidth(windowWidth);
+  const mapWidth = Math.max(0, windowWidth - RIGHT_PANEL_W);
+  const bandH = bandHeight(mapWidth);
   return (
     <>
       <StackView columnWidth={cw} />
-      {/* 何の地図かが、開いてすぐ分かる題。ドラッグなどの操作は、題の下の地図にそのまま届く。 */}
-      <header data-testid="page-title" style={{ position: 'absolute', top: 8, left: 8, maxWidth: 340, pointerEvents: 'none', color: '#fff', font: '14px sans-serif', background: 'rgba(0, 0, 0, 0.78)', padding: '6px 10px', borderRadius: 6 }}>
-        <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700, lineHeight: 1.3 }}>東京23区の水害を読む地図</h1>
-      </header>
-      <InfoColumn width={cw} />
+      {/* 画面上端の帯：何の地図かが開いてすぐ分かる題と、地図と情報の列の両方に効く「全体／地点／断面」の切り替え。ドラッグなどの操作は、帯の空いたところから下の地図にそのまま届く。 */}
+      <ModeBand mapWidth={mapWidth} height={bandH} rightInset={RIGHT_PANEL_W} />
+      <InfoColumn width={cw} top={bandH} />
       <div
         style={{
           ...panelStyle,

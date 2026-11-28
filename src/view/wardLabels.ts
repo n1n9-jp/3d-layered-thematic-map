@@ -10,7 +10,7 @@
  * 描画するレイヤーのデータ（区の輪郭、避難場所の点）には触れない。マウスの移動（探針）では、視点も段の高さも変わらないので、決め直さない。
  *
  * 避けるもの（札が重ならないようにする）：
- *   題、右の列（描画領域の右端）、レイヤー名、ほかの表示中の段のデータのある範囲（その段の高さでの、23区を囲む多角形）。
+ *   題と切り替えの帯、右の列（描画領域の右端）、レイヤー名、ほかの表示中の段のデータのある範囲（その段の高さでの、23区を囲む多角形）。
  *   同じ段のデータのある範囲は、なるべく避ける（区や避難場所の点の上に札が乗らないように）。
  * 収まらないときは、札を段階的に小さく・短くする（2行 → 小さな2行 → 区名だけ → 「区」を省く）。それでも置けない札は出さない。
  */
@@ -26,7 +26,7 @@ import { makeProjector } from './camera';
 import type { Size } from './camera';
 import { placeCallouts } from './calloutPlacement';
 import type { CalloutItem } from './calloutPlacement';
-import { TITLE_RECT } from './layout';
+import { bandRect } from './layout';
 import type { Pt, Rect } from './layout';
 
 type View4 = Pick<ViewState, 'target' | 'rotationX' | 'rotationOrbit' | 'zoom'>;
@@ -145,7 +145,7 @@ export function layoutWardLabels(input: WardLabelInput): WardLabelLayout | null 
   const hullZs = [...new Set(otherZs.map((v) => Math.round(v)))];
   const obstacles = {
     bounds,
-    rects: [TITLE_RECT, ...layerNameRects],
+    rects: [bandRect(size.width), ...layerNameRects],
     polys: hullZs.map(hull),
     soft: [hull(z)],
     // 引き出し線は、別の高さの段の上を通らないほうがよい（同じ高さの段は、札を置く段と同じ場所にあるので、通ってよい）

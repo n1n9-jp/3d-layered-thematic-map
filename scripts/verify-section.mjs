@@ -130,7 +130,7 @@ async function run(browser, base) {
   check((await state(page)).mode === 'overview' && (await page.getByTestId('mode-overview').getAttribute('aria-pressed')) === 'true', '開いたときは「全体」');
   await page.getByTestId('mode-section').click();
   await waitFor(page, () => window.__store.getState().mode === 'section');
-  check(await page.isVisible('[data-testid=section-hint]'), '「断面」に切り替えると、操作の手がかりが出る');
+  check((await page.textContent('[data-testid=mode-hint]')) === '地図の上で2点をクリックして線を引く' && (await page.isVisible('[data-testid=section-hint]')), '「断面」に切り替えると、帯に操作の手がかり、列に例の線が出る');
   check((await page.getByTestId('mode-section').getAttribute('aria-pressed')) === 'true', '「断面」が選択中の見た目');
 
   const [ax, ay] = P.at(-7000, -3000, zTop);
@@ -139,7 +139,7 @@ async function run(browser, base) {
   await page.mouse.move(ax + 1, ay + 1);
   await page.mouse.click(ax, ay);
   await waitFor(page, () => window.__store.getState().sectionStart !== null);
-  check((await page.getAttribute('[data-testid=section-hint]', 'data-state')) === 'start', '1回クリック：始点が決まり、終点を待つ');
+  check((await page.getAttribute('[data-testid=section-hint]', 'data-state')) === 'start' && (await page.locator('[data-testid=mode-hint]').count()) === 0, '1回クリック：始点が決まり、終点を待つ（帯の手がかりは消え、列に終点の案内が出る）');
   await page.mouse.move(bx - 40, by - 20);
   await page.mouse.move(bx, by);
   await waitFor(page, () => window.__store.getState().sectionCursor !== null);
@@ -322,7 +322,7 @@ async function run(browser, base) {
   check(s.line === null && s.probe === null && !s.pinned && (await page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'overview', '「全体」を選ぶと、線も固定した探針も消えて、23区全体のまとめに戻る');
   await page.getByTestId('mode-section').click();
   await waitFor(page, () => window.__store.getState().mode === 'section');
-  check((await chartCount(page)) === 0 && (await page.isVisible('[data-testid=section-hint]')), '「全体」へ戻したあとの「断面」は、線がなく、手がかりが出る');
+  check((await chartCount(page)) === 0 && (await page.isVisible('[data-testid=mode-hint]')) && (await page.isVisible('[data-testid=section-hint]')), '「全体」へ戻したあとの「断面」は、線がなく、手がかり（帯）と例の線（列）が出る');
   check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
   await ctx.close();
 

@@ -6,6 +6,8 @@
 //   2. 右の列の中身が状態に応じて変わる（23区全体のまとめ／手がかり／区名と「この地点」／クローズアップと3列の表）
 //   3. 固定した印のドラッグ、クローズアップの中のクリック、半径の切り替え、Esc と「全体」の選択での解除が動く
 //   4. 「断面」（URL の section= で開く）でも、全体の地図の大きさと位置が変わらない。線を消す・「地点」へ戻す・「断面」へ戻すでも同じ
+//   5. 画面上端の帯：題と「全体／地点／断面」の切り替えが、地図と情報の列の上にまたがって並ぶ（列の中ではない）。切り替えのすぐ右に、モードごとの手がかりの1行が出る
+//      （「地点」で未固定、「断面」で線を引く前だけ。読める濃さ）。帯は地図の大きさと位置を変えず、列の先頭は帯の下から始まる。区の札（避難の行を開いたとき）は帯に重ならない
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。描画が遅い環境（1フレーム約2秒）を見込んで、待ちは長めにとる。
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -22,6 +24,8 @@ const { values } = parseArgs({
   options: {
     url: { type: 'string' },
     sizes: { type: 'string', default: '1400x1000,2000x1100,1000x700' },
+    // 帯が2行・3行に折り返す狭い画面（地図の幅が、題・切り替え・手がかりが1行に並ぶ幅に足りない）。帯の確認だけを行う。
+    'narrow-sizes': { type: 'string', default: '800x700,680x700' },
   },
 });
 
@@ -118,6 +122,133 @@ async function topPlanePoint(page) {
   return [Math.round(info.left + x), Math.round(info.top + y)];
 }
 
+/** 画面上端の帯（題・切り替え・手がかり）の配置と、モードごとの手がかり。 */
+async function band(browser, base, size, narrow = false) {
+  console.log(`\n[${size}] 画面上端の帯：題と切り替え、手がかりの1行`);
+  const { ctx, page, errors, w, h } = await open(browser, base, size);
+  const boxes = () =>
+    page.evaluate(() => {
+      const box = (sel) => {
+        const e = document.querySelector(sel);
+        if (!e) return null;
+        const b = e.getBoundingClientRect();
+        return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+      };
+      const hint = document.querySelector('[data-testid=mode-hint]');
+      return {
+        title: box('[data-testid=page-title]'),
+        seg: box('[data-testid=mode-bar]'),
+        band: box('[data-testid=mode-band]'),
+        hint: box('[data-testid=mode-hint]'),
+        hintText: hint ? hint.textContent : null,
+        hintFor: hint ? hint.getAttribute('data-for') : null,
+        hintColor: hint ? getComputedStyle(hint).color : null,
+        column: box('[data-testid=info-column]'),
+        colPadTop: parseFloat(getComputedStyle(document.querySelector('[data-testid=info-column]')).paddingTop),
+        first: box('.ov-title') || box('[data-testid=info-column] .ic-head') || box('[data-testid=info-column] .ic-hint'),
+        canvas: box('canvas'),
+        inColumn: document.querySelectorAll('[data-testid=info-column] [data-testid=mode-bar], [data-testid=info-column] [data-testid=page-title]').length,
+        bandText: document.querySelector('[data-testid=mode-band]').textContent,
+      };
+    });
+  const overlap = (a, b) => a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const rows = (b) => (b.hint ? b.hint.left >= b.seg.right - 0.5 ? 'same' : 'below' : null);
+
+  // 全体：題と切り替えだけ（手がかりなし）。列の先頭は帯の下
+  let b = await boxes();
+  check(b.inColumn === 0 && !!b.title && !!b.seg, '題と切り替えは、帯にあり、情報の列の中にはない');
+  check(!b.bandText.includes('読み方'), '帯に「読み方」のラベルはない');
+  check(b.canvas.left === 0 && b.canvas.top === 0 && Math.round(b.canvas.right) === w - 256 && Math.round(b.canvas.bottom) === h, `帯は地図の描画領域の大きさと位置を変えない（地図 0,0〜${Math.round(b.canvas.right)}×${Math.round(b.canvas.bottom)}）`);
+  check(b.title.left <= b.seg.left && (b.seg.left >= b.title.right - 0.5 || b.seg.top >= b.title.bottom - 0.5), '切り替えは、題の右（収まらなければ下）に並ぶ');
+  const singleRow = b.seg.left >= b.title.right - 0.5;
+  console.log(`      切り替えは題の${singleRow ? '右' : '下'}（${w}×${h}）`);
+  check(b.hint === null, '「全体」：手がかりは出ない');
+  check(b.title.top >= 0 && b.seg.bottom <= b.band.bottom + 0.5 && b.title.bottom <= b.band.bottom + 0.5, '題と切り替えは帯の高さに収まる');
+  check(Math.abs(b.colPadTop - (b.band.bottom - b.band.top)) < 0.5, `情報の列の上の空きは帯の高さと同じ（${b.colPadTop}px）`);
+  check(b.first.top >= Math.max(b.title.bottom, b.seg.bottom) - 0.5, `列の先頭（${Math.round(b.first.top)}px〜）は、帯の題・切り替え（〜${Math.round(Math.max(b.title.bottom, b.seg.bottom))}px）と重ならない`);
+  check(b.seg.right <= b.canvas.right + (b.column.right - b.column.left) && b.title.right <= b.column.right, '帯の中身は、右上のパネルに重ならない');
+  const hole = await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? !!e.closest('[data-testid=mode-band]') : null; }, [Math.round(b.seg.right + 24), Math.round(b.seg.top + 4)]);
+  check(hole === false, '帯の空いたところは、下の地図や列の操作をさえぎらない');
+
+  // 地点：未固定のあいだ手がかり。カーソルを置いても残り、固定すると消える
+  await page.getByTestId('mode-point').click();
+  await settle(page, 600);
+  b = await boxes();
+  check(b.hintText === '地図をクリックして地点を選ぶ' && b.hintFor === 'point', '「地点」：切り替えのすぐ右に「地図をクリックして地点を選ぶ」');
+  check(rows(b) === 'same' ? b.hint.left - b.seg.right < 24 && Math.abs((b.hint.top + b.hint.bottom) / 2 - (b.seg.top + b.seg.bottom) / 2) < 6 : b.hint.top >= b.seg.bottom - 0.5, `手がかりは切り替えの${rows(b) === 'same' ? '右（同じ行）' : '下'}`);
+  const rgb = b.hintColor.match(/\d+/g).map(Number);
+  check(Math.min(...rgb.slice(0, 3)) >= 200, `手がかりの文字は読める濃さ（${b.hintColor}）`);
+  check(b.hint.right <= b.column.right, '手がかりは右上のパネルに重ならない');
+  if (!narrow) {
+  const [hx, hy] = await topPlanePoint(page);
+    await page.mouse.move(hx, hy);
+    await page.mouse.move(hx + 1, hy + 1);
+    await page.mouse.move(hx, hy);
+    await waitFor(page, () => window.__store.getState().probe !== null);
+    await settle(page, 600);
+    b = await boxes();
+    check(b.hintText === '地図をクリックして地点を選ぶ' && (await mode(page)) === 'hover', '「地点」でカーソルを置いただけ（未固定）：手がかりは残り、列は各段の値の行');
+    check(b.first.top >= Math.max(b.title.bottom, b.seg.bottom) - 0.5, '列の先頭の見出し（区名）は、帯と重ならない');
+    await page.mouse.click(hx, hy);
+    await waitFor(page, () => window.__store.getState().probePinned);
+    await settle(page, 800);
+    b = await boxes();
+    check(b.hint === null && (await mode(page)) === 'pinned', '固定すると、手がかりは消える');
+    check(b.first.top >= Math.max(b.title.bottom, b.seg.bottom) - 0.5, '固定中：列の先頭の見出し（区名・固定中）は、帯と重ならない');
+    check(b.canvas.left === 0 && Math.round(b.canvas.right) === w - 256, '固定しても、地図の大きさと位置は変わらない');
+  }
+
+  // 断面：線を引く前だけ手がかり
+  await page.getByTestId('mode-section').click();
+  await settle(page, 800);
+  b = await boxes();
+  check(b.hintText === '地図の上で2点をクリックして線を引く' && b.hintFor === 'section', '「断面」：切り替えのすぐ右に「地図の上で2点をクリックして線を引く」');
+  check((await page.locator('[data-testid=info-column] [data-testid=mode-hint]').count()) === 0 && (await page.locator('[data-testid=section-example]').count()) === 3, '列には、例の線のボタン3つが残り、手がかりの1行はない');
+  check((await page.getAttribute('[data-testid=section-guide-toggle]', 'aria-expanded')) === 'false', '列には、閉じた見出し「線の引き方と、例の線について」が残る');
+  if (!narrow) {
+    const [sx, sy] = await topPlanePoint(page);
+    await page.mouse.move(sx - 60, sy - 20);
+    await page.mouse.click(sx - 60, sy - 20);
+    await waitFor(page, () => window.__store.getState().sectionStart !== null);
+    await settle(page, 400);
+    b = await boxes();
+    check(b.hint === null, '始点を置いたあと：帯の手がかりは消える（案内は列に出る）');
+    await page.mouse.move(sx + 80, sy + 30);
+    await page.mouse.click(sx + 80, sy + 30);
+    await waitFor(page, () => window.__store.getState().section !== null);
+    await settle(page, 800);
+    b = await boxes();
+    check(b.hint === null && (await page.locator('[data-testid=section-head]').count()) === 1, '線を引いたあと：手がかりは消え、列の先頭は「断面 ○km」の見出し');
+    const secHead = await page.evaluate(() => { const r = document.querySelector('[data-testid=section-head]').getBoundingClientRect(); return { top: r.top }; });
+    check(secHead.top >= Math.max(b.title.bottom, b.seg.bottom) - 0.5, `断面の見出し（${Math.round(secHead.top)}px〜）は、帯と重ならない`);
+  }
+  check(errors.length === 0, `ブラウザのエラーなし${errors.length ? `：${errors[0]}` : ''}`);
+  await ctx.close();
+
+  // 区の札（避難の行を開いたとき）は、帯（題・切り替え・手がかり）に重ならない
+  for (const m of narrow ? [] : ['overview', 'point', 'section']) {
+    const o = await open(browser, base, size, '?open=shelters');
+    if (m !== 'overview') {
+      await o.page.getByTestId(`mode-${m}`).click();
+      await settle(o.page, 800);
+    }
+    const r = await o.page.evaluate(() => {
+      const box = (sel) => {
+        const e = document.querySelector(sel);
+        if (!e) return null;
+        const b = e.getBoundingClientRect();
+        return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+      };
+      const L = window.__wardLabels;
+      return { labels: L ? L.placed.map((p) => ({ name: p.label.name, rect: p.rect })) : [], items: [box('[data-testid=page-title]'), box('[data-testid=mode-bar]'), box('[data-testid=mode-hint]')].filter(Boolean) };
+    });
+    const bad = r.labels.filter((l) => r.items.some((it) => overlap(l.rect, it))).map((l) => l.name);
+    check(r.labels.length > 0 && bad.length === 0, `「${m}」・避難の行を開く：区の札 ${r.labels.length} 枚が、帯の題・切り替え${m === 'overview' ? '' : '・手がかり'}に重ならない${bad.length ? `（${bad.join('、')}）` : ''}`);
+    check(o.errors.length === 0, `ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
+    await o.ctx.close();
+  }
+}
+
 async function viewConsistency(browser, base, size) {
   console.log(`\n[${size}] 固定前・カーソルを置いた状態・固定後・解除後の視点`);
   const { ctx, page, errors } = await open(browser, base, size);
@@ -140,7 +271,8 @@ async function viewConsistency(browser, base, size) {
   // 「地点」を選ぶと、手がかりの1行だけが出る
   await page.getByTestId('mode-point').click();
   await settle(page, 800);
-  check((await mode(page)) === 'empty' && (await page.textContent('[data-testid=point-hint]')) === '地図をクリックして地点を選ぶ', '「地点」を選んだ直後：列は手がかりの1行だけ（23区全体のまとめは出ない）');
+  check((await mode(page)) === 'empty' && (await page.textContent('[data-testid=mode-hint]')) === '地図をクリックして地点を選ぶ', '「地点」を選んだ直後：手がかりの1行は帯の切り替えの右に出る');
+  check((await page.locator('[data-testid=info-column] [data-testid=mode-hint]').count()) === 0 && (await page.textContent('[data-testid=info-column]')).trim() === '', '「地点」を選んだ直後：情報の列は空（手がかりも、23区全体のまとめも出ない）');
   check((await page.locator('[data-testid=overall]').count()) === 0, '「地点」を選んだ直後：23区全体のまとめは出ていない');
 
   const [hx, hy] = await topPlanePoint(page);
@@ -216,7 +348,7 @@ async function viewConsistency(browser, base, size) {
   await o.page.getByTestId('mode-point').click();
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), '「地点」へ切り替えても、視点は同じ');
-  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は手がかりの1行（探針なし）');
+  check((await o.page.getAttribute('[data-testid=info-column]', 'data-mode')) === 'empty', '「地点」へ切り替えると、右の列は空（探針なし。手がかりは帯に出る）');
   await o.page.getByTestId('mode-section').click();
   await settle(o.page, 1000);
   check(sameView(v0, (await getState(o.page)).view), '「断面」へ戻しても、視点は同じ');
@@ -340,6 +472,8 @@ try {
   browser = await chromium.launch();
   const sizes = values.sizes.split(',');
   for (const size of sizes) await viewConsistency(browser, base, size);
+  for (const size of sizes) await band(browser, base, size);
+  for (const size of values['narrow-sizes'].split(',').filter(Boolean)) await band(browser, base, size, true);
   await interactions(browser, base, sizes[0]);
 } finally {
   await browser?.close().catch(() => {});

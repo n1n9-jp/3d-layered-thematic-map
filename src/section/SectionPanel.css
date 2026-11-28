@@ -141,55 +141,6 @@
   display: block;
 }
 
-/* 「全体」「地点」「断面」の切り替え。 */
-.ic-modes {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px 4px;
-}
-
-.ic-modes-label {
-  font-size: 11px;
-  color: #8a93a0;
-}
-
-.ic-seg {
-  display: inline-flex;
-  border: 1px solid rgba(255, 255, 255, 0.26);
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.ic-seg button {
-  font: 12.5px sans-serif;
-  color: #d7dde8;
-  background: transparent;
-  border: 0;
-  padding: 3px 14px;
-  cursor: pointer;
-}
-
-.ic-seg button + button {
-  border-left: 1px solid rgba(255, 255, 255, 0.26);
-}
-
-.ic-seg button:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.ic-seg button:focus-visible {
-  outline: 2px solid #5ab4ff;
-  outline-offset: -2px;
-}
-
-.ic-seg button[aria-pressed='true'] {
-  color: #1a1200;
-  background: #ffb000;
-  font-weight: 600;
-}
-
 /* 避難のグラフで、未公開の区間・指定なしの区間に出す名前。 */
 .sc-gap-label {
   font: 9.5px sans-serif;

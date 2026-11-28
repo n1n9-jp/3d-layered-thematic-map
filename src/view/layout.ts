@@ -37,10 +37,51 @@ export const LABEL_ROOM = 80;
 /** 画面の端との最小の隙間（px）。 */
 export const GUTTER = 24;
 /**
- * 左上の題（「東京23区の水害を読む地図」）が占める長方形（px、描画領域の左上が原点）。`src/App.tsx` の header の実測に少し余裕を足した値。
- * 地図の上に置く札は、これに重ならないようにする。
+ * 画面上端の帯（題「東京23区の水害を読む地図」、「全体／地点／断面」の切り替え、モードごとの手がかりの1行）の寸法（px）。
+ * 帯は、地図と情報の列の上にまたがって（右上のパネルの左側いっぱいに）重ねて置く。`src/info/ModeBand.tsx` と `src/info/ModeBand.css` の実測に少し余裕を足した値。
+ * 幅は、題・切り替え・手がかり（いちばん長い文）の順に並べたときの、それぞれの右端までの値。
  */
-export const TITLE_RECT: Rect = { left: 0, top: 0, right: 268, bottom: 54 };
+export const BAND = {
+  /** 画面の左端と、各行の上下の余白。 */
+  pad: 8,
+  padTop: 4,
+  padBottom: 4,
+  /** 1行の高さと、行どうしの間隔。 */
+  rowH: 32,
+  rowGap: 4,
+  /** 同じ行に並ぶものの間隔。 */
+  gap: 8,
+  /** 題・切り替え・手がかり（最大）の幅。 */
+  titleW: 258,
+  switchW: 170,
+  hintW: 258,
+} as const;
+
+/** 帯が並ぶ行の数。題・切り替え・手がかりが1行に収まれば 1、題だけが上の行なら 2、手がかりも別の行に下がれば 3。mapWidth は描画領域（右上のパネルの左側）の幅。 */
+export function bandRows(mapWidth: number): 1 | 2 | 3 {
+  const { pad, gap, titleW, switchW, hintW } = BAND;
+  if (2 * pad + titleW + gap + switchW + gap + hintW <= mapWidth) return 1;
+  if (2 * pad + switchW + gap + hintW <= mapWidth) return 2;
+  return 3;
+}
+
+/** 帯の高さ（px）。情報の列は、この高さのぶん上を空ける。手がかりの有無によらず一定。 */
+export function bandHeight(mapWidth: number): number {
+  const rows = bandRows(mapWidth);
+  return BAND.padTop + rows * BAND.rowH + (rows - 1) * BAND.rowGap + BAND.padBottom;
+}
+
+/**
+ * 帯が占める長方形（px、描画領域の左上が原点）。地図の上に置く札は、これに重ならないようにする。
+ * 手がかりの有無によらず、手がかりが出る場合の範囲で一定にする（札の場所が、モードの切り替えで動かない）。
+ */
+export function bandRect(mapWidth: number): Rect {
+  const { pad, gap, titleW, switchW, hintW } = BAND;
+  const rows = bandRows(mapWidth);
+  const right = rows === 1 ? pad + titleW + gap + switchW + gap + hintW : rows === 2 ? pad + Math.max(titleW, switchW + gap + hintW) : pad + Math.max(titleW, switchW, hintW);
+  return { left: 0, top: 0, right, bottom: bandHeight(mapWidth) };
+}
+
 /**
  * 「選んだ地点の情報」の列（右上のパネルのすぐ左）の幅の範囲（px）と、パネルを除いた画面の幅に対する割合。
  * 列の高さは画面いっぱい（下端は出典の1行を避ける）。中身の有無にかかわらず、この幅を常に確保する。

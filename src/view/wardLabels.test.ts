@@ -3,7 +3,7 @@ import { DATA_OUTLINE } from '../config';
 import type { WardLabel } from '../layers/shelters/model';
 import { fitStack, makeProjector } from './camera';
 import type { Size } from './camera';
-import { convexIntersectsRect, infoColumnWidth, RIGHT_PANEL_W, TITLE_RECT } from './layout';
+import { convexIntersectsRect, infoColumnWidth, RIGHT_PANEL_W, bandRect } from './layout';
 import type { Pt, Rect } from './layout';
 import { stackLabelRects } from './labelLayers';
 import { LABEL_LEVELS, layoutWardLabels } from './wardLabels';
@@ -72,7 +72,7 @@ describe('区名の札の置き場所', () => {
   for (const [w, h] of SIZES)
     for (const [viewName, rx, ro] of VIEWS)
       for (const spacing of SPACINGS)
-        it(`${w}×${h}・${viewName}・間隔 ${spacing / 1000} km：札どうし・題・列・レイヤー名・ほかの段のデータに重ならず、引き出し線が札や線と交わらない`, () => {
+        it(`${w}×${h}・${viewName}・間隔 ${spacing / 1000} km：札どうし・帯・列・レイヤー名・ほかの段のデータに重ならず、引き出し線が札や線と交わらない`, () => {
           const { size, columnWidth, vs, tiers, layerNameRects, layout } = scene(w, h, rx, ro, spacing);
           expect(layout).not.toBeNull();
           const placed = layout!.placed;
@@ -82,12 +82,12 @@ describe('区名の札の置き場所', () => {
           const hullOf = (z: number) => DATA_OUTLINE.map(([x, y]) => pr.project([x, y, z]) as Pt);
           const colLeft = size.width - columnWidth;
           for (const p of placed) {
-            // 札は、描画領域の中、右の列の左、題の外
+            // 札は、描画領域の中、右の列の左、帯の外
             expect(p.rect.left).toBeGreaterThanOrEqual(0);
             expect(p.rect.top).toBeGreaterThanOrEqual(0);
             expect(p.rect.bottom).toBeLessThanOrEqual(size.height);
             expect(p.rect.right).toBeLessThanOrEqual(colLeft);
-            expect(rectsOverlap(p.rect, TITLE_RECT)).toBe(false);
+            expect(rectsOverlap(p.rect, bandRect(size.width))).toBe(false);
             for (const r of layerNameRects) expect(rectsOverlap(p.rect, r)).toBe(false);
             // ほかの段のデータのある範囲に重ならない
             for (const t of tiers) if (t.id !== 'shelters') expect(convexIntersectsRect(hullOf(t.z), p.rect)).toBe(false);

@@ -9,7 +9,7 @@
 //     折りたたみの注記に、足し合わせでないことと、指定なし・未公開の読み方がある。1000×700 では、収まらなければ、スクロールで最後の行まで読める
 //   labels（避難の段の区名の札）
 //     2000×1100・1400×1000・1000×700 の初期表示と、方位（ro=120・-60）・正面・真上・間隔 0 と 20km で、
-//     札どうし・題・右の列・レイヤー名・ほかの段の区境界線と鉄道に重ならず、引き出し線が札や線と交わらない。
+//     札どうし・帯（題・切り替え）・右の列・レイヤー名・ほかの段の区境界線と鉄道に重ならず、引き出し線が札や線と交わらない。
 //     2000×1100・1400×1000 では、8つの札がすべて出る。視点（マウスの移動）では、札の置き場所を決め直さず、間隔を変えたときだけ決め直す
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。
 import { createRequire } from 'node:module';
@@ -287,6 +287,7 @@ async function labels(browser, base, vertices) {
         visible: s.visible,
         solo: s.solo,
         title: box('[data-testid=page-title]'),
+        modeBar: box('[data-testid=mode-bar]'),
         column: box('[data-testid=info-column]'),
         layout: L && { level: L.level, omitted: L.omitted, layerNames: L.layerNames, placed: L.placed.map((p) => ({ name: p.label.name, kind: p.label.kind, text: p.text, rect: p.rect, anchor: p.anchor, attach: p.attach })) },
       };
@@ -327,7 +328,7 @@ async function labels(browser, base, vertices) {
     check(bad.length === 0, `${tag}：引き出し線が、ほかの札や線と交わらない${bad.length ? `（${bad.join('、')}）` : ''}`);
     check(rects.every((r) => r.left >= 0 && r.top >= 0 && r.bottom <= info.canvas.height && r.right <= info.canvas.width), `${tag}：札が描画領域の中に収まる`);
     check(rects.every((r) => !rectsOverlap(r, info.column)), `${tag}：右の列に重ならない（列の左端 ${Math.round(info.column.left)}、札の右端 最大 ${Math.round(Math.max(...rects.map((r) => r.right)))}）`);
-    check(rects.every((r) => !rectsOverlap(r, info.title)), `${tag}：題に重ならない`);
+    check(rects.every((r) => !rectsOverlap(r, info.title) && !rectsOverlap(r, info.modeBar)), `${tag}：帯の題・切り替えに重ならない`);
     check(rects.every((r) => L.layerNames.every((n) => !rectsOverlap(r, n))), `${tag}：レイヤー名に重ならない`);
     // 札の中に、別の段の区境界線・鉄道の頂点がない（避難の段と同じ高さの段は、避難の段自体なので除く）
     const hit = { boundary: 0, rail: 0 };
