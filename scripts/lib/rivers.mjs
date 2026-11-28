@@ -377,3 +377,52 @@ export function distanceToLand(mask) {
   }
   return d;
 }
+
+/**
+ * 面（外周と穴のリング。座標は整数）を、一辺 cell（m）の格子で切り分ける。1つの格子に収まる面は、そのまま。
+ * 外周は格子の線で切り、切り口の座標は 1 m に丸める（格子の線の上の座標は整数なので、隣の面と辺を共有する）。
+ * 穴は、1つの格子に完全に収まるものだけを、その格子の面に付ける（格子をまたぐ穴は、小さな島なので、落とす）。
+ * 戻り値は、面（リングの配列）の配列。
+ */
+export function splitByGrid(rings, cell) {
+  const outer = rings[0];
+  const box = (ring) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of ring) {
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    return [x0, y0, x1, y1];
+  };
+  const [x0, y0, x1, y1] = box(outer);
+  const c0 = Math.floor(x0 / cell);
+  const c1 = Math.floor(x1 / cell);
+  const r0 = Math.floor(y0 / cell);
+  const r1 = Math.floor(y1 / cell);
+  if (c0 === c1 && r0 === r1) return [rings];
+  const holes = rings.slice(1).map((ring) => ({ ring, box: box(ring) }));
+  const out = [];
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const bx0 = c * cell;
+      const by0 = r * cell;
+      const clipped = clipRingToBox(outer, bx0, by0, bx0 + cell, by0 + cell);
+      if (!clipped) continue;
+      const ring = [];
+      for (const [x, y] of clipped) {
+        const q = [Math.round(x), Math.round(y)];
+        const last = ring[ring.length - 1];
+        if (!last || last[0] !== q[0] || last[1] !== q[1]) ring.push(q);
+      }
+      if (ring.length < 4 || Math.abs(signedArea(ring)) < 1) continue;
+      const mine = [ring];
+      for (const h of holes) {
+        if (h.box[0] >= bx0 && h.box[2] <= bx0 + cell && h.box[1] >= by0 && h.box[3] <= by0 + cell) mine.push(h.ring);
+      }
+      out.push(mine);
+    }
+  }
+  return out;
+}

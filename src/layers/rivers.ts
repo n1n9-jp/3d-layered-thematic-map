@@ -16,10 +16,16 @@ import type { FeatureCollection, PolygonGeometry, Position } from '../types';
 /** 川を重ねて描く段。 */
 export const RIVER_TIERS: readonly LayerId[] = ['elevation', 'flood'];
 
-/** 川の水色（塗りと細い川の線）。浸水の桃色・標高の緑〜黄〜白・0m 未満の紫の、どの上でも見分けられる明るい水色。 */
-export const RIVER_COLOR: [number, number, number] = [64, 214, 255];
+/**
+ * 川の水色（23区に近い川の塗りと細い川の線。凡例の見本）。主役は浸水と標高の塗りなので、鮮やかさと明るさを抑えた水色にする。
+ * 浸水の桃色・標高の緑〜黄〜白・0m 未満の紫の、どの上でも水と分かり、紫とは色相が 50 度以上離れる。
+ */
+export const RIVER_COLOR: [number, number, number] = [50, 168, 204];
+/** 23区から離れた川（上流・下流の続き）は、さらに控えめに（暗い青緑）。水のつながりは分かるが、23区の中の塗りより目立たない。 */
+export const RIVER_FAR_COLOR: [number, number, number] = [30, 82, 104];
 /** 細い川にも見える水色の線の太さ（px）。広い川は、実際の幅のまま塗りで見える。 */
-export const RIVER_LINE_PX = 1.7;
+export const RIVER_LINE_PX = 1.4;
+export const RIVER_FAR_LINE_PX = 1.2;
 /**
  * 線を重ねる面の、幅（2 × 面積 ÷ 周長。m）の上限。これより広い面は、塗りだけで線の太さ以上に見える（初期表示で 1 px が約 70 m）。
  * 線の頂点数に描画時間がほぼ比例するので、線は細い面だけに引き、間引く（`PATH_TOLERANCE`）。
@@ -27,6 +33,9 @@ export const RIVER_LINE_PX = 1.7;
 export const THIN_WIDTH_M = 100;
 /** 全体の地図の線の間引きの許容誤差（m）。拡大の上限（1 px が約 2 m）でも 5 px 以内で、塗りは間引かない。 */
 export const PATH_TOLERANCE = 10;
+
+/** 前処理（`scripts/build-rivers.mjs` の SPLIT_CELL_M）が、大きな面を切り分ける格子の大きさ（m）。切り口の辺には、線を引かない。 */
+export const RIVER_GRID_M = 1000;
 
 /** 川の名前の標本の点：x, y（m）と、名前の番号（`names` の添字。-1 は、対象外の川）。 */
 export type RiverSample = readonly [number, number, number];
@@ -39,15 +48,32 @@ export interface RiverAnchor {
   y: number;
 }
 
-/** 描画する形。全体の地図ではデータ全体、クローズアップでは円で切ったもの。 */
-export interface RiverShapes {
+/** 描画する形の一部（23区に近い川、または離れた川）。 */
+export interface RiverPart {
   /** 水域の面（外周と穴のリング）。 */
   polygons: Position[][][];
-  /** 面の縁の線（リングごと。全体の地図では、細い面だけを間引いたもの。円で切ったときは、円の縁の部分を含まない）。 */
+  /** 面の縁の線（全体の地図では、23区に近い川の細い面だけを、切り口の辺を除いて間引いたもの。円で切ったときは、円の縁の部分を含まない）。 */
   paths: Position[][];
 }
 
+/** 描画する形。全体の地図ではデータ全体、クローズアップでは円で切ったもの。 */
+export interface RiverShapes {
+  /** 23区に近い川（区の中、または区から 400 m 以内。区の境が川の真ん中を通る所を含む） */
+  near: RiverPart;
+  /** 23区から離れた川（控えめに描く） */
+  far: RiverPart;
+}
+
+/** 面ごとの外接矩形 [minX, minY, maxX, maxY] をもつ RiverPart。 */
+export interface RiverPartData extends RiverPart {
+  boxes: [number, number, number, number][];
+}
+
 export interface RiverData extends RiverShapes {
+  near: RiverPartData;
+  far: RiverPartData;
+  /** 全部の面（近い・離れたの順）。断面が川を横切る位置の判定に使う。 */
+  polygons: Position[][][];
   /** 名前を付ける川（`river-labels.json` の `names`）。 */
   names: string[];
   /** 幹となる川の名前 */
@@ -56,7 +82,7 @@ export interface RiverData extends RiverShapes {
   anchors: RiverAnchor[];
   /** 名前の標本（x, y, 名前の番号）。断面が川を横切る位置の名前を、いちばん近い標本から引く。 */
   samples: RiverSample[];
-  /** 面ごとの外接矩形 [minX, minY, maxX, maxY]（切り出しと断面の判定を速くする） */
+  /** `polygons` の面ごとの外接矩形 [minX, minY, maxX, maxY]（断面の判定を速くする） */
   boxes: [number, number, number, number][];
 }
 
@@ -67,7 +93,7 @@ interface RiverLabelFile {
   samples: [number, number, number][];
 }
 
-type RiverCollection = FeatureCollection<PolygonGeometry, Record<string, never>>;
+type RiverCollection = FeatureCollection<PolygonGeometry, { in: boolean }>;
 
 const boxOf = (rings: Position[][]): [number, number, number, number] => {
   let x0 = Infinity;
@@ -98,22 +124,52 @@ export function polygonWidth(rings: readonly (readonly Position[])[]): number {
   return perimeter > 0 ? (2 * area) / perimeter : 0;
 }
 
+/** 切り分けた面の切り口（格子の線の上の辺）かどうか。 */
+const onGrid = (a: Position, b: Position) =>
+  (a[0] === b[0] && a[0] % RIVER_GRID_M === 0) || (a[1] === b[1] && a[1] % RIVER_GRID_M === 0);
+
+/** リングを、岸の線（切り口の辺を除いた、つながった折れ線）に分ける。 */
+export function bankPaths(ring: readonly Position[]): Position[][] {
+  const out: Position[][] = [];
+  let cur: Position[] = [];
+  for (let i = 0; i < ring.length - 1; i++) {
+    if (onGrid(ring[i], ring[i + 1])) {
+      if (cur.length >= 2) out.push(cur);
+      cur = [];
+      continue;
+    }
+    if (cur.length === 0) cur.push(ring[i]);
+    cur.push(ring[i + 1]);
+  }
+  if (cur.length >= 2) out.push(cur);
+  return out;
+}
+
 /** `rivers.geojson` と `river-labels.json` を読む。 */
 export async function loadRivers(base: string): Promise<RiverData> {
   const [fc, labels] = await Promise.all([
     fetchJson<RiverCollection>(`${base}rivers.geojson`),
     fetchJson<RiverLabelFile>(`${base}river-labels.json`),
   ]);
-  const polygons = fc.features.map((f) => f.geometry.coordinates);
-  const paths: Position[][] = [];
-  for (const rings of polygons) {
-    if (polygonWidth(rings) >= THIN_WIDTH_M) continue;
-    for (const ring of rings) paths.push(simplifyPath(ring, PATH_TOLERANCE));
-  }
+  const part = (rows: Position[][][], withLines: boolean): RiverPartData => {
+    const paths: Position[][] = [];
+    if (withLines) {
+      for (const rings of rows) {
+        if (polygonWidth(rings) >= THIN_WIDTH_M) continue;
+        for (const ring of rings) paths.push(...bankPaths(simplifyPath(ring, PATH_TOLERANCE)));
+      }
+    }
+    return { polygons: rows, paths, boxes: rows.map(boxOf) };
+  };
+  // 線は、23区に近い川の細い面だけに引く（離れた川は塗りだけ。線の頂点数に描画時間がほぼ比例するため）
+  const near = part(fc.features.filter((f) => f.properties.in).map((f) => f.geometry.coordinates), true);
+  const far = part(fc.features.filter((f) => !f.properties.in).map((f) => f.geometry.coordinates), false);
+  const polygons = [...near.polygons, ...far.polygons];
   return {
+    near,
+    far,
     polygons,
-    paths,
-    boxes: polygons.map(boxOf),
+    boxes: [...near.boxes, ...far.boxes],
     names: labels.names,
     trunk: labels.trunk,
     anchors: labels.anchors,
@@ -167,24 +223,27 @@ function clipRingToConvex(ring: readonly Position[], clip: readonly Position[]):
  * 川を、中心 (cx, cy)・半径 r（m）の円で切り出す（クローズアップ用）。面は円で切り、縁の線は円の中の部分だけ（円の縁には線を引かない）。
  * 円と重ならない面は除く。入力は変更しない。
  */
-export function clipRivers(rivers: Pick<RiverData, 'polygons' | 'boxes'>, cx: number, cy: number, r: number): RiverShapes {
+export function clipRivers(rivers: Pick<RiverData, 'near' | 'far'>, cx: number, cy: number, r: number): RiverShapes {
   const clip = circlePolygon(cx, cy, r);
-  const polygons: Position[][][] = [];
-  const paths: Position[][] = [];
-  rivers.polygons.forEach((rings, i) => {
-    const [x0, y0, x1, y1] = rivers.boxes[i];
-    if (x1 < cx - r || x0 > cx + r || y1 < cy - r || y0 > cy + r) return;
-    const outer = clipRingToConvex(rings[0], clip);
-    if (!outer) return;
-    const kept: Position[][] = [outer];
-    for (const hole of rings.slice(1)) {
-      const h = clipRingToConvex(hole, clip);
-      if (h) kept.push(h);
-    }
-    polygons.push(kept);
-    for (const ring of rings) for (const piece of clipPolylineToCircle(ring, cx, cy, r)) paths.push(piece);
-  });
-  return { polygons, paths };
+  const cut = (src: RiverPartData): RiverPart => {
+    const polygons: Position[][][] = [];
+    const paths: Position[][] = [];
+    src.polygons.forEach((rings, i) => {
+      const [x0, y0, x1, y1] = src.boxes[i];
+      if (x1 < cx - r || x0 > cx + r || y1 < cy - r || y0 > cy + r) return;
+      const outer = clipRingToConvex(rings[0], clip);
+      if (!outer) return;
+      const kept: Position[][] = [outer];
+      for (const hole of rings.slice(1)) {
+        const h = clipRingToConvex(hole, clip);
+        if (h) kept.push(h);
+      }
+      polygons.push(kept);
+      for (const ring of rings) for (const piece of clipPolylineToCircle(ring, cx, cy, r)) paths.push(piece);
+    });
+    return { polygons, paths };
+  };
+  return { near: cut(rivers.near), far: cut(rivers.far) };
 }
 
 // アクセサは参照を固定する（段の高さが変わっても属性を再計算させない）。
@@ -192,37 +251,42 @@ const getPolygon = (d: Position[][]) => d;
 const getPath = (d: Position[]) => d;
 
 /**
- * 高さ z の段に重ねる川のレイヤー（縁取り、塗り、細い川にも見える水色の線）。
+ * 高さ z の段に重ねる川のレイヤー（23区から離れた川、23区に近い川の順。それぞれ塗りと、細い川にも見える線）。
  * データとアクセサの参照は固定で、高さは modelMatrix だけで与える。`tier` は、レイヤーの ID の区別に使う。
  */
 export function riverLayers(shapes: RiverShapes, tier: string, z: number): Layer[] {
-  if (shapes.polygons.length === 0) return [];
   const common = {
     coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     modelMatrix: asModelMatrix(translationMatrix(z)),
     pickable: false,
   } as const;
-  const line = {
-    ...common,
-    data: shapes.paths,
-    getPath,
-    positionFormat: 'XY',
-    widthUnits: 'pixels',
-    billboard: true,
-    // 線は細いので、端と継ぎ目は丸めない（頂点ごとの描画の量が減る）
-    capRounded: false,
-    jointRounded: false,
-  } as const;
-  return [
-    new SolidPolygonLayer<Position[][]>({
-      ...common,
-      id: `rivers-fill-${tier}`,
-      data: shapes.polygons,
-      getPolygon,
-      positionFormat: 'XY',
-      getFillColor: RIVER_COLOR,
-    }),
-    // 細い川（実際の幅が線より細い）だけ、細い線を重ねる。広い川は、塗りで実際の幅のまま見える。
-    new PathLayer<Position[]>({ ...line, id: `rivers-line-${tier}`, getColor: [...RIVER_COLOR, 255], getWidth: RIVER_LINE_PX }),
-  ];
+  const layersOf = (part: RiverPart, name: string, color: readonly [number, number, number], widthPx: number): Layer[] =>
+    part.polygons.length === 0
+      ? []
+      : [
+          new SolidPolygonLayer<Position[][]>({
+            ...common,
+            id: `rivers-fill-${name}-${tier}`,
+            data: part.polygons,
+            getPolygon,
+            positionFormat: 'XY',
+            getFillColor: color,
+          }),
+          // 細い川（実際の幅が線より細い）だけ、細い線を重ねる。広い川は、塗りで実際の幅のまま見える。
+          new PathLayer<Position[]>({
+            ...common,
+            id: `rivers-line-${name}-${tier}`,
+            data: part.paths,
+            getPath,
+            positionFormat: 'XY',
+            getColor: [...color, 255],
+            getWidth: widthPx,
+            widthUnits: 'pixels',
+            billboard: true,
+            // 線は細いので、端と継ぎ目は丸めない（頂点ごとの描画の量が減る）
+            capRounded: false,
+            jointRounded: false,
+          }),
+        ];
+  return [...layersOf(shapes.far, 'far', RIVER_FAR_COLOR, RIVER_FAR_LINE_PX), ...layersOf(shapes.near, 'near', RIVER_COLOR, RIVER_LINE_PX)];
 }

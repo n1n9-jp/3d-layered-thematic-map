@@ -15,8 +15,9 @@ const boxOf = (rings: Position[][]): [number, number, number, number] => {
 function rivers(polys: Position[][][], extra: Partial<RiverData> = {}): RiverData {
   return {
     polygons: polys,
-    paths: polys.flat(),
     boxes: polys.map(boxOf),
+    near: { polygons: polys, paths: polys.flat(), boxes: polys.map(boxOf) },
+    far: { polygons: [], paths: [], boxes: [] },
     names: ['大川', '小川'],
     trunk: ['大川'],
     anchors: [],
@@ -118,7 +119,7 @@ describe('実データ：例の線が川を横切る位置', () => {
   const fc = read('rivers.geojson') as { features: { geometry: { coordinates: Position[][] } }[] };
   const labels = read('river-labels.json') as Pick<RiverData, 'names' | 'trunk' | 'anchors' | 'samples'>;
   const polygons = fc.features.map((f) => f.geometry.coordinates);
-  const data: RiverData = { polygons, paths: polygons.flat(), boxes: polygons.map(boxOf), ...labels };
+  const data: RiverData = { polygons, boxes: polygons.map(boxOf), near: { polygons, paths: [], boxes: polygons.map(boxOf) }, far: { polygons: [], paths: [], boxes: [] }, ...labels };
   const names = (id: string) => {
     const e = EXAMPLE_LINES.find((x) => x.id === id)!;
     return computeRiverCrossings(data, e.line).map((c) => c.name);

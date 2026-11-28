@@ -383,9 +383,16 @@ function makeRivers() {
   const joinX = -6000;
   for (let y = 12500; y >= mainY(joinX); y -= 250) trib.push([joinX + Math.round(500 * Math.sin(y / 1800)), y]);
   trib.push([joinX, mainY(joinX)]);
+  // 本流は 2 km ごとの面に分け、仮の都市（半径 13 km）に近いかを、面の真ん中で決める（`in`。近くなければ控えめに描く）
+  const chunks = [];
+  for (let i = 0; i + 1 < main.length; i += 8) chunks.push(main.slice(i, Math.min(main.length, i + 9)));
+  const near = (center) => {
+    const mid = center[Math.floor(center.length / 2)];
+    return Math.hypot(mid[0], mid[1]) <= CITY_RADIUS + 400;
+  };
   const rivers = collection([
-    feature({ type: 'Polygon', coordinates: bandPolygon(main, 500) }, {}),
-    feature({ type: 'Polygon', coordinates: bandPolygon(trib, 160) }, {}),
+    ...chunks.map((c) => feature({ type: 'Polygon', coordinates: bandPolygon(c, 500) }, { in: near(c) })),
+    feature({ type: 'Polygon', coordinates: bandPolygon(trib, 160) }, { in: near(trib) }),
   ]);
   const samples = [...main.map(([x, y]) => [x, y, 0]), ...trib.map(([x, y]) => [x, y, 1])];
   const anchorOf = (center, k, at) => ({ name: FIXTURE_RIVER_NAMES[k], trunk: k === 0, x: center[at][0], y: center[at][1] });

@@ -894,6 +894,15 @@ describe('川（rivers.geojson と river-labels.json）', () => {
     expect(validateGeoJson('rivers.geojson', open).violationCount).toBeGreaterThan(0);
   });
 
+  it('rivers.geojson の属性 in（23区に近いか）は真偽値で必須', () => {
+    const noIn = clone(rivers);
+    delete noIn.features[0].properties.in;
+    expect(validateGeoJson('rivers.geojson', noIn).violations.map((v) => v.message).join()).toContain('項目 in がない');
+    const bad = clone(rivers);
+    bad.features[0].properties.in = 1;
+    expect(validateGeoJson('rivers.geojson', bad).violationCount).toBeGreaterThan(0);
+  });
+
   it('rivers.geojson の座標が EXTENT の外、または整数でなければ違反', () => {
     const out = clone(rivers);
     out.features[0].geometry.coordinates[0][0] = [EXTENT.maxX + 1, 0];

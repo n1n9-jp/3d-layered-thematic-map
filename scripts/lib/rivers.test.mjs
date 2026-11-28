@@ -12,6 +12,7 @@ import {
   ringPerimeter,
   signedArea,
   simplifyRing,
+  splitByGrid,
 } from './rivers.mjs';
 
 const square = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
@@ -180,5 +181,36 @@ describe('名前を水に沿って伝える', () => {
   it('nearestWaterCell は、近くに水がなければ null', () => {
     const { m, labels, allowed } = build();
     expect(nearestWaterCell(m, labels, allowed, 900, 500, 50)).toBeNull();
+  });
+});
+
+describe('splitByGrid', () => {
+  const sq = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+  it('1つの格子に収まる面は、そのまま', () => {
+    const rings = [sq(10, 10, 900, 400)];
+    expect(splitByGrid(rings, 1000)).toEqual([rings]);
+  });
+  it('格子をまたぐ面は、格子ごとの面に切り分ける（面積の合計は変わらない。切り口は格子の線の上の整数座標）', () => {
+    const rings = [sq(500, 200, 2500, 800)];
+    const out = splitByGrid(rings, 1000);
+    expect(out).toHaveLength(3);
+    expect(out.reduce((s, p) => s + Math.abs(signedArea(p[0])), 0)).toBe(2000 * 600);
+    for (const p of out) for (const [x, y] of p[0]) expect(Number.isInteger(x) && Number.isInteger(y)).toBe(true);
+    // 隣り合う面は、格子の線 x=1000 の上に、同じ辺をもつ
+    const onLine = (ring) => new Set(ring.filter(([x]) => x === 1000).map(([, y]) => y));
+    expect([...onLine(out[0][0])].sort()).toEqual([200, 800]);
+    expect([...onLine(out[1][0])].sort()).toEqual([200, 800]);
+  });
+  it('1つの格子に収まる穴は、その格子の面に付ける。格子をまたぐ穴は落とす', () => {
+    const inner = [...sq(600, 300, 700, 400)].reverse();
+    const across = [...sq(950, 300, 1050, 400)].reverse();
+    const out = splitByGrid([sq(500, 200, 2500, 800), inner, across], 1000);
+    expect(out[0]).toHaveLength(2);
+    expect(out.slice(1).every((p) => p.length === 1)).toBe(true);
+  });
+  it('負の座標でも、格子の線で切る', () => {
+    const out = splitByGrid([sq(-1500, -200, 500, 200)], 1000); // 3 列 × 2 行（y = 0 の線でも切る）
+    expect(out).toHaveLength(6);
+    expect(out.reduce((s, p) => s + Math.abs(signedArea(p[0])), 0)).toBe(2000 * 400);
   });
 });

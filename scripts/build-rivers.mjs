@@ -24,6 +24,7 @@ import { decodeTile } from './lib/mvt.mjs';
 import { DATA_DIR } from './lib/paths.mjs';
 import {
   Mask,
+  splitByGrid,
   clipRingToBox,
   midpointOf,
   distanceToLand,
@@ -64,6 +65,10 @@ const NARROW_PENALTY = 5;
 const WIDE_HALF_WIDTH_M = 50;
 /** 名前の標本を、名前ごとにこの大きさの正方形に 1 点ずつ取る（m）。 */
 const SAMPLE_BLOCK_M = 250;
+/** 大きな面を切り分ける格子の大きさ（m）。画面側の RIVER_GRID_M（src/layers/rivers.ts）と同じ値。 */
+const SPLIT_CELL_M = 1000;
+/** 「23区に近い」と判定する、23区の外へ広げる距離（m）。 */
+const NEAR_WARD_M = 400;
 /** 連結成分を求める格子のセル（m）。 */
 const GRID_CELL_M = 10;
 
@@ -246,15 +251,41 @@ async function build() {
       const ccw = signedArea(ring) > 0;
       return (k === 0) === ccw ? ring : [...ring].reverse();
     });
-    for (const ring of oriented) vertsAfter += ring.length;
     const body = bodyId.get(p.component); // 水域の番号（大きい順）。出力の並びを、近い面がまとまるように決めるのに使う
     p.body = body;
-    features.push({ body, feature: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: oriented } } });
+    // 大きな面は、1000 m の格子で切り分ける（23区に近いかを、小さな単位で決めるため）。切り分けた面は、隣と辺を共有する
+    for (const sub of splitByGrid(oriented, SPLIT_CELL_M)) {
+      vertsAfter += sub.reduce((n, ring) => n + ring.length, 0);
+      features.push({ body, rings: sub });
+    }
   }
   // 水域の番号順（大きい順）、同じ水域の中は読んだ順
   features.sort((a, b) => a.body - b.body);
-  const file = await writeFeatureCollection('rivers.geojson', features.map((f) => f.feature));
-  console.log(`rivers.geojson: 面 ${features.length}、頂点 ${vertsBefore} → ${vertsAfter}、出力 ${file}`);
+  // 23区に近いか（in）：面の頂点の平均と、そのまわり 400 m の 8 方向の点のどれかが、23区の中にあれば true。
+  // 23区の境は川の真ん中を通ることが多いので、境の川は「近い」とする。区から離れた上流・下流は、控えめに描く。
+  const nearWards = loadWards();
+  const isNear = (rings) => {
+    const outer = rings[0];
+    let cx = 0;
+    let cy = 0;
+    for (const [x, y] of outer) { cx += x; cy += y; }
+    cx /= outer.length;
+    cy /= outer.length;
+    if (nearWards.contains(cx, cy)) return true;
+    for (let k = 0; k < 8; k++) {
+      const t = (k * Math.PI) / 4;
+      if (nearWards.contains(cx + NEAR_WARD_M * Math.cos(t), cy + NEAR_WARD_M * Math.sin(t))) return true;
+    }
+    return false;
+  };
+  let nearCount = 0;
+  const out = features.map((f) => {
+    const near = isNear(f.rings);
+    if (near) nearCount++;
+    return { type: 'Feature', properties: { in: near }, geometry: { type: 'Polygon', coordinates: f.rings } };
+  });
+  const file = await writeFeatureCollection('rivers.geojson', out);
+  console.log(`rivers.geojson: 面 ${features.length}（23区に近い ${nearCount}）、頂点 ${vertsBefore} → ${vertsAfter}、出力 ${file}`);
 
   // --- 川の名前。注記（河川名）は、川ごとに数か所しかなく、川に沿った短い線なので、断面が川を横切る位置の名前は、注記だけでは決まらない。
   // そこで、水域の格子（mask）の上で、すべての川の注記を起点に、水に沿った距離がいちばん近い起点の名前を、水のセルごとに決める

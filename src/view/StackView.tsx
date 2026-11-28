@@ -43,6 +43,20 @@ import type { ZMap } from './useDisplayedZ';
 
 const { minX, minY, maxX, maxY } = EXTENT;
 
+/** 川の名前の札の置き場所を決め直すまでの、視点が止まっている時間（ms）。 */
+export const RIVER_LABEL_SETTLE_MS = 160;
+
+/** value が変わってから、ms のあいだ変わらなければ、その値を返す（それまでは、前の値）。最初の値はそのまま返す。 */
+function useSettled<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (Object.is(settled, value)) return;
+    const t = window.setTimeout(() => setSettled(value), ms);
+    return () => window.clearTimeout(t);
+  }, [value, ms, settled]);
+  return settled;
+}
+
 /** 断面で、右のチャートにカーソルがあるとき、ほかの段の描画を暗くする（不透明度に掛ける値）。 */
 const DIM_OPACITY = 0.38;
 const dimCache = new WeakMap<Layer, Layer>();
@@ -397,6 +411,9 @@ export default function StackView({ columnWidth }: Props) {
   const openLayer = useMapStore((s) => s.open.layer);
   const riverLabelTier = openLayer !== null && RIVER_TIERS.includes(openLayer) ? openLayer : null;
   const riverLabelZ = visibleIds.find((t) => t.id === riverLabelTier)?.z ?? null;
+  // 札の置き場所は、視点の操作が止まってから決め直す（ドラッグや拡大のあいだ、毎フレーム決め直さない）。
+  // 操作のあいだ、札は、前に置いた場所（段の平面の上の座標）に付いたまま、平面と一緒に動く。
+  const labelView = useSettled(viewState, RIVER_LABEL_SETTLE_MS);
   const riverLayout = useMemo(() => {
     if (!riverData || riverLabelTier === null || riverLabelZ === null || !size) return null;
     const tiers = tiersKey.split(',').map((s) => {
@@ -405,14 +422,14 @@ export default function StackView({ columnWidth }: Props) {
     });
     return layoutRiverLabels({
       anchors: riverData.anchors.filter((a) => a.trunk),
-      viewState,
+      viewState: labelView,
       size,
       z: riverLabelZ,
       otherZs: tiers.filter((t) => t.id !== riverLabelTier).map((t) => t.z),
       columnWidth,
       layerNameRects: stackLabelRects({ tiers, viewState, size }),
     });
-  }, [riverData, riverLabelTier, riverLabelZ, size, tiersKey, viewState, columnWidth]);
+  }, [riverData, riverLabelTier, riverLabelZ, size, tiersKey, labelView, columnWidth]);
   const riverLabelLayerList = useMemo(() => (riverLayout ? riverLabelLayers(riverLayout) : []), [riverLayout]);
   useEffect(() => {
     window.__riverLabels = riverLayout;

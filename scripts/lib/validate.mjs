@@ -164,15 +164,16 @@ export const GEOJSON_SPECS = {
   },
 };
 
-// 川（水域の面）。属性は持たない（名前は river-labels.json）。面は外周と穴のリングで、外周の面積が 0 でないこと。
+// 川（水域の面）。属性は `in`（23区に近いか。近くない川は控えめに描く）だけ（名前は river-labels.json）。面は外周と穴のリングで、外周の面積が 0 でないこと。
 GEOJSON_SPECS['rivers.geojson'] = {
   geometry: ['Polygon'],
-  properties: {},
+  properties: { in: { test: isBoolean, expect: '真偽値（23区に近いか）' } },
   extra: (geom) => (polygonArea(geom.coordinates.slice(0, 1)) >= 1 ? null : '外周の面積が 0（1 m² 未満）'),
   summarize: (features) => {
     let area = 0;
     for (const f of features) if (f?.geometry?.type === 'Polygon' && Array.isArray(f.geometry.coordinates)) area += polygonArea(f.geometry.coordinates);
-    return [`水域の面積の合計: ${(area / 1e6).toFixed(2)} km²`];
+    const near = features.filter((f) => f?.properties?.in === true).length;
+    return [`水域の面積の合計: ${(area / 1e6).toFixed(2)} km²、23区に近い面: ${near} / ${features.length}`];
   },
 };
 
