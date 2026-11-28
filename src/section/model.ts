@@ -328,10 +328,13 @@ export function summaryLine(id: LayerId, tracks: readonly SectionTrack[]): strin
       return `路線との交差 ${rail}・近くの駅 ${stations}`;
     }
     case 'shelters': {
-      const usable = all.filter((m) => m.category === 'shelter-usable').length;
+      const usableMarks = all.filter((m) => m.category === 'shelter-usable');
       const other = all.filter((m) => m.category === 'shelter-other').length;
       const hospital = all.filter((m) => m.category === 'hospital').length;
-      return `避難場所 洪水・高潮用 ${usable}・それ以外 ${other}・病院 ${hospital}`;
+      const known = usableMarks.some((m) => m.inside !== undefined);
+      const inside = usableMarks.filter((m) => m.inside).length;
+      const split = known ? `（区域の外 ${usableMarks.length - inside}・中 ${inside}）` : '';
+      return `避難場所 洪水・高潮用 ${usableMarks.length}${split}・それ以外 ${other}・病院 ${hospital}`;
     }
     default: {
       return tracks.map((t) => t.label).join('・');

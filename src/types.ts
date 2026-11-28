@@ -173,6 +173,8 @@ export interface SectionMarks {
     y: number;
     /** 浸水が想定される区域（深さ 0.5m 以上）にあるか。公共交通の交差・駅だけが持つ */
     exposed?: boolean;
+    /** 洪水・高潮で使える避難場所だけ。その位置が、浸水が想定される区域の中（深さ 0.5m 以上）か。中は輪郭だけの丸、外は塗った丸で描く */
+    inside?: boolean;
   }[];
   /** 線から離れた地物を探した距離（m）。縦軸（線からの距離）の左右の端。指定がなければレイヤーごとの既定 */
   radius?: number;
@@ -210,10 +212,10 @@ export interface LegendItem {
   color: [number, number, number];
   label: string;
   /**
-   * 見本の形。省略は塗りの四角。'hatch' は灰の斜線（データ未公開で、浸水が小さい区）、'hatch-deep' は灰の斜線に琥珀の塗りと縁（データ未公開で、浸水が深い区）、
-   * 'alert' は琥珀の太い斜線と縁（浸水が深いのに指定がない区）、'faint' はごく薄い塗り（浸水が小さく指定がない区）
+   * 見本の形。省略は塗りの四角。'hatch' は斜線（データ未公開の区）、'frame' は輪郭の枠（指定なしの区）、
+   * 'dot' は塗りの丸（浸水が想定される区域の外の避難場所）、'ring' は輪郭だけの丸（区域の中の避難場所）
    */
-  swatch?: 'hatch' | 'frame';
+  swatch?: 'hatch' | 'frame' | 'dot' | 'ring';
 }
 
 export interface ProbeValue {
@@ -232,7 +234,7 @@ export interface LayerModule<D> {
   render(data: D, ctx: LayerRenderContext): Layer[];
   /**
    * 地点 (x, y) の値（探針用）。切り替えにかかわらず、そのレイヤーの値をすべて返す。
-   * options は、他のレイヤーの選択に値が連動するレイヤー（公共交通の、浸水の想定）だけが読む。
+   * options は、他のレイヤーの選択に値が連動するレイヤー（公共交通と避難の、浸水の想定）だけが読む。
    */
   sample(data: D, x: number, y: number, options?: LayerOptions): ProbeValue[];
   /** 中心 (cx, cy)・半径 radius（m）の円の中だけを取り出した、同じ形のデータを返す。render と sample にそのまま渡せる。 */

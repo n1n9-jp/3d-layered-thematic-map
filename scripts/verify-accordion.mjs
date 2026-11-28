@@ -114,7 +114,7 @@ async function tabTo(page, selector, n = 60) {
   console.log('\n[2・3] マウスで開閉');
   await page.click('[data-testid=layer-toggle-shelters]');
   check((await openIds(page)).join() === 'shelters', '避難の名前を押すと、避難の行が開く');
-  check((await page.locator('[data-testid=legend-shelters] li').count()) === 5, '開いた行に、凡例の5行が出る');
+  check((await page.locator('[data-testid=legend-shelters] li').count()) === 6, '開いた行に、凡例の6行（区域の外・中の2行を含む）が出る');
   check(await page.isVisible('[data-testid=notes-shelters] summary'), '開いた行に「読み方と注意」の見出しが出る');
   await sleep(1200);
   check((await labelCount(page)) === 8, '避難の行を開いているあいだ、区名の札が8枚出る');
