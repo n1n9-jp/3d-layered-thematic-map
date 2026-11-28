@@ -43,6 +43,18 @@ const ENTRIES: Entry[] = [
     asOf: '航空レーザ測量による5mメッシュ（DEM5A）',
   },
   {
+    name: '川',
+    sources: [
+      {
+        before: '「国土地理院最適化ベクトルタイル」（国土地理院）（',
+        url: 'https://github.com/gsi-cyberjapan/optimal_bvmap',
+        after: '）を加工して作成',
+      },
+    ],
+    asOf: 'データの取得は 2026年11月（試験公開のタイル）',
+    notes: ['水域の面のうち、川などの水部を取り出して描いています。海は含みません。'],
+  },
+  {
     name: '浸水想定（洪水）',
     sources: [
       {
