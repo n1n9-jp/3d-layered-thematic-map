@@ -5,7 +5,7 @@ import { cutCloseup } from '../closeup/cut';
 import { DEFAULT_OPTIONS, EXTENT } from '../config';
 import type { LayerStatus } from '../store';
 import type { Position } from '../types';
-import { RIVER_CASING, RIVER_COLOR, RIVER_TIERS, clipRivers, loadRivers, riverLayers } from './rivers';
+import { PATH_TOLERANCE, RIVER_COLOR, RIVER_TIERS, THIN_WIDTH_M, clipRivers, loadRivers, polygonWidth, riverLayers } from './rivers';
 import type { RiverData } from './rivers';
 
 const rect = (x0: number, y0: number, x1: number, y1: number): Position[] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
@@ -66,9 +66,9 @@ describe('clipRivers', () => {
 
 describe('riverLayers', () => {
   const shapes = { polygons: [[rect(0, 0, 10, 10)]], paths: [rect(0, 0, 10, 10)] };
-  it('縁取り・塗り・線の3つ。縁取りが塗りの下', () => {
+  it('塗りと、細い川にも見える線の2つ。線が塗りの上', () => {
     const layers = riverLayers(shapes, 'flood', 12000);
-    expect(layers.map((l) => l.id)).toEqual(['rivers-casing-flood', 'rivers-fill-flood', 'rivers-line-flood']);
+    expect(layers.map((l) => l.id)).toEqual(['rivers-fill-flood', 'rivers-line-flood']);
     expect(layers.every((l) => l.props.pickable === false)).toBe(true);
   });
   it('高さは modelMatrix だけで与える（データは同じ参照）', () => {
@@ -83,10 +83,24 @@ describe('riverLayers', () => {
   it('標高と浸水の段に描く', () => {
     expect([...RIVER_TIERS]).toEqual(['elevation', 'flood']);
   });
-  it('水色は明るく、縁取りは暗い', () => {
+  it('水色は明るい', () => {
     const luma = ([r, g, b]: readonly number[]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
     expect(luma(RIVER_COLOR)).toBeGreaterThan(150);
-    expect(luma(RIVER_CASING)).toBeLessThan(60);
+  });
+});
+
+describe('polygonWidth', () => {
+  it('細長い面の幅は、川幅にほぼ等しい（2 × 面積 ÷ 周長）', () => {
+    expect(polygonWidth([rect(0, 0, 10000, 50)])).toBeCloseTo((2 * 10000 * 50) / (2 * 10050), 6);
+    expect(polygonWidth([rect(0, 0, 10000, 50)])).toBeGreaterThan(49);
+  });
+  it('穴は面積から引く。周長には足す', () => {
+    const hole = [...rect(100, 10, 200, 40)].reverse();
+    expect(polygonWidth([rect(0, 0, 10000, 50), hole])).toBeLessThan(polygonWidth([rect(0, 0, 10000, 50)]));
+  });
+  it('線を重ねる面の幅の上限と、間引きの許容誤差は、初期表示の 1 px（約 70 m）と拡大の上限に照らして決めている', () => {
+    expect(THIN_WIDTH_M).toBeLessThanOrEqual(110);
+    expect(PATH_TOLERANCE).toBeLessThanOrEqual(10);
   });
 });
 
@@ -99,12 +113,14 @@ describe('実データの川', () => {
       return { ok: true, status: 200, json: async () => JSON.parse(readFileSync(`${dir}${file}`, 'utf8')) };
     });
 
-  it('loadRivers は、面・外接矩形・名前・札の根元・標本を読む', async () => {
+  it('loadRivers は、面・外接矩形・名前・札の根元・標本を読む。縁の線は、細い面だけを間引いたもの（頂点が面の半分以下）', async () => {
     stub();
     const d = await loadRivers('/data/');
     expect(d.polygons.length).toBeGreaterThan(500);
     expect(d.boxes).toHaveLength(d.polygons.length);
-    expect(d.paths.length).toBeGreaterThanOrEqual(d.polygons.length);
+    const verts = (rings: Position[][]) => rings.reduce((s, r) => s + r.length, 0);
+    expect(verts(d.paths)).toBeLessThan(0.5 * verts(d.polygons.flat()));
+    expect(d.paths.length).toBeGreaterThan(0);
     expect(d.names).toContain('荒川');
     expect(d.samples.length).toBeGreaterThan(1000);
     for (const [x0, y0, x1, y1] of d.boxes) {

@@ -5,9 +5,10 @@
 //   1. 初期状態は、レイヤー一覧の5行・23区全体の表と注記・断面の集計・地点の表の行が、すべて閉じている（凡例・切り替え・表はDOMにない。区名の札も出ない）。
 //      見出しは button 要素で、aria-expanded を持つ
 //   2. レイヤー名を押すと、その行が開き（凡例・切り替えが出る）、別の行を押すと、開いていた行が閉じる（同時に開けるのは1つ）。もう一度押すと閉じる
-//   3. 避難の行を開いているあいだだけ、区名の札が8枚出る
+//   3. 避難の行を開いているあいだだけ、区名の札が8枚出る。浸水または標高の行を開いているあいだだけ、川の名前の札が5枚出て、凡例に「川」の行がある
 //   4. キーボード（Tab で見出しへ移り、Enter・スペースで開閉）でも、同じ開閉ができる
 //   5. 既定以外の切り替えは、閉じた行にも小さく出る（「高潮・深さ」「65歳以上」）
+//   7（断面）. 標高と浸水のグラフにだけ、川を横切る位置（縦線）が出る
 //   6. 固定した探針の表の行：押すと開き、別の行で閉じる（同時に1つ）。23区全体の表・注記は、それぞれ独立に開閉する
 // 1つでも外れれば、内容を表示して終了コード 1。
 import { createRequire } from 'node:module';
@@ -84,6 +85,7 @@ const IDS = ['elevation', 'flood', 'population', 'transit', 'shelters'];
 const expanded = (page, id) => page.getAttribute(`[data-testid=layer-toggle-${id}]`, 'aria-expanded');
 const openIds = async (page) => (await Promise.all(IDS.map(async (id) => ((await expanded(page, id)) === 'true' ? id : null)))).filter(Boolean);
 const labelCount = (page) => page.evaluate(() => (window.__wardLabels ? window.__wardLabels.placed.length : 0));
+const riverLabelCount = (page) => page.evaluate(() => (window.__riverLabels ? window.__riverLabels.placed.length : 0));
 /** Tab で、selector の要素にフォーカスが来るまで進める（最大 n 回）。来たら true。 */
 async function tabTo(page, selector, n = 60) {
   for (let i = 0; i < n; i++) {
@@ -102,6 +104,7 @@ async function tabTo(page, selector, n = 60) {
   const tags = await Promise.all(IDS.map((id) => page.$eval(`[data-testid=layer-toggle-${id}]`, (e) => e.tagName)));
   check(tags.every((t) => t === 'BUTTON'), 'レイヤー名の見出しは button 要素');
   check((await labelCount(page)) === 0, '区名の札は出ない');
+  check((await riverLabelCount(page)) === 0, '川の名前の札も出ない（初期状態）');
   check((await page.getAttribute('[data-testid=overall-table-toggle]', 'aria-expanded')) === 'false' && (await page.getAttribute('[data-testid=overall-notes-toggle]', 'aria-expanded')) === 'false', '23区全体の表と注記の見出しは閉じている');
   check((await page.locator('[data-testid=overall-exposure]').count()) === 0 && (await page.locator('[data-testid=overall-notes-body]').count()) === 0, '表と注記は、DOM にない');
   check((await page.locator('[data-testid^=layer-summary-]').count()) === 0, '既定のままなので、閉じた行に選択の表示は付かない');
@@ -123,8 +126,23 @@ async function tabTo(page, selector, n = 60) {
   check((await page.locator('[data-testid=legend-shelters]').count()) === 0 && (await page.locator('[data-testid=opt-floodScenario-tide]').count()) === 1, '避難の凡例は消え、浸水の切り替えが出る');
   await sleep(800);
   check((await labelCount(page)) === 0, '避難の行を閉じると、区名の札が消える');
+  check((await riverLabelCount(page)) === 5, '浸水の行を開いているあいだ、川の名前の札が5枚出る');
+  const floodLegend = await page.$$eval('[data-testid=legend-flood] li', (els) => els.map((e) => e.textContent.trim()));
+  check(floodLegend[floodLegend.length - 1] === '川', `浸水の凡例の最後に「川」の行がある（${floodLegend[floodLegend.length - 1]}）`);
   await page.click('[data-testid=layer-toggle-flood]');
   check((await openIds(page)).length === 0, '開いている行をもう一度押すと閉じる');
+  await sleep(500);
+  check((await riverLabelCount(page)) === 0, '浸水の行を閉じると、川の名前の札が消える');
+  await page.click('[data-testid=layer-toggle-elevation]');
+  await sleep(1200);
+  check((await riverLabelCount(page)) === 5, '標高の行を開いているあいだ、川の名前の札が5枚出る');
+  const elevLegend = await page.$$eval('[data-testid=legend-elevation] li', (els) => els.map((e) => e.textContent.trim()));
+  check(elevLegend[elevLegend.length - 1] === '川', `標高の凡例の最後に「川」の行がある（${elevLegend[elevLegend.length - 1]}）`);
+  check((await page.textContent('[data-testid=notes-elevation]')).includes('紫の所（0m 未満）'), '標高の注記は、0m 未満を「紫の所」と書いている');
+  await page.click('[data-testid=layer-toggle-population]');
+  await sleep(500);
+  check((await riverLabelCount(page)) === 0, '人口の行を開くと（標高の行は閉じる）、川の名前の札は消える');
+  await page.click('[data-testid=layer-toggle-population]');
   // 5. 選択の表示
   await page.click('[data-testid=layer-toggle-flood]');
   await page.click('[data-testid=opt-floodScenario-tide]');
@@ -197,6 +215,11 @@ async function tabTo(page, selector, n = 60) {
   console.log('\n[7] 断面の集計');
   check((await page.getAttribute('[data-testid=section-summary-acc-toggle]', 'aria-expanded')) === 'false' && (await page.locator('[data-testid=section-headline]').count()) === 0, '線に沿った集計は、初期状態では閉じている');
   check((await page.locator('[data-testid=section-chart]').count()) === 5, '5つのグラフは、閉じていても見えている');
+  const riverMarks = async (id) => page.locator(`[data-testid=section-chart][data-layer=${id}] [data-testid=section-river]`).count();
+  check((await riverMarks('flood')) >= 4 && (await riverMarks('elevation')) >= 4, '浸水と標高のグラフに、川を横切る位置の縦線が出る');
+  check((await Promise.all(['population', 'transit', 'shelters'].map(riverMarks))).every((n) => n === 0), '人口・公共交通・避難のグラフには、川の縦線は出ない');
+  const riverNames = await page.$$eval('[data-testid=section-chart][data-layer=flood] [data-testid=section-river-name]', (els) => els.map((e) => e.textContent));
+  check(riverNames.includes('隅田川') && riverNames.includes('荒川'), `浸水のグラフに、川の名前（隅田川・荒川）が出る（${riverNames.join('、')}）`);
   await page.focus('[data-testid=section-summary-acc-toggle]');
   await page.keyboard.press('Enter');
   check((await page.locator('[data-testid=section-headline]').count()) === 1, 'Enter で開くと、集計が出る');
