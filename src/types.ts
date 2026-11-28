@@ -159,6 +159,8 @@ export interface SectionMarks {
     color: [number, number, number];
     x: number; // その地物の地点（ローカル座標）
     y: number;
+    /** 浸水が想定される区域（深さ 0.5m 以上）にあるか。公共交通の交差・駅だけが持つ */
+    exposed?: boolean;
   }[];
   /** 線から離れた地物を探した距離（m）。縦軸（線からの距離）の左右の端。指定がなければレイヤーごとの既定 */
   radius?: number;
@@ -216,8 +218,11 @@ export interface LayerModule<D> {
   load(base: string): Promise<D>;
   /** deck.gl レイヤー。id は `${id}-*` */
   render(data: D, ctx: LayerRenderContext): Layer[];
-  /** 地点 (x, y) の値（探針用）。切り替えにかかわらず、そのレイヤーの値をすべて返す */
-  sample(data: D, x: number, y: number): ProbeValue[];
+  /**
+   * 地点 (x, y) の値（探針用）。切り替えにかかわらず、そのレイヤーの値をすべて返す。
+   * options は、他のレイヤーの選択に値が連動するレイヤー（公共交通の、浸水の想定）だけが読む。
+   */
+  sample(data: D, x: number, y: number, options?: LayerOptions): ProbeValue[];
   /** 中心 (cx, cy)・半径 radius（m）の円の中だけを取り出した、同じ形のデータを返す。render と sample にそのまま渡せる。 */
   subset(data: D, cx: number, cy: number, radius: number): D;
   /** データ（ふつうは subset の結果）の集計を返す。切り替えに従う。 */

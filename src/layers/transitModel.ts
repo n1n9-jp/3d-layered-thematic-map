@@ -3,6 +3,11 @@ import type { Circle } from '../lib/circleClip';
 import { createBoxIndex, intersectLineSegment, isUsableLine, lineLength, projectOnLine } from '../lib/section';
 import type { BoxIndex } from '../lib/section';
 import { createPointIndex, createSegmentIndex } from '../lib/spatialIndex';
+import { DEFAULT_OPTIONS } from '../config';
+import type { FloodScenario, LayerOptions } from '../config';
+import { SCENARIO_LABEL } from './flood/classes';
+import type { FloodData } from './flood/model';
+import { EXPOSED_MIN_DEPTH, isExposedAt, transitExposure } from './transit/exposure';
 import type { PointIndex, Segment, SegmentIndex } from '../lib/spatialIndex';
 import type { Position, ProbeValue, RailCollection, SectionLine, SectionMarks, StationCollection } from '../types';
 import { formatDistance, unique, withSuffix } from './format';
@@ -24,6 +29,11 @@ export interface TransitData {
   /** 路線（事業者＋路線名）ごとの線分索引。「通る路線」の探索用 */
   lines: { name: string; index: SegmentIndex }[];
   stationIndex: PointIndex;
+  /**
+   * 浸水の段の格子（読み取り専用）。駅と路線が「浸水が想定される区域」にかかるかの判定に使う（`./transit/exposure.ts`）。
+   * 読み込めなかったとき・まだ付けていないときは null か省略。subset の結果も、切り出さない全体の格子を持つ。
+   */
+  flood?: FloodData | null;
   /** subset の結果のとき、切り出した円。この円の外の地点は sample が値なしにする */
   clip?: Circle;
 }
@@ -78,19 +88,36 @@ export function subsetTransit(data: TransitData, cx: number, cy: number, radius:
     { ...data.stations, features: stations },
     0,
   );
-  return { ...built, clip: { cx, cy, r: radius } };
+  return { ...built, flood: data.flood, clip: { cx, cy, r: radius } };
 }
 
-export function summarizeTransit(data: TransitData): ProbeValue[] {
+export function summarizeTransit(data: TransitData, options: Pick<LayerOptions, 'floodScenario'> = DEFAULT_OPTIONS): ProbeValue[] {
   const stationNames = new Set(data.stations.features.map((f) => f.properties.name));
   const lineNames = new Set(data.rail.features.map((f) => f.properties.line));
-  return [
+  const out: ProbeValue[] = [
     { label: '駅', value: stationNames.size, unit: '駅' },
     { label: '路線', value: lineNames.size, unit: '路線' },
   ];
+  // うち、浸水が想定される区域（深さ 0.5m 以上）にある駅。同じ駅名は1つと数える（上の「駅」と同じ数え方）。
+  const exposure = transitExposure(data, options.floodScenario);
+  if (exposure) {
+    const exposedNames = new Set<string>();
+    data.stations.features.forEach((f, i) => {
+      if (exposure.stationExposed[i] === 1) exposedNames.add(f.properties.name);
+    });
+    out.splice(1, 0, { label: '浸水が想定される区域の駅', value: exposedNames.size, unit: '駅' });
+  }
+  return out;
 }
 
-export function sampleTransit(data: TransitData, x: number, y: number): ProbeValue[] {
+/** 最寄り駅が浸水が想定される区域にあるか、の読み。 */
+export function stationExposureText(exposed: boolean, scenario: FloodScenario): string {
+  return exposed
+    ? `区域内（深さ ${EXPOSED_MIN_DEPTH}m 以上。${SCENARIO_LABEL[scenario]}）`
+    : `区域外（深さ ${EXPOSED_MIN_DEPTH}m 未満、または浸水なし。${SCENARIO_LABEL[scenario]}）`;
+}
+
+export function sampleTransit(data: TransitData, x: number, y: number, options: Pick<LayerOptions, 'floodScenario'> = DEFAULT_OPTIONS): ProbeValue[] {
   if (data.clip && !pointInCircle(x, y, data.clip.cx, data.clip.cy, data.clip.r))
     return [
       { label: '最寄り駅', value: null },
@@ -116,10 +143,15 @@ export function sampleTransit(data: TransitData, x: number, y: number): ProbeVal
     .sort((a, b) => a.d - b.d);
   const lineText = passing.length ? unique(passing.map((l) => l.name)).join('、') : null;
 
-  return [
+  const out: ProbeValue[] = [
     { label: '最寄り駅', value: stationText },
     { label: '通る路線', value: lineText },
   ];
+  // 最寄り駅の位置が、浸水が想定される区域か（想定は画面の選択に従う。駅の位置で判定する）
+  const exposure = hit ? transitExposure(data, options.floodScenario) : null;
+  if (hit && exposure)
+    out.splice(1, 0, { label: '最寄り駅の浸水想定', value: stationExposureText(exposure.stationExposed[hit.index] === 1, options.floodScenario) });
+  return out;
 }
 
 /* ---------- 断面 ---------- */
@@ -180,25 +212,37 @@ export function transitSectionIndex(data: TransitData): TransitSectionIndex {
 export function sectionTransit(
   data: TransitData,
   line: SectionLine,
-  colors: { rail: [number, number, number]; station: [number, number, number] },
+  colors: {
+    rail: [number, number, number];
+    station: [number, number, number];
+    /** 浸水が想定される区域（深さ 0.5m 以上）の交差・駅の色。scenario を渡したときだけ使う */
+    railExposed?: [number, number, number];
+    stationExposed?: [number, number, number];
+  },
+  /** 浸水の想定。渡すと、各交差・駅が浸水が想定される区域かどうかで色を分け、`exposed` を付ける（浸水の格子がなければ付けない） */
+  scenario?: FloodScenario,
 ): SectionMarks[] {
   const rail: SectionMarks = { kind: 'marks', label: '鉄道との交差', marks: [] };
   const station: SectionMarks = { kind: 'marks', label: '近くの駅', marks: [] };
   if (!isUsableLine(line)) return [rail, station];
   const { segs, featureOf, isLast, rail: railIndex, stations: stationIndex } = transitSectionIndex(data);
+  const flood = scenario && data.flood ? data.flood : null;
+  const exposure = scenario ? transitExposure(data, scenario) : null;
 
   railIndex.near(line, 0, (i) => {
     const hit = intersectLineSegment(line, segs[4 * i], segs[4 * i + 1], segs[4 * i + 2], segs[4 * i + 3]);
     if (!hit || (hit.u >= 1 && !isLast[i])) return;
+    const exposed = flood && scenario ? isExposedAt(flood, scenario, hit.x, hit.y) : undefined;
     rail.marks.push({
       d: hit.d,
       offset: 0,
       category: 'rail',
       categoryLabel: '鉄道',
       name: data.rail.features[featureOf[i]].properties?.line || null,
-      color: colors.rail,
+      color: exposed ? (colors.railExposed ?? colors.rail) : colors.rail,
       x: hit.x,
       y: hit.y,
+      ...(exposed === undefined ? {} : { exposed }),
     });
   });
   rail.marks.sort((a, b) => a.d - b.d);
@@ -223,15 +267,17 @@ export function sectionTransit(
   });
   for (const { i, d, offset } of [...best.values(), ...single].sort((a, b) => a.d - b.d || a.i - b.i)) {
     const [x, y] = data.stationPoints[i];
+    const exposed = exposure ? exposure.stationExposed[i] === 1 : undefined;
     station.marks.push({
       d,
       offset,
       category: 'station',
       categoryLabel: '駅',
       name: data.stations.features[i].properties?.name || null,
-      color: colors.station,
+      color: exposed ? (colors.stationExposed ?? colors.station) : colors.station,
       x,
       y,
+      ...(exposed === undefined ? {} : { exposed }),
     });
   }
   return [rail, station];

@@ -133,7 +133,8 @@ export function isNearMark(m: Pick<Mark, 'category'>): boolean {
 export function markText(m: Mark): string {
   const side = m.offset > 0 ? '左' : '右';
   const where = isNearMark(m) ? `・線の${side} ${Math.round(Math.abs(m.offset))} m` : '';
-  return m.name ? `${m.name}（${m.categoryLabel}${where}）` : `${m.categoryLabel}${where}`;
+  const flooded = m.exposed ? '・浸水が想定される区域' : '';
+  return m.name ? `${m.name}（${m.categoryLabel}${where}${flooded}）` : `${m.categoryLabel}${where}${flooded}`;
 }
 
 /** 系列の値の文字列。段（ランク）の系列は、段の名前（0 は「浸水なし」）。数値の系列は、桁区切りと単位。 */
