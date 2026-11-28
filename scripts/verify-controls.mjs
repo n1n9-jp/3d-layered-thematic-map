@@ -145,6 +145,7 @@ const openTable = async (page) => {
   await page.click('[data-testid=info-row-toggle-shelters]');
   const sh = await page.textContent('[data-layer=shelters]');
   check(sh.includes('最寄りの避難場所') && sh.includes('最寄りの病院'), '避難：最寄りの避難場所と病院が出る');
+  check(sh.includes('最寄りの避難場所の位置') && /浸水が想定される区域の(中|外)（洪水の想定で、深さ 0\.5m/.test(sh), '避難：最寄りの避難場所が、浸水が想定される区域の中か外か（想定は洪水。見るものが継続時間でも深さで判定）が出る');
   check(sh.includes('江戸川区は指定なし') && sh.includes('洪水・高潮用の指定が 0 件') && !sh.includes('浸水が深い'), '避難：江戸川区は指定なし（洪水・高潮用が 0 件）と出て、浸水の深さには触れない');
   await ctx.close();
 }

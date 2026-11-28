@@ -227,6 +227,9 @@ function MarksContent({ id, tracks, sc, ph }: { id: LayerId; tracks: SectionMark
           <rect key={`n${i}`} x={cx - 3.6} y={cy - 3.6} width={7.2} height={7.2} transform={`rotate(45 ${fix(cx)} ${fix(cy)})`} fill={rgb(m.color)} stroke="rgba(255,255,255,0.9)" strokeWidth={0.9} />
         ) : m.category === 'shelter-other' ? (
           <circle key={`n${i}`} cx={fix(cx)} cy={fix(cy)} r={2.2} fill={rgb(m.color)} fillOpacity={0.85} stroke="rgba(0,0,0,0.6)" strokeWidth={0.5} />
+        ) : m.category === 'shelter-usable' && m.inside ? (
+          // 浸水が想定される区域の中：同じ色の輪郭だけ（外縁は塗りの丸と同じ 4.4 + 0.5 = 4.9 px）
+          <circle key={`n${i}`} cx={fix(cx)} cy={fix(cy)} r={3.9} fill="none" stroke={rgb(m.color)} strokeWidth={2} data-inside="true" />
         ) : m.category === 'shelter-usable' ? (
           <circle key={`n${i}`} cx={fix(cx)} cy={fix(cy)} r={4.4} fill={rgb(m.color)} stroke="rgba(255,255,255,0.95)" strokeWidth={1} />
         ) : (

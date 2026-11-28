@@ -14,6 +14,12 @@ import { hatchPolygon } from '../../lib/hatch';
 import { createBoxIndex, isUsableLine, lineInsidePolygon, lineLength, projectOnLine } from '../../lib/section';
 import type { BoxIndex } from '../../lib/section';
 import { createPointIndex, pointInPolygon } from '../../lib/spatialIndex';
+import { DEFAULT_OPTIONS } from '../../config';
+import type { FloodScenario, LayerOptions } from '../../config';
+import { SCENARIO_LABEL } from '../flood/classes';
+import type { FloodData } from '../flood/model';
+import { INSIDE_LABEL, INSIDE_MIN_DEPTH_M, OUTSIDE_LABEL, computeInundation } from './inundation';
+import type { Inundation } from './inundation';
 import type { PointIndex, PolygonRings } from '../../lib/spatialIndex';
 import { cachedDistrictLookup } from '../../probe/district';
 import type {
@@ -110,6 +116,11 @@ export interface ShelterData {
   tide: boolean[];
   /** 種別ごとの点。描画用 */
   points: Record<ShelterKind, Position[]>;
+  /**
+   * 想定ごとの、各点が浸水が想定される区域の中か（1 = 中、0 = 外。添字は all と同じ。洪水・高潮で使える避難場所だけが意味を持つ）。
+   * 浸水想定のデータが読めなかったときは null（中・外は分からない）。
+   */
+  inside: Inundation | null;
   /** 洪水・高潮で使える避難場所、病院の、最寄りを引く索引 */
   usable: KindIndex;
   hospital: KindIndex;
@@ -198,6 +209,7 @@ export function buildShelterData(
   summary: ShelterSummary,
   facilities: FacilityCollection,
   boundary: BoundaryData,
+  floodData: FloodData | null = null,
 ): ShelterData {
   const all: Position[] = [];
   const kind: ShelterKind[] = [];
@@ -285,6 +297,7 @@ export function buildShelterData(
     flood,
     tide,
     points,
+    inside: floodData ? computeInundation(all, floodData) : null,
     usable: kindIndex('usable'),
     hospital: kindIndex('hospital'),
     boundary,
@@ -335,6 +348,11 @@ export function subsetShelters(data: ShelterData, cx: number, cy: number, radius
     flood: pick(data.flood),
     tide: pick(data.tide),
     points,
+    inside: data.inside && {
+      max: Uint8Array.from(keep, (i) => data.inside!.max[i]),
+      river: Uint8Array.from(keep, (i) => data.inside!.river[i]),
+      tide: Uint8Array.from(keep, (i) => data.inside!.tide[i]),
+    },
     usable: kindIndex('usable'),
     hospital: kindIndex('hospital'),
     gapPolygons: [],
@@ -346,9 +364,63 @@ export function subsetShelters(data: ShelterData, cx: number, cy: number, radius
   };
 }
 
-export function summarizeShelters(data: ShelterData): ProbeValue[] {
+/* ---------- 洪水・高潮で使える避難場所の、浸水が想定される区域の中・外 ---------- */
+
+/** 洪水・高潮で使える避難場所を、想定 scenario の浸水が想定される区域の外・中に分けた点（描画用）。浸水想定が読めていなければ、すべて外に置く（`known` が false）。 */
+export interface UsableSplit {
+  out: Position[];
+  in: Position[];
+  /** 中・外の判定ができているか（浸水想定のデータが読めているか） */
+  known: boolean;
+}
+
+const splits = new WeakMap<ShelterData, Map<FloodScenario, UsableSplit>>();
+
+/** 想定ごとの分け方。データと想定の組ごとに1回だけ作る（描画のたびには作らない）。 */
+export function usableSplit(data: ShelterData, scenario: FloodScenario): UsableSplit {
+  let byScenario = splits.get(data);
+  if (!byScenario) splits.set(data, (byScenario = new Map()));
+  let split = byScenario.get(scenario);
+  if (!split) {
+    const flags = data.inside?.[scenario] ?? null;
+    split = { out: [], in: [], known: flags !== null };
+    data.kind.forEach((k, i) => {
+      if (k !== 'usable') return;
+      (flags && flags[i] === 1 ? split!.in : split!.out).push(data.all[i]);
+    });
+    byScenario.set(scenario, split);
+  }
+  return split;
+}
+
+/** 全体の添字 i の洪水・高潮で使える避難場所が、想定 scenario の浸水が想定される区域の中か。判定できないとき（浸水想定が読めていない）は null。 */
+export function insideOf(data: ShelterData, scenario: FloodScenario, i: number): boolean | null {
+  return data.inside ? data.inside[scenario][i] === 1 : null;
+}
+
+/** 洪水・高潮で使える避難場所の、区域の外・中の数。判定できないときは null。 */
+export function insideCounts(data: ShelterData, scenario: FloodScenario): { out: number; in: number } | null {
+  const s = usableSplit(data, scenario);
+  return s.known ? { out: s.out.length, in: s.in.length } : null;
+}
+
+/** 位置の読み。「浸水が想定される区域の中（洪水と高潮の大きいほうの想定で、深さ 0.5m 以上）」。使える・使えないは言わない。 */
+export function insideText(inside: boolean, scenario: FloodScenario): string {
+  return inside
+    ? `${INSIDE_LABEL}（${SCENARIO_LABEL[scenario]}の想定で、深さ ${INSIDE_MIN_DEPTH_M}m 以上）`
+    : `${OUTSIDE_LABEL}（${SCENARIO_LABEL[scenario]}の想定で、深さ ${INSIDE_MIN_DEPTH_M}m 未満か浸水なし）`;
+}
+
+export function summarizeShelters(data: ShelterData, options: LayerOptions = DEFAULT_OPTIONS): ProbeValue[] {
+  const counts = insideCounts(data, options.floodScenario);
   const out: ProbeValue[] = [
     { label: '洪水・高潮で使える避難場所', value: data.points.usable.length, unit: 'か所' },
+    ...(counts
+      ? [
+          { label: `うち${OUTSIDE_LABEL}`, value: counts.out, unit: 'か所' },
+          { label: `うち${INSIDE_LABEL}`, value: counts.in, unit: 'か所' },
+        ]
+      : []),
     { label: 'それ以外の避難場所', value: data.points.other.length, unit: 'か所' },
     { label: '病院', value: data.points.hospital.length, unit: '院' },
   ];
@@ -365,7 +437,7 @@ export function usageLabel(flood: boolean, tide: boolean): string {
   return flood && tide ? '洪水・高潮' : flood ? '洪水' : tide ? '高潮' : '洪水・高潮以外';
 }
 
-export function sampleShelters(data: ShelterData, x: number, y: number): ProbeValue[] {
+export function sampleShelters(data: ShelterData, x: number, y: number, options: LayerOptions = DEFAULT_OPTIONS): ProbeValue[] {
   if (data.clip && !pointInCircle(x, y, data.clip.cx, data.clip.cy, data.clip.r))
     return [
       { label: '最寄りの避難場所', value: null },
@@ -389,6 +461,8 @@ export function sampleShelters(data: ShelterData, x: number, y: number): ProbeVa
       value: hospital ? `${data.name[hospital.i]}（${formatDistance(hospital.distance)}）` : null,
     },
   ];
+  const nearInside = shelter ? insideOf(data, options.floodScenario, shelter.i) : null;
+  if (nearInside !== null) out.push({ label: '最寄りの避難場所の位置', value: insideText(nearInside, options.floodScenario) });
   const ward = cachedDistrictLookup(data.boundary)(x, y);
   const info = ward === null ? undefined : data.wards.find((w) => w.name === ward);
   const note = info ? wardNote(info) : null;
@@ -457,7 +531,7 @@ export function sectionGaps(data: ShelterData, line: SectionLine): NonNullable<S
  * 洪水・高潮で使える避難場所、それ以外の避難場所、病院を、カテゴリで見分ける。
  * 線が通る、データ未公開の区・洪水・高潮用が 0 件の区の区間（gaps）も付ける。
  */
-export function sectionShelters(data: ShelterData, line: SectionLine): SectionMarks {
+export function sectionShelters(data: ShelterData, line: SectionLine, options: LayerOptions = DEFAULT_OPTIONS): SectionMarks {
   const track: SectionMarks = { kind: 'marks', label: '近くの避難場所・病院', marks: [], radius: SHELTER_SECTION_RADIUS, gaps: [] };
   if (!isUsableLine(line)) return track;
   const len = lineLength(line);
@@ -470,15 +544,17 @@ export function sectionShelters(data: ShelterData, line: SectionLine): SectionMa
   found.sort((a, b) => a.d - b.d || a.i - b.i);
   for (const { i, d, offset } of found) {
     const k = data.kind[i];
+    const inside = k === 'usable' ? insideOf(data, options.floodScenario, i) : null;
     track.marks.push({
       d,
       offset,
       category: k === 'hospital' ? 'hospital' : k === 'usable' ? 'shelter-usable' : 'shelter-other',
-      categoryLabel: SHELTER_KIND_LABEL[k],
+      categoryLabel: inside === null ? SHELTER_KIND_LABEL[k] : `${SHELTER_KIND_LABEL[k]}・${inside ? INSIDE_LABEL : OUTSIDE_LABEL}`,
       name: data.name[i] || null,
       color: SHELTER_COLORS[k],
       x: data.all[i][0],
       y: data.all[i][1],
+      ...(inside === null ? {} : { inside }),
     });
   }
   // 区の間（クローズアップの切り出しでも、線が円の外にある区間は、円の外のデータがないので、gaps は付けない）

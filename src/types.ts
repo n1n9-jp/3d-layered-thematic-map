@@ -159,6 +159,8 @@ export interface SectionMarks {
     color: [number, number, number];
     x: number; // その地物の地点（ローカル座標）
     y: number;
+    /** 洪水・高潮で使える避難場所だけ。その位置が、浸水が想定される区域の中（深さ 0.5m 以上）か。中は輪郭だけの丸、外は塗った丸で描く */
+    inside?: boolean;
   }[];
   /** 線から離れた地物を探した距離（m）。縦軸（線からの距離）の左右の端。指定がなければレイヤーごとの既定 */
   radius?: number;
@@ -196,10 +198,10 @@ export interface LegendItem {
   color: [number, number, number];
   label: string;
   /**
-   * 見本の形。省略は塗りの四角。'hatch' は灰の斜線（データ未公開で、浸水が小さい区）、'hatch-deep' は灰の斜線に琥珀の塗りと縁（データ未公開で、浸水が深い区）、
-   * 'alert' は琥珀の太い斜線と縁（浸水が深いのに指定がない区）、'faint' はごく薄い塗り（浸水が小さく指定がない区）
+   * 見本の形。省略は塗りの四角。'hatch' は斜線（データ未公開の区）、'frame' は輪郭の枠（指定なしの区）、
+   * 'dot' は塗りの丸（浸水が想定される区域の外の避難場所）、'ring' は輪郭だけの丸（区域の中の避難場所）
    */
-  swatch?: 'hatch' | 'frame';
+  swatch?: 'hatch' | 'frame' | 'dot' | 'ring';
 }
 
 export interface ProbeValue {
@@ -216,8 +218,8 @@ export interface LayerModule<D> {
   load(base: string): Promise<D>;
   /** deck.gl レイヤー。id は `${id}-*` */
   render(data: D, ctx: LayerRenderContext): Layer[];
-  /** 地点 (x, y) の値（探針用）。切り替えにかかわらず、そのレイヤーの値をすべて返す */
-  sample(data: D, x: number, y: number): ProbeValue[];
+  /** 地点 (x, y) の値（探針用）。切り替えにかかわらず、そのレイヤーの値をすべて返す。options は、切り替えに従う値（避難場所の「区域の中／外」の想定）にだけ使う */
+  sample(data: D, x: number, y: number, options?: LayerOptions): ProbeValue[];
   /** 中心 (cx, cy)・半径 radius（m）の円の中だけを取り出した、同じ形のデータを返す。render と sample にそのまま渡せる。 */
   subset(data: D, cx: number, cy: number, radius: number): D;
   /** データ（ふつうは subset の結果）の集計を返す。切り替えに従う。 */

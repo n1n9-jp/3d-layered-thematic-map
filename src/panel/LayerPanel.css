@@ -252,6 +252,18 @@
   background: transparent;
   border: 2px solid rgb(var(--sw));
 }
+/* 洪水・高潮で使える避難場所：区域の外は塗りの丸、中は輪郭だけの丸（色に頼らず形で見分ける） */
+.lp-swatch-dot,
+.lp-swatch-ring {
+  flex: none; /* 凡例の文が折り返しても、丸が楕円につぶれない */
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgb(var(--sw));
+}
+.lp-swatch-ring {
+  background: transparent;
+  border: 2px solid rgb(var(--sw));
+}
 
 .lp-sr {
   position: absolute;
