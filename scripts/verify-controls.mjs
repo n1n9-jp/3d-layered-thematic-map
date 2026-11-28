@@ -101,7 +101,7 @@ const openTable = async (page) => {
   const { ctx, page } = await open('');
   console.log('\n[1] 浸水の想定と見るもの');
   check(JSON.stringify(await opts(page)) === JSON.stringify({ floodScenario: 'max', floodView: 'depth', populationView: 'total' }), '既定：大きいほう・深さ・総人口');
-  check((await legend(page, 'flood')).length === 7, `深さの凡例：6段 + 浸水なし（${(await legend(page, 'flood')).length}）`);
+  check((await legend(page, 'flood')).length === 8, `深さの凡例：6段 + 浸水なし + 川（${(await legend(page, 'flood')).length}）`);
   await openTable(page);
   check((await page.getAttribute('[data-testid=overall-exposure]', 'data-scenario')) === 'max', '23区全体の表：想定は大きいほう');
   await press(page, 'opt-floodScenario-river');
@@ -114,17 +114,17 @@ const openTable = async (page) => {
   console.log('\n[2] 継続時間の凡例');
   await press(page, 'opt-floodView-duration');
   let l = await legend(page, 'flood');
-  check(l.length === 6, `高潮・継続時間：5段 + 浸水なし（${l.length}）`);
+  check(l.length === 7, `高潮・継続時間：5段 + 浸水なし + 川（${l.length}）`);
   check(l.some((x) => x.startsWith('1週間以上') && x.includes('上限なし')), `高潮の最上段は「1週間以上（高潮。上限なし）」（${l[0]}）`);
   await press(page, 'opt-floodScenario-river');
   l = await legend(page, 'flood');
-  check(l.length === 8 && l[0] === '4週間以上' && l.includes('1週間〜2週間'), `洪水・継続時間：7段 + 浸水なし（${l.length}）。最上段は「4週間以上」、5 は「1週間〜2週間」`);
+  check(l.length === 9 && l[0] === '4週間以上' && l.includes('1週間〜2週間') && l[l.length - 1] === '川', `洪水・継続時間：7段 + 浸水なし + 川（${l.length}）。最上段は「4週間以上」、5 は「1週間〜2週間」`);
   await press(page, 'opt-floodScenario-max');
   l = await legend(page, 'flood');
-  check(l.length === 10, `大きいほう・継続時間：9段 + 浸水なし（${l.length}）`);
+  check(l.length === 11, `大きいほう・継続時間：9段 + 浸水なし + 川（${l.length}）`);
   check(l.some((x) => x.startsWith('2週間以上')) && l.some((x) => x.includes('高潮。上限なし')) && l.includes('1週間〜2週間'), '洪水と高潮で最上段の意味が違うことが、凡例の名前で分かる');
   await press(page, 'opt-floodView-depth');
-  check((await legend(page, 'flood')).length === 7, '「深さ」に戻すと、6段 + 浸水なし');
+  check((await legend(page, 'flood')).length === 8, '「深さ」に戻すと、6段 + 浸水なし + 川');
 
   console.log('\n[3] 人口の65歳以上');
   const before = await legend(page, 'population');

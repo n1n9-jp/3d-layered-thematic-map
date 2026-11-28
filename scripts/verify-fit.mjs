@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 画面の収まりの確認（実データ）：全体の地図の区名の札と、右の列の23区全体の集計。
-//   node scripts/verify-fit.mjs [--url http://127.0.0.1:5173/] [--only labels,column]
+// 画面の収まりの確認（実データ）：全体の地図の区名の札・川の名前の札と、右の列の23区全体の集計。
+//   node scripts/verify-fit.mjs [--url http://127.0.0.1:5173/] [--only labels,column,rivers]
 // --url がなければ Vite を起動する。確認すること：
 //   column（右の列の23区全体の集計）
 //     2000×1100・1400×1000 の初期表示で、想定のラベル・大きな数字・深さの区分ごとの表（合計の行、標高 0m 未満の行まで）が、
@@ -11,6 +11,10 @@
 //     2000×1100・1400×1000・1000×700 の初期表示と、方位（ro=120・-60）・正面・真上・間隔 0 と 20km で、
 //     札どうし・帯（題・切り替え）・右の列・レイヤー名・ほかの段の区境界線と鉄道に重ならず、引き出し線が札や線と交わらない。
 //     2000×1100・1400×1000 では、8つの札がすべて出る。視点（マウスの移動）では、札の置き場所を決め直さず、間隔を変えたときだけ決め直す
+//   rivers（浸水・標高の段の、川の名前の札）
+//     「浸水」「標高」の行を開いた（open=flood・open=elevation）2000×1100・1400×1000 の初期表示と、1400×1000 の方位・正面・真上・間隔 0 と 20km で、
+//     札どうし・帯・右の列・レイヤー名に重ならず、引き出し線が札や線と交わらない。初期表示では、幹となる川（荒川・隅田川・江戸川・中川・多摩川）の5枚がすべて出る。
+//     川の行を開かない（初期状態）と、札は出ない。マウスの移動では置き場所を決め直さず、間隔を変えたときだけ決め直す
 // 1つでも外れれば、内容を表示して終了コード 1 で終わる。
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -367,11 +371,105 @@ async function labels(browser, base, vertices) {
   await o.ctx.close();
 }
 
+/* ------------------------------------------------------------------ 浸水・標高の段の、川の名前の札 */
+
+const RIVER_NAMES = ['中川', '多摩川', '江戸川', '荒川', '隅田川'];
+const RIVER_CASES = [
+  // [名前, サイズ, クエリ, 5枚すべてが出ることを求めるか]
+  ['初期表示', '2000x1100', '', true],
+  ['初期表示', '1400x1000', '', true],
+  ['方位 120', '1400x1000', 'ro=120', false],
+  ['正面', '1400x1000', 'rx=12&ro=0', false],
+  ['真上', '1400x1000', 'rx=90&ro=0', false],
+  ['間隔 0', '1400x1000', 'spacing=0', false],
+  ['間隔 20km', '1400x1000', 'spacing=20000', false],
+];
+
+async function rivers(browser, base) {
+  console.log('\n[rivers] 浸水・標高の段の、川の名前の札');
+  {
+    const o = await open(browser, base, '', '1400x1000');
+    await settled(o.page);
+    const n = await o.page.evaluate(() => (window.__riverLabels ? window.__riverLabels.placed.length : 0));
+    check(n === 0, `初期状態（どの行も閉じている）では、川の名前の札は出ない（${n} 枚）`);
+    await o.ctx.close();
+  }
+  for (const tier of ['flood', 'elevation'])
+    for (const [name, size, query, needAll] of RIVER_CASES) {
+      if (tier === 'elevation' && !(name === '初期表示')) continue; // 標高は、初期表示だけ
+      const tag = `${size}・${name}・${tier === 'flood' ? '浸水' : '標高'}`;
+      const o = await open(browser, base, [query, `open=${tier}`].filter(Boolean).join('&'), size);
+      await settled(o.page);
+      const info = await o.page.evaluate(() => {
+        const canvas = document.querySelector('canvas').getBoundingClientRect();
+        const box = (sel) => {
+          const e = document.querySelector(sel);
+          if (!e) return null;
+          const b = e.getBoundingClientRect();
+          return { left: b.left - canvas.left, right: b.right - canvas.left, top: b.top - canvas.top, bottom: b.bottom - canvas.top };
+        };
+        const L = window.__riverLabels;
+        return {
+          canvas: { width: canvas.width, height: canvas.height },
+          title: box('[data-testid=page-title]'),
+          modeBar: box('[data-testid=mode-bar]'),
+          column: box('[data-testid=info-column]'),
+          layout: L && { omitted: L.omitted, fontPx: L.fontPx, placed: L.placed.map((p) => ({ name: p.name, rect: p.rect, anchor: p.anchor, attach: p.attach })) },
+        };
+      });
+      if (!info.layout) {
+        check(false, `${tag}：札の配置が取れない`);
+        await o.ctx.close();
+        continue;
+      }
+      const L = info.layout;
+      const rects = L.placed.map((p) => p.rect);
+      console.log(`      ${tag}：${L.placed.map((p) => p.name).join('、')}（${L.fontPx}px）${L.omitted.length ? `（出さなかった川：${L.omitted.join('・')}）` : ''}`);
+      if (needAll) check(L.placed.length === 5 && RIVER_NAMES.every((n) => L.placed.some((p) => p.name === n)), `${tag}：幹となる5本の川の札がすべて出る（${L.placed.length} 枚）`);
+      else check(L.placed.length >= 1, `${tag}：札が出る（${L.placed.length} 枚。置けないものは出さない）`);
+      let bad = [];
+      for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (rectsOverlap(rects[i], rects[j])) bad.push(`${L.placed[i].name}×${L.placed[j].name}`);
+      check(bad.length === 0, `${tag}：札どうしが重ならない${bad.length ? `（${bad.join('、')}）` : ''}`);
+      bad = [];
+      for (const p of L.placed) for (const q of L.placed) if (p !== q && segHitsRect(p.anchor, p.attach, q.rect)) bad.push(`${p.name}の線×${q.name}の札`);
+      for (let i = 0; i < L.placed.length; i++) for (let j = i + 1; j < L.placed.length; j++) if (segCross(L.placed[i].anchor, L.placed[i].attach, L.placed[j].anchor, L.placed[j].attach)) bad.push(`${L.placed[i].name}の線×${L.placed[j].name}の線`);
+      check(bad.length === 0, `${tag}：引き出し線が、ほかの札や線と交わらない${bad.length ? `（${bad.join('、')}）` : ''}`);
+      check(rects.every((r) => r.left >= 0 && r.top >= 0 && r.bottom <= info.canvas.height && r.right <= info.canvas.width), `${tag}：札が描画領域の中に収まる`);
+      check(rects.every((r) => !rectsOverlap(r, info.column)), `${tag}：右の列に重ならない`);
+      check(rects.every((r) => !rectsOverlap(r, info.title) && !rectsOverlap(r, info.modeBar)), `${tag}：帯の題・切り替えに重ならない`);
+      check(o.errors.length === 0, `${tag}：ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
+      await o.ctx.close();
+    }
+
+  console.log('\n      マウスの移動と間隔の変更');
+  const o = await open(browser, base, 'open=flood', '1400x1000');
+  const n0 = await o.page.evaluate(() => window.__riverLabelLayouts);
+  await settled(o.page);
+  const m0 = await o.page.evaluate(() => window.__riverLabelLayouts);
+  const before = await o.page.evaluate(() => window.__riverLabels.placed.map((p) => [p.name, Math.round(p.rect.left), Math.round(p.rect.top)].join()).join('|'));
+  for (const [x, y] of [[200, 300], [300, 420], [150, 600], [400, 500], [250, 200], [350, 700]]) {
+    await o.page.mouse.move(x, y);
+    await sleep(500);
+  }
+  await sleep(1500);
+  const m1 = await o.page.evaluate(() => window.__riverLabelLayouts);
+  const after = await o.page.evaluate(() => window.__riverLabels.placed.map((p) => [p.name, Math.round(p.rect.left), Math.round(p.rect.top)].join()).join('|'));
+  check(m1 === m0, `マウスを動かしても、川の札の置き場所を決め直さない（${m0} 回 → ${m1} 回。最初 ${n0} 回）`);
+  check(before === after, 'マウスを動かしても、川の札の位置が変わらない');
+  await o.page.evaluate(() => window.__store.getState().setSpacing(20000));
+  await settled(o.page);
+  const m2 = await o.page.evaluate(() => window.__riverLabelLayouts);
+  check(m2 > m1, `間隔を変えると、川の札の置き場所を決め直す（${m1} 回 → ${m2} 回）`);
+  check(o.errors.length === 0, `ブラウザのエラーなし${o.errors.length ? `：${o.errors[0]}` : ''}`);
+  await o.ctx.close();
+}
+
 const base = await baseUrl();
 const browser = await chromium.launch();
 try {
   if (want('column')) await column(browser, base);
   if (want('labels')) await labels(browser, base, loadVertices());
+  if (want('rivers')) await rivers(browser, base);
 } finally {
   await browser.close();
 }

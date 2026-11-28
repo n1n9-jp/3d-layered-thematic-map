@@ -9,7 +9,7 @@
 //   --hover <x,y>   撮影前にマウスを動かす画面座標
 //   --url <URL>     指定時は Vite を起動せず、この URL を撮る（--query は付け足される）
 //   --wait <ms>     撮影前の追加待ち時間（既定 0）
-//   --require-ready 撮影前に window.__store の status（boundary と各レイヤー）がすべて ready か確かめる。
+//   --require-ready 撮影前に window.__store の status（boundary・rivers と各レイヤー）がすべて ready か確かめる。
 //                   ready でないものがあれば、その名前を表示し、画像は保存したうえで終了コード 1 で終わる。
 // 実行の最後に、ページを開いてから撮影直前までの所要時間（ms）を表示する。
 import { createRequire } from 'node:module';

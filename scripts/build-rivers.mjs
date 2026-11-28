@@ -126,11 +126,12 @@ async function build() {
   let thinDropped = 0;
 
   /** 断片：タイルの枠で切り抜いた1つの面。 */
-  const pieces = [];
-  const annos = [];
+  // タイルは並列に取得するので、結果はタイルの順に並べ直す（何度実行しても同じ出力にする）
+  const tilePieces = tiles.map(() => []);
+  const tileAnnos = tiles.map(() => []);
   const t0 = Date.now();
   let done = 0;
-  await mapLimit(tiles, CONCURRENCY, async ([tx, ty]) => {
+  await mapLimit(tiles, CONCURRENCY, async ([tx, ty], tileIndex) => {
     const layers = decodeTile(await fetchCached(TILE_URL(tx, ty)));
     for (const feature of layers.WA?.features ?? []) {
       if (feature.properties.vt_code !== WATER_CODE || feature.type !== 3) continue;
@@ -159,7 +160,7 @@ async function build() {
         if (clipped.length === 0) continue;
         // 外周が切り抜きで消えたのに穴だけが残る場合を除く（外周は最初のリング）
         if (!clipRingToBox(poly[0], 0, 0, TILE_SIZE, TILE_SIZE)) continue;
-        pieces.push({ tx, ty, rings: clipped });
+        tilePieces[tileIndex].push({ tx, ty, rings: clipped });
       }
     }
     for (const f of layers.Anno?.features ?? []) {
@@ -167,11 +168,13 @@ async function build() {
       // 河川名（線または点）と、湖沼名（点）。対象外の川や池の名前も、名前を伝える起点にする（その水域が、近くの対象の川の名前にならないように）。
       if (!WATER_NAME_CODES.includes(p.vt_code) || typeof p.vt_text !== 'string' || (f.type !== 1 && f.type !== 2)) continue;
       const line = f.geometry[0].map(([u, v]) => tileToLocal(tx, ty, u, v));
-      annos.push({ name: p.vt_text, line });
+      tileAnnos[tileIndex].push({ name: p.vt_text, line });
     }
     done++;
     if (done % 60 === 0) console.log(`  ${done}/${tiles.length} 枚 処理済み`);
   });
+  const pieces = tilePieces.flat();
+  const annos = tileAnnos.flat();
   console.log(
     `細い面を除いた数 ${thinDropped}、断片 ${pieces.length}、河川名の注記 ${annos.length} 件（取得とデコード ${((Date.now() - t0) / 1000).toFixed(1)} 秒）`,
   );

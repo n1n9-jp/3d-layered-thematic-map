@@ -8,6 +8,7 @@ import type { Layer } from '@deck.gl/core';
 import { PathLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import type { LayerId } from '../config';
 import { fetchJson } from '../lib/fetch';
+import { simplifyPath } from './simplify';
 import { clipPolylineToCircle } from '../lib/circleClip';
 import { asModelMatrix, translationMatrix } from '../stack';
 import type { FeatureCollection, PolygonGeometry, Position } from '../types';
@@ -17,11 +18,15 @@ export const RIVER_TIERS: readonly LayerId[] = ['elevation', 'flood'];
 
 /** 川の水色（塗りと細い川の線）。浸水の桃色・標高の緑〜黄〜白・0m 未満の紫の、どの上でも見分けられる明るい水色。 */
 export const RIVER_COLOR: [number, number, number] = [64, 214, 255];
-/** 川の縁取り（暗い青）。白に近い標高の面や、白い区境界線の上でも、水色が見分けられる。 */
-export const RIVER_CASING: [number, number, number, number] = [4, 44, 100, 235];
-/** 縁取りの線の太さと、細い川にも見える水色の線の太さ（px）。広い川は、実際の幅のまま塗りで見える。 */
-export const RIVER_CASING_PX = 3.4;
-export const RIVER_LINE_PX = 1.5;
+/** 細い川にも見える水色の線の太さ（px）。広い川は、実際の幅のまま塗りで見える。 */
+export const RIVER_LINE_PX = 1.7;
+/**
+ * 線を重ねる面の、幅（2 × 面積 ÷ 周長。m）の上限。これより広い面は、塗りだけで線の太さ以上に見える（初期表示で 1 px が約 70 m）。
+ * 線の頂点数に描画時間がほぼ比例するので、線は細い面だけに引き、間引く（`PATH_TOLERANCE`）。
+ */
+export const THIN_WIDTH_M = 100;
+/** 全体の地図の線の間引きの許容誤差（m）。拡大の上限（1 px が約 2 m）でも 5 px 以内で、塗りは間引かない。 */
+export const PATH_TOLERANCE = 10;
 
 /** 川の名前の標本の点：x, y（m）と、名前の番号（`names` の添字。-1 は、対象外の川）。 */
 export type RiverSample = readonly [number, number, number];
@@ -38,7 +43,7 @@ export interface RiverAnchor {
 export interface RiverShapes {
   /** 水域の面（外周と穴のリング）。 */
   polygons: Position[][][];
-  /** 面の縁の線（リングごと。円で切ったときは、円の縁の部分を含まない）。 */
+  /** 面の縁の線（リングごと。全体の地図では、細い面だけを間引いたもの。円で切ったときは、円の縁の部分を含まない）。 */
   paths: Position[][];
 }
 
@@ -78,6 +83,21 @@ const boxOf = (rings: Position[][]): [number, number, number, number] => {
   return [x0, y0, x1, y1];
 };
 
+/** 面の幅の目安（2 × 面積 ÷ 周長。m）。細長い面なら川幅にほぼ等しい。 */
+export function polygonWidth(rings: readonly (readonly Position[])[]): number {
+  let area = 0;
+  let perimeter = 0;
+  rings.forEach((ring, k) => {
+    let a = 0;
+    for (let i = 0; i < ring.length - 1; i++) {
+      a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+      perimeter += Math.hypot(ring[i + 1][0] - ring[i][0], ring[i + 1][1] - ring[i][1]);
+    }
+    area += (k === 0 ? 1 : -1) * Math.abs(a) / 2;
+  });
+  return perimeter > 0 ? (2 * area) / perimeter : 0;
+}
+
 /** `rivers.geojson` と `river-labels.json` を読む。 */
 export async function loadRivers(base: string): Promise<RiverData> {
   const [fc, labels] = await Promise.all([
@@ -85,9 +105,14 @@ export async function loadRivers(base: string): Promise<RiverData> {
     fetchJson<RiverLabelFile>(`${base}river-labels.json`),
   ]);
   const polygons = fc.features.map((f) => f.geometry.coordinates);
+  const paths: Position[][] = [];
+  for (const rings of polygons) {
+    if (polygonWidth(rings) >= THIN_WIDTH_M) continue;
+    for (const ring of rings) paths.push(simplifyPath(ring, PATH_TOLERANCE));
+  }
   return {
     polygons,
-    paths: polygons.flat(),
+    paths,
     boxes: polygons.map(boxOf),
     names: labels.names,
     trunk: labels.trunk,
@@ -184,11 +209,11 @@ export function riverLayers(shapes: RiverShapes, tier: string, z: number): Layer
     positionFormat: 'XY',
     widthUnits: 'pixels',
     billboard: true,
-    capRounded: true,
-    jointRounded: true,
+    // 線は細いので、端と継ぎ目は丸めない（頂点ごとの描画の量が減る）
+    capRounded: false,
+    jointRounded: false,
   } as const;
   return [
-    new PathLayer<Position[]>({ ...line, id: `rivers-casing-${tier}`, getColor: RIVER_CASING, getWidth: RIVER_CASING_PX }),
     new SolidPolygonLayer<Position[][]>({
       ...common,
       id: `rivers-fill-${tier}`,
@@ -197,6 +222,7 @@ export function riverLayers(shapes: RiverShapes, tier: string, z: number): Layer
       positionFormat: 'XY',
       getFillColor: RIVER_COLOR,
     }),
+    // 細い川（実際の幅が線より細い）だけ、細い線を重ねる。広い川は、塗りで実際の幅のまま見える。
     new PathLayer<Position[]>({ ...line, id: `rivers-line-${tier}`, getColor: [...RIVER_COLOR, 255], getWidth: RIVER_LINE_PX }),
   ];
 }
