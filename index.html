@@ -7,6 +7,20 @@
     <style>
       html, body, #root { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
     </style>
+  <script>
+  // Count one page view per document on the canonical production host.
+  if (location.origin === "https://3d-layered-thematic-map.visualizing.jp") {
+    window.dataLayer = window.dataLayer || [];
+    function queueAnalytics() { window.dataLayer.push(arguments); }
+    queueAnalytics("js", new Date());
+    queueAnalytics("config", "G-9HTGX19L31");
+
+    const tag = document.createElement("script");
+    tag.async = true;
+    tag.src = "https://www.googletagmanager.com/gtag/js?id=G-9HTGX19L31";
+    document.head.appendChild(tag);
+  }
+</script>
   </head>
   <body>
     <div id="root"></div>
